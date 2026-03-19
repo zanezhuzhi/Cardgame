@@ -1,0 +1,32 @@
+
+# Dependencies
+node_modules/
+dist/
+.vite/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build
+*.tgz
+*.lock
+
+# 策划文档中的临时文件
+策划文档/*.tmp
+策划文档/*~

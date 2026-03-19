@@ -4,38 +4,25 @@
     <header class="header">
       <span class="title">🎴 御魂传说</span>
       <div v-if="inGame" class="resources">
-        <span>🔥{{ ghostFire }}/5</span>
-        <span>⚡{{ spellPower }}</span>
-        <span>🏆{{ totalCharm }}</span>
+        <span title="鬼火">🔥{{ player?.ghostFire || 0 }}/5</span>
+        <span title="咒力">⚡{{ player?.spellPower || 0 }}</span>
+        <span title="符咒">🏆{{ player?.totalCharm || 0 }}</span>
+        <span title="回合">📅 R{{ gameState?.turnNumber || 0 }}</span>
       </div>
-      <span class="status" :class="{ connected: isConnected }">
-        {{ isConnected ? '已连接' : '未连接' }}
-      </span>
+      <span class="status playing" v-if="inGame">单人测试</span>
+      <span class="status" v-else>就绪</span>
     </header>
 
-    <!-- 大厅 -->
+    <!-- 大厅 - 单人模式 -->
     <div v-if="!inGame" class="lobby">
       <div class="lobby-card">
-        <h2>游戏大厅</h2>
-        <div v-if="!currentRoom">
-          <button @click="createRoom" class="btn primary">创建房间</button>
-          <div class="join-form">
-            <input v-model="joinRoomId" placeholder="输入房间ID" />
-            <button @click="joinRoom" class="btn">加入</button>
-          </div>
-        </div>
-        <div v-else>
-          <p>房间: {{ currentRoom.name }}</p>
-          <p class="room-id">ID: {{ currentRoom.id }}</p>
-          <div class="players">
-            <div v-for="p in currentRoom.players" :key="p.id" class="player-tag">
-              {{ p.name }} <span v-if="p.id === currentRoom.hostId">👑</span>
-            </div>
-          </div>
-          <div class="actions">
-            <button @click="leaveRoom" class="btn">离开</button>
-            <button v-if="isHost" @click="startGame" class="btn primary">开始游戏</button>
-          </div>
+        <h2>🎮 单人测试模式</h2>
+        <p class="desc">验证游戏核心机制</p>
+        <input v-model="playerName" placeholder="输入你的名字" class="name-input" />
+        <button @click="startSinglePlayer" class="btn primary large">开始游戏</button>
+        <div class="tips">
+          <p>💡 初始牌库：7张灯笼鬼 + 3张招福达摩</p>
+          <p>🎯 目标：退治妖怪，累积符咒</p>
         </div>
       </div>
     </div>
@@ -43,128 +30,142 @@
     <!-- 游戏界面 -->
     <div v-else class="game-board">
       
-      <!-- 战场顶部：商店区 -->
+      <!-- 商店区 -->
       <div class="shop-row">
-        <div class="shop-item shikigami-deck">
-          <div class="deck-back">?</div>
-          <div class="shop-label">式神卡组</div>
-          <div class="shop-count">{{ shikigamiDeckCount }}</div>
+        <div class="shop-item" @click="buyToken('token1')" :class="{ disabled: (player?.spellPower || 0) < 1 }">
+          <div class="token-card t1">招福达摩</div>
+          <div class="shop-info">💰1 符咒+1</div>
+          <div class="shop-count">{{ gameState?.field.tokenShop.token1 || 0 }}</div>
         </div>
-        <div class="shop-item" @click="buySpell('basic')">
-          <div class="spell-card basic">基础术式</div>
-          <div class="shop-label">咒力+1</div>
-          <div class="shop-count">{{ basicSpellCount }}</div>
+        <div class="shop-item" @click="buyToken('token3')" :class="{ disabled: (player?.spellPower || 0) < 3 }">
+          <div class="token-card t3">大吉达摩</div>
+          <div class="shop-info">💰3 符咒+3</div>
+          <div class="shop-count">{{ gameState?.field.tokenShop.token3 || 0 }}</div>
         </div>
-        <div class="shop-item" @click="buySpell('mid')">
-          <div class="spell-card mid">中级符咒</div>
-          <div class="shop-label">咒力+2</div>
-          <div class="shop-count">{{ midSpellCount }}</div>
-        </div>
-        <div class="shop-item" @click="buySpell('high')">
-          <div class="spell-card high">高级符咒</div>
-          <div class="shop-label">咒力+3</div>
-          <div class="shop-count">{{ highSpellCount }}</div>
+        <div class="shop-item" @click="buyToken('token6')" :class="{ disabled: (player?.spellPower || 0) < 6 }">
+          <div class="token-card t6">奉为达摩</div>
+          <div class="shop-info">💰6 符咒+6</div>
+          <div class="shop-count">{{ gameState?.field.tokenShop.token6 || 0 }}</div>
         </div>
       </div>
 
-      <!-- 战场中部：游荡妖怪区 -->
+      <!-- 战场区 -->
       <div class="battlefield-row">
-        <!-- 鬼王区 -->
+        <!-- 鬼王 -->
         <div class="boss-section">
-          <div class="section-title">鬼王</div>
-          <div v-if="currentBoss" 
-               class="boss-card" 
-               :class="{ selected: selectedTarget === 'boss' }"
-               @click="selectTarget('boss')">
-            <img :src="bossImage" alt="鬼王" />
-            <div class="card-hp">❤️{{ currentBoss.health }}</div>
+          <div class="section-title">👹 鬼王</div>
+          <div v-if="gameState?.field.currentBoss" class="boss-card">
+            <div class="boss-name">{{ gameState.field.currentBoss.name }}</div>
+            <div class="boss-hp">❤️ {{ gameState.field.bossHp }}</div>
           </div>
+          <div v-else class="boss-empty">已击败</div>
         </div>
 
-        <!-- 游荡妖怪展示区 (2行3列) -->
+        <!-- 游荡妖怪 -->
         <div class="yokai-grid">
-          <div class="section-title">游荡妖怪</div>
+          <div class="section-title">👻 游荡妖怪 (点击退治)</div>
           <div class="yokai-cards">
-            <div v-for="(y, i) in displayedYokai" :key="y.id"
+            <div v-for="(yokai, i) in yokaiSlots" :key="i"
                  class="yokai-card"
-                 :class="{ selected: selectedTarget === y.id }"
-                 @click="selectTarget(y.id)">
-              <img :src="getYokaiImage(i + 1)" alt="妖怪" />
-              <div class="card-stats">
-                <span>❤️{{ y.health }}</span>
-                <span>🏆{{ y.charm }}</span>
-              </div>
+                 :class="{ 
+                   empty: !yokai,
+                   affordable: yokai && (player?.spellPower || 0) >= (yokai.hp + (yokai.armor || 0))
+                 }"
+                 @click="yokai && killYokai(i)">
+              <template v-if="yokai">
+                <div class="yokai-name">{{ yokai.name }}</div>
+                <div class="yokai-stats">
+                  <span>❤️{{ yokai.hp }}</span>
+                  <span v-if="yokai.cost">💰{{ yokai.cost }}</span>
+                </div>
+              </template>
+              <template v-else>
+                <div class="empty-slot">空</div>
+              </template>
             </div>
           </div>
         </div>
 
-        <!-- 流浪妖怪卡组 -->
-        <div class="yokai-deck-section">
-          <div class="section-title">妖怪卡组</div>
-          <div class="yokai-deck">
-            <div class="deck-top-card">
-              <img :src="getYokaiImage(7)" alt="卡组顶牌" />
-            </div>
-            <div class="deck-count">{{ yokaiDeckCount }}</div>
+        <!-- 妖怪牌库 -->
+        <div class="deck-info">
+          <div class="yokai-deck-count">
+            妖怪牌库: {{ gameState?.field.yokaiDeck.length || 0 }}
           </div>
         </div>
       </div>
 
-      <!-- 公共超度区 -->
-      <div class="exile-row">
-        <div class="exile-zone">
-          <span class="exile-label">公共超度区</span>
-          <span class="exile-count">{{ exileCount }} 张</span>
+      <!-- 日志区 -->
+      <div class="log-row">
+        <div class="game-log" ref="logRef">
+          <div v-for="(log, i) in recentLogs" :key="i" class="log-entry">
+            {{ log.message }}
+          </div>
         </div>
       </div>
 
-      <!-- 玩家区域 -->
+      <!-- 玩家区 -->
       <div class="player-row">
-        <!-- 式神区 -->
+        <!-- 式神 -->
         <div class="shikigami-section">
-          <div class="section-title">我的式神</div>
+          <div class="section-title">🦊 式神</div>
           <div class="shikigami-list">
-            <div v-for="s in myShikigamis" :key="s.id" 
-                 class="shikigami-card"
-                 :class="{ usable: ghostFire >= s.cost }"
-                 @click="useSkill(s)">
-              <img :src="getShikigamiImage(s.imageId)" alt="式神" />
-              <div class="shiki-cost">🔥{{ s.cost }}</div>
+            <div v-for="s in player?.shikigami" :key="s.id" class="shikigami-card">
+              <div class="shiki-name">{{ s.name }}</div>
+              <div class="shiki-skill">{{ s.skill.name }} (🔥{{ s.skill.cost }})</div>
             </div>
           </div>
         </div>
 
-        <!-- 牌库/弃牌 -->
+        <!-- 牌库状态 -->
         <div class="deck-section">
           <div class="my-deck">
-            <div class="deck-label">牌库</div>
-            <div class="deck-num">{{ deckCount }}</div>
+            <span class="deck-label">牌库</span>
+            <span class="deck-num">{{ player?.deck.length || 0 }}</span>
           </div>
           <div class="my-discard">
-            <div class="deck-label">弃牌</div>
-            <div class="deck-num">{{ discardCount }}</div>
+            <span class="deck-label">弃牌</span>
+            <span class="deck-num">{{ player?.discard.length || 0 }}</span>
           </div>
         </div>
 
         <!-- 手牌区 -->
         <div class="hand-section">
+          <div class="section-title">🃏 手牌 (点击打出)</div>
           <div class="hand-cards">
-            <div v-for="(card, i) in handCards" :key="card.id"
+            <div v-for="(card, i) in player?.hand" :key="card.instanceId"
                  class="hand-card"
-                 :class="{ selected: selectedCard === card.id }"
-                 :style="getCardStyle(i)"
-                 @click="selectCard(card.id)">
+                 :class="{ 
+                   'ghost-fire': card.cardType === 'ghostFire',
+                   'token': card.cardType === 'token',
+                   'yokai': card.cardType === 'yokai'
+                 }"
+                 :style="getCardStyle(i, player?.hand.length || 0)"
+                 @click="playCard(card.instanceId)">
               <div class="card-name">{{ card.name }}</div>
-              <div class="card-power">⚡+{{ card.power }}</div>
+              <div class="card-stats">
+                <span v-if="card.ghostFire">🔥+{{ card.ghostFire }}</span>
+                <span>⚡+{{ card.hp }}</span>
+                <span v-if="card.charm">🏆{{ card.charm }}</span>
+              </div>
             </div>
           </div>
         </div>
 
         <!-- 操作按钮 -->
         <div class="action-section">
-          <button class="btn play" :disabled="!selectedCard" @click="playCard">打出</button>
-          <button class="btn attack" :disabled="spellPower === 0 || !selectedTarget" @click="attack">攻击</button>
-          <button class="btn end" @click="endTurn">结束回合</button>
+          <button class="btn end-turn" @click="endTurn">
+            结束回合 ➡️
+          </button>
+        </div>
+      </div>
+
+      <!-- 已打出区 -->
+      <div v-if="player?.played.length" class="played-row">
+        <div class="section-title">📜 本回合已打出</div>
+        <div class="played-cards">
+          <div v-for="card in player.played" :key="card.instanceId" class="played-card">
+            {{ card.name }}
+          </div>
         </div>
       </div>
     </div>
@@ -172,711 +173,526 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { io, Socket } from 'socket.io-client'
-
-const SERVER_URL = 'http://localhost:3000'
+import { ref, computed, nextTick } from 'vue'
+import { SinglePlayerGame } from './game/SinglePlayerGame'
+import type { GameState, PlayerState } from '../../shared/types/game'
+import type { CardInstance } from '../../shared/types/cards'
 
 // 状态
-const socket = ref<Socket | null>(null)
-const isConnected = ref(false)
-const currentRoom = ref<any>(null)
-const joinRoomId = ref('')
+const playerName = ref('阴阳师')
 const inGame = ref(false)
+const gameState = ref<GameState | null>(null)
+let game: SinglePlayerGame | null = null
 
-// 资源
-const ghostFire = ref(1)
-const spellPower = ref(0)
-const totalCharm = ref(0)
-const deckCount = ref(10)
-const discardCount = ref(0)
-const exileCount = ref(0)
+const logRef = ref<HTMLElement | null>(null)
 
-// 商店库存
-const shikigamiDeckCount = ref(22)
-const basicSpellCount = ref(30)
-const midSpellCount = ref(20)
-const highSpellCount = ref(10)
-const yokaiDeckCount = ref(84)
+// 计算属性
+const player = computed(() => gameState.value?.players[0])
 
-// 卡牌
-const handCards = ref([
-  { id: '1', name: '基础术式', power: 1 },
-  { id: '2', name: '基础术式', power: 1 },
-  { id: '3', name: '基础术式', power: 1 },
-  { id: '4', name: '破碎符咒', power: 0, charm: 1 },
-  { id: '5', name: '基础术式', power: 1 },
-])
-
-const myShikigamis = ref([
-  { id: 's1', name: '妖刀姬', imageId: '01', cost: 3 },
-  { id: 's2', name: '大天狗', imageId: '02', cost: 4 },
-])
-
-const displayedYokai = ref([
-  { id: 'y1', health: 4, charm: 1 },
-  { id: 'y2', health: 3, charm: 1 },
-  { id: 'y3', health: 5, charm: 2 },
-  { id: 'y4', health: 6, charm: 0 },
-  { id: 'y5', health: 4, charm: 3 },
-  { id: 'y6', health: 7, charm: 2 },
-])
-
-const currentBoss = ref({ health: 8, charm: 5 })
-
-// 选择状态
-const selectedCard = ref<string | null>(null)
-const selectedTarget = ref<string | null>(null)
-
-// 计算
-const isHost = computed(() => currentRoom.value?.hostId === socket.value?.id)
-
-const bossImage = computed(() => {
-  return new URL('./assets/cards/鬼王01.png', import.meta.url).href
+const yokaiSlots = computed(() => {
+  return gameState.value?.field.yokaiSlots || []
 })
 
-function getShikigamiImage(id: string) {
-  return new URL(`./assets/cards/式神${id}.png`, import.meta.url).href
+const recentLogs = computed(() => {
+  const logs = gameState.value?.log || []
+  return logs.slice(-8)  // 只显示最近8条
+})
+
+// 开始单人游戏
+function startSinglePlayer() {
+  game = new SinglePlayerGame(playerName.value || '阴阳师', onStateChange)
+  game.startGame()
+  inGame.value = true
 }
 
-function getYokaiImage(num: number) {
-  return new URL(`./assets/cards/others/各2张/游荡${num}.png`, import.meta.url).href
+// 状态更新回调
+function onStateChange(state: GameState) {
+  gameState.value = state
+  // 滚动日志到底部
+  nextTick(() => {
+    if (logRef.value) {
+      logRef.value.scrollTop = logRef.value.scrollHeight
+    }
+  })
 }
 
-function getCardStyle(index: number) {
-  const total = handCards.value.length
-  const spread = 50
+// 打出手牌
+function playCard(cardInstanceId: string) {
+  game?.playCard(cardInstanceId)
+}
+
+// 退治妖怪
+function killYokai(slotIndex: number) {
+  game?.killWithSpellPower(slotIndex)
+}
+
+// 购买令牌
+function buyToken(tokenType: 'token1' | 'token3' | 'token6') {
+  game?.buyToken(tokenType)
+}
+
+// 结束回合
+function endTurn() {
+  game?.endTurn()
+}
+
+// 手牌扇形布局
+function getCardStyle(index: number, total: number) {
+  if (total === 0) return {}
+  const spread = 60
   const offset = (index - (total - 1) / 2) * spread
-  const rotation = (index - (total - 1) / 2) * 4
+  const rotation = (index - (total - 1) / 2) * 3
   return {
     transform: `translateX(${offset}px) rotate(${rotation}deg)`,
     zIndex: index
   }
 }
-
-// 生命周期
-onMounted(() => {
-  socket.value = io(SERVER_URL)
-  socket.value.on('connect', () => { isConnected.value = true })
-  socket.value.on('disconnect', () => { 
-    isConnected.value = false
-    currentRoom.value = null
-    inGame.value = false
-  })
-})
-
-onUnmounted(() => {
-  socket.value?.disconnect()
-})
-
-// 房间
-function createRoom() {
-  socket.value?.emit('room:create', `房间${Date.now().toString().slice(-4)}`, (room: any) => {
-    currentRoom.value = room
-  })
-}
-
-function joinRoom() {
-  if (!joinRoomId.value) return
-  socket.value?.emit('room:join', joinRoomId.value, (room: any) => {
-    if (room) currentRoom.value = room
-    else alert('无法加入')
-  })
-}
-
-function leaveRoom() {
-  socket.value?.emit('room:leave')
-  currentRoom.value = null
-}
-
-function startGame() {
-  inGame.value = true
-}
-
-// 游戏操作
-function selectCard(id: string) {
-  selectedCard.value = selectedCard.value === id ? null : id
-}
-
-function selectTarget(id: string) {
-  selectedTarget.value = selectedTarget.value === id ? null : id
-}
-
-function playCard() {
-  if (!selectedCard.value) return
-  const card = handCards.value.find(c => c.id === selectedCard.value)
-  if (card) {
-    spellPower.value += card.power
-    handCards.value = handCards.value.filter(c => c.id !== selectedCard.value)
-  }
-  selectedCard.value = null
-}
-
-function buySpell(type: string) {
-  // 购买阴阳术逻辑
-  console.log('购买', type)
-}
-
-function attack() {
-  if (!selectedTarget.value || spellPower.value === 0) return
-  
-  if (selectedTarget.value === 'boss' && currentBoss.value) {
-    currentBoss.value.health -= spellPower.value
-    if (currentBoss.value.health <= 0) {
-      totalCharm.value += currentBoss.value.charm
-      currentBoss.value = null as any
-    }
-  } else {
-    const yokai = displayedYokai.value.find(y => y.id === selectedTarget.value)
-    if (yokai) {
-      yokai.health -= spellPower.value
-      if (yokai.health <= 0) {
-        totalCharm.value += yokai.charm
-        displayedYokai.value = displayedYokai.value.filter(y => y.id !== selectedTarget.value)
-      }
-    }
-  }
-  
-  spellPower.value = 0
-  selectedTarget.value = null
-}
-
-function useSkill(shiki: any) {
-  if (ghostFire.value >= shiki.cost) {
-    ghostFire.value -= shiki.cost
-    spellPower.value += 3
-  }
-}
-
-function endTurn() {
-  spellPower.value = 0
-  ghostFire.value = Math.min(ghostFire.value + 1, 5)
-  discardCount.value += handCards.value.length
-  handCards.value = [
-    { id: Date.now() + '1', name: '基础术式', power: 1 },
-    { id: Date.now() + '2', name: '基础术式', power: 1 },
-    { id: Date.now() + '3', name: '基础术式', power: 1 },
-    { id: Date.now() + '4', name: '基础术式', power: 1 },
-    { id: Date.now() + '5', name: '基础术式', power: 1 },
-  ]
-  deckCount.value = Math.max(0, deckCount.value - 5)
-}
 </script>
 
 <style scoped>
-* { box-sizing: border-box; }
-
-.game-container {
-  width: 100vw;
-  height: 100vh;
-  background: linear-gradient(180deg, #e8e0d0, #d4c8b8);
-  color: #333;
-  font-family: 'Microsoft YaHei', sans-serif;
-  display: flex;
-  flex-direction: column;
+* {
+  box-sizing: border-box;
 }
 
-/* 顶部 */
+.game-container {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  color: #fff;
+  font-family: 'Microsoft YaHei', sans-serif;
+}
+
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.4rem 1.5rem;
-  background: linear-gradient(90deg, #8b4513, #a0522d);
-  border-bottom: 3px solid #ffd700;
-  color: #fff;
+  padding: 12px 20px;
+  background: rgba(0,0,0,0.4);
+  border-bottom: 1px solid #333;
 }
 
 .title {
-  font-size: 1.3rem;
-  color: #ffd700;
+  font-size: 20px;
   font-weight: bold;
 }
 
 .resources {
   display: flex;
-  gap: 1rem;
-  font-size: 1rem;
+  gap: 20px;
+  font-size: 16px;
 }
 
 .resources span {
-  background: rgba(0,0,0,0.3);
-  padding: 0.2rem 0.6rem;
-  border-radius: 8px;
+  padding: 4px 12px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 12px;
 }
 
 .status {
-  padding: 0.2rem 0.6rem;
-  border-radius: 8px;
-  background: #c0392b;
-  font-size: 0.8rem;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 14px;
+  background: #666;
 }
 
-.status.connected {
-  background: #27ae60;
+.status.playing {
+  background: #4CAF50;
 }
 
 /* 大厅 */
 .lobby {
-  flex: 1;
   display: flex;
   justify-content: center;
   align-items: center;
-  background: linear-gradient(180deg, #2d1b4e, #1a0a2e);
+  min-height: calc(100vh - 60px);
 }
 
 .lobby-card {
-  background: rgba(45, 27, 78, 0.95);
-  padding: 2rem;
+  background: rgba(255,255,255,0.1);
+  padding: 40px 60px;
   border-radius: 16px;
-  min-width: 360px;
-  border: 2px solid #ffd700;
   text-align: center;
-  color: #fff;
 }
 
 .lobby-card h2 {
-  color: #ffd700;
-  margin-bottom: 1.5rem;
+  margin: 0 0 10px;
+  font-size: 28px;
 }
 
-.join-form {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 1rem;
+.desc {
+  color: #aaa;
+  margin-bottom: 20px;
 }
 
-.join-form input {
-  flex: 1;
-  padding: 0.6rem;
-  border: 1px solid #ffd700;
-  border-radius: 6px;
-  background: rgba(0,0,0,0.3);
-  color: #fff;
-}
-
-.room-id { color: #888; font-size: 0.8rem; }
-
-.players {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  justify-content: center;
-  margin: 1rem 0;
-}
-
-.player-tag {
-  background: rgba(255,215,0,0.2);
-  padding: 0.3rem 0.6rem;
-  border-radius: 6px;
-  border: 1px solid #ffd700;
-}
-
-.actions {
-  display: flex;
-  gap: 1rem;
-  justify-content: center;
-  margin-top: 1rem;
-}
-
-/* 按钮 */
-.btn {
-  padding: 0.6rem 1rem;
+.name-input {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 20px;
   border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: bold;
-  transition: all 0.2s;
-  color: #fff;
+  border-radius: 8px;
+  font-size: 16px;
+  text-align: center;
 }
 
-.btn:hover { transform: translateY(-2px); }
-.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-.btn.primary { background: linear-gradient(135deg, #8b4513, #d4a017); }
-.btn.play { background: #27ae60; }
-.btn.attack { background: #c0392b; }
-.btn.end { background: #7f8c8d; }
+.btn {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
 
-/* 游戏界面 */
+.btn.primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.btn.primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102,126,234,0.4);
+}
+
+.btn.large {
+  padding: 16px 48px;
+  font-size: 18px;
+}
+
+.tips {
+  margin-top: 30px;
+  text-align: left;
+  color: #888;
+  font-size: 14px;
+}
+
+.tips p {
+  margin: 8px 0;
+}
+
+/* 游戏板 */
 .game-board {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  padding: 0.3rem;
-  gap: 0.3rem;
+  padding: 10px;
   transform: scale(0.85);
   transform-origin: top center;
 }
 
 .section-title {
-  font-size: 0.75rem;
-  color: #666;
-  margin-bottom: 0.3rem;
-  text-align: center;
+  font-size: 14px;
+  color: #888;
+  margin-bottom: 8px;
 }
 
-/* 商店行 */
+/* 商店区 */
 .shop-row {
   display: flex;
   justify-content: center;
-  gap: 1rem;
-  padding: 0.5rem;
-  background: #b8d4e8;
-  border-radius: 8px;
-  border: 2px solid #7ab;
+  gap: 20px;
+  margin-bottom: 15px;
 }
 
 .shop-item {
+  background: rgba(255,255,255,0.1);
+  padding: 10px 15px;
+  border-radius: 8px;
   text-align: center;
   cursor: pointer;
   transition: all 0.2s;
 }
 
-.shop-item:hover {
-  transform: scale(1.05);
+.shop-item:hover:not(.disabled) {
+  background: rgba(255,255,255,0.2);
+  transform: translateY(-2px);
 }
 
-.deck-back {
-  width: 60px;
-  height: 80px;
-  background: linear-gradient(135deg, #4a3a6a, #2a1a4a);
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 2rem;
-  color: #ffd700;
-  border: 2px solid #ffd700;
+.shop-item.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
-.spell-card {
-  width: 60px;
-  height: 80px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.65rem;
+.token-card {
+  padding: 8px 16px;
+  border-radius: 4px;
   font-weight: bold;
-  color: #fff;
-  text-align: center;
-  padding: 0.3rem;
+  margin-bottom: 5px;
 }
 
-.spell-card.basic { background: linear-gradient(135deg, #3498db, #2980b9); }
-.spell-card.mid { background: linear-gradient(135deg, #9b59b6, #8e44ad); }
-.spell-card.high { background: linear-gradient(135deg, #e74c3c, #c0392b); }
+.token-card.t1 { background: #4CAF50; }
+.token-card.t3 { background: #FF9800; }
+.token-card.t6 { background: #9C27B0; }
 
-.shop-label {
-  font-size: 0.7rem;
-  color: #555;
-  margin-top: 0.2rem;
+.shop-info {
+  font-size: 12px;
+  color: #aaa;
 }
 
 .shop-count {
-  font-size: 0.75rem;
-  color: #333;
-  font-weight: bold;
+  font-size: 12px;
+  color: #666;
+  margin-top: 4px;
 }
 
-/* 战场行 */
+/* 战场区 */
 .battlefield-row {
-  flex: 1;
   display: flex;
-  gap: 1rem;
-  padding: 0.5rem;
+  justify-content: center;
+  gap: 30px;
+  margin-bottom: 15px;
 }
 
-/* 鬼王区 */
 .boss-section {
-  width: 100px;
+  text-align: center;
 }
 
 .boss-card {
-  border-radius: 6px;
-  overflow: hidden;
-  cursor: pointer;
-  border: 3px solid transparent;
-  transition: all 0.2s;
-  position: relative;
+  background: linear-gradient(135deg, #b71c1c 0%, #880e4f 100%);
+  padding: 20px;
+  border-radius: 8px;
+  min-width: 100px;
 }
 
-.boss-card img {
-  width: 100%;
-  display: block;
+.boss-name {
+  font-weight: bold;
+  margin-bottom: 8px;
 }
 
-.boss-card:hover { transform: scale(1.02); }
-.boss-card.selected {
-  border-color: #ff4444;
-  box-shadow: 0 0 12px rgba(255,68,68,0.6);
+.boss-hp {
+  font-size: 20px;
 }
 
-.card-hp {
-  position: absolute;
-  bottom: 5px;
-  left: 5px;
-  background: rgba(0,0,0,0.7);
-  color: #fff;
-  padding: 0.2rem 0.4rem;
-  border-radius: 4px;
-  font-size: 0.9rem;
+.boss-empty {
+  padding: 20px;
+  color: #666;
 }
 
-/* 游荡妖怪网格 */
 .yokai-grid {
   flex: 1;
+  max-width: 500px;
 }
 
 .yokai-cards {
   display: grid;
-  grid-template-columns: repeat(3, 90px);
-  grid-template-rows: repeat(2, auto);
-  gap: 0.4rem;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
 }
 
 .yokai-card {
-  border-radius: 6px;
-  overflow: hidden;
-  cursor: pointer;
-  border: 2px solid transparent;
-  transition: all 0.2s;
-  position: relative;
-  background: #fff;
-}
-
-.yokai-card img {
-  width: 100%;
-  display: block;
-}
-
-.yokai-card:hover { transform: translateY(-3px); }
-.yokai-card.selected {
-  border-color: #ffd700;
-  box-shadow: 0 0 10px rgba(255,215,0,0.6);
-}
-
-.card-stats {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: rgba(0,0,0,0.7);
-  color: #fff;
-  padding: 0.2rem;
-  font-size: 0.7rem;
-  display: flex;
-  justify-content: space-around;
-}
-
-/* 妖怪卡组 */
-.yokai-deck-section {
-  width: 70px;
-}
-
-.yokai-deck {
-  position: relative;
-}
-
-.deck-top-card {
-  border-radius: 6px;
-  overflow: hidden;
-  border: 2px solid #8b4513;
-}
-
-.deck-top-card img {
-  width: 100%;
-  display: block;
-}
-
-.yokai-deck .deck-count {
-  position: absolute;
-  bottom: -20px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: #8b4513;
-  color: #fff;
-  padding: 0.2rem 0.5rem;
-  border-radius: 10px;
-  font-size: 0.8rem;
-  font-weight: bold;
-}
-
-/* 超度区 */
-.exile-row {
-  padding: 0.3rem;
-}
-
-.exile-zone {
-  background: #9ed0f0;
-  border: 2px solid #5ba;
-  border-radius: 6px;
-  padding: 0.4rem 1rem;
+  background: rgba(255,255,255,0.1);
+  padding: 12px;
+  border-radius: 8px;
   text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-height: 70px;
+}
+
+.yokai-card:hover:not(.empty) {
+  background: rgba(255,255,255,0.2);
+}
+
+.yokai-card.affordable {
+  background: rgba(76, 175, 80, 0.3);
+  border: 2px solid #4CAF50;
+}
+
+.yokai-card.empty {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.yokai-name {
+  font-weight: bold;
+  font-size: 13px;
+  margin-bottom: 5px;
+}
+
+.yokai-stats {
+  font-size: 12px;
   display: flex;
   justify-content: center;
-  gap: 2rem;
+  gap: 10px;
 }
 
-.exile-label {
-  font-weight: bold;
-  color: #246;
+.empty-slot {
+  color: #666;
 }
 
-.exile-count {
-  color: #468;
+.deck-info {
+  text-align: center;
+  color: #666;
 }
 
-/* 玩家行 */
+/* 日志区 */
+.log-row {
+  margin-bottom: 15px;
+}
+
+.game-log {
+  background: rgba(0,0,0,0.3);
+  padding: 10px;
+  border-radius: 8px;
+  height: 100px;
+  overflow-y: auto;
+  font-size: 13px;
+}
+
+.log-entry {
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+/* 玩家区 */
 .player-row {
-  height: 140px;
   display: flex;
-  gap: 0.8rem;
-  padding: 0.4rem;
-  background: rgba(0,0,0,0.1);
-  border-radius: 6px;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 15px;
 }
 
-/* 式神区 */
 .shikigami-section {
-  width: 130px;
+  min-width: 150px;
 }
 
 .shikigami-list {
   display: flex;
-  gap: 0.3rem;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .shikigami-card {
-  width: 55px;
-  border-radius: 4px;
-  overflow: hidden;
-  cursor: pointer;
-  position: relative;
-  border: 2px solid transparent;
-  transition: all 0.2s;
+  background: rgba(156, 39, 176, 0.3);
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 12px;
 }
 
-.shikigami-card img {
-  width: 100%;
-  display: block;
+.shiki-name {
+  font-weight: bold;
 }
 
-.shikigami-card.usable {
-  border-color: #ffd700;
-  box-shadow: 0 0 6px rgba(255,215,0,0.5);
+.shiki-skill {
+  color: #aaa;
+  font-size: 11px;
 }
 
-.shikigami-card:hover { transform: scale(1.03); }
-
-.shiki-cost {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  background: rgba(0,0,0,0.7);
-  color: #fff;
-  padding: 0.1rem 0.3rem;
-  border-radius: 3px;
-  font-size: 0.65rem;
-}
-
-/* 牌库区 */
 .deck-section {
-  width: 60px;
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 8px;
 }
 
 .my-deck, .my-discard {
-  background: rgba(0,0,0,0.2);
+  background: rgba(255,255,255,0.1);
+  padding: 10px 15px;
   border-radius: 6px;
-  padding: 0.5rem;
   text-align: center;
 }
 
 .deck-label {
-  font-size: 0.7rem;
-  color: #666;
+  font-size: 12px;
+  color: #888;
 }
 
 .deck-num {
-  font-size: 1.3rem;
+  font-size: 20px;
   font-weight: bold;
-  color: #333;
+  display: block;
 }
 
 /* 手牌区 */
 .hand-section {
   flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .hand-cards {
+  display: flex;
+  justify-content: center;
+  min-height: 90px;
+  padding: 10px;
   position: relative;
-  height: 100px;
-  width: 350px;
 }
 
 .hand-card {
-  position: absolute;
-  left: 50%;
-  bottom: 0;
-  width: 55px;
-  height: 80px;
-  margin-left: -27px;
-  background: linear-gradient(135deg, #f5f0e6, #e8e0d0);
-  border: 2px solid #8b4513;
-  border-radius: 6px;
+  position: relative;
+  width: 70px;
+  height: 95px;
+  background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+  border-radius: 8px;
+  padding: 8px;
   cursor: pointer;
   transition: all 0.2s;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  padding: 0.3rem;
-  box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+  justify-content: space-between;
 }
 
 .hand-card:hover {
-  transform: translateY(-20px) scale(1.1) !important;
+  transform: translateY(-15px) scale(1.1) !important;
   z-index: 100 !important;
-  border-color: #ffd700;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.4);
 }
 
-.hand-card.selected {
-  border-color: #27ae60;
-  box-shadow: 0 0 10px rgba(39,174,96,0.5);
-  transform: translateY(-15px) !important;
+.hand-card.ghost-fire {
+  background: linear-gradient(135deg, #ff5722 0%, #e64a19 100%);
+}
+
+.hand-card.token {
+  background: linear-gradient(135deg, #4CAF50 0%, #388E3C 100%);
+}
+
+.hand-card.yokai {
+  background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%);
 }
 
 .card-name {
-  font-size: 0.6rem;
-  text-align: center;
-  color: #333;
-}
-
-.card-power {
-  font-size: 1rem;
+  font-size: 11px;
   font-weight: bold;
-  color: #3498db;
-  margin-top: 0.3rem;
+  text-align: center;
 }
 
-/* 操作区 */
+.card-stats {
+  font-size: 10px;
+  text-align: center;
+}
+
+.card-stats span {
+  display: block;
+}
+
+/* 操作按钮 */
 .action-section {
-  width: 100px;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  justify-content: center;
+  gap: 10px;
 }
 
-.action-section .btn {
-  padding: 0.5rem;
-  font-size: 0.85rem;
+.btn.end-turn {
+  background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
+  color: white;
+  padding: 15px 25px;
+  font-size: 16px;
+}
+
+.btn.end-turn:hover {
+  transform: translateY(-2px);
+}
+
+/* 已打出区 */
+.played-row {
+  background: rgba(0,0,0,0.2);
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.played-cards {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.played-card {
+  background: rgba(255,255,255,0.1);
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 12px;
 }
 </style>

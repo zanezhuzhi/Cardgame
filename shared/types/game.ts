@@ -1,7 +1,7 @@
-
 /**
  * 御魂传说 - 游戏状态类型定义
  * @file shared/types/game.ts
+ * @version 0.3 - 根据规则书更新
  */
 
 import type { CardInstance, OnmyojiCard, ShikigamiCard, BossCard } from './cards';
@@ -11,15 +11,12 @@ import type { CardInstance, OnmyojiCard, ShikigamiCard, BossCard } from './cards
 /** 游戏整体阶段 */
 export type GamePhase = 'waiting' | 'setup' | 'playing' | 'ended';
 
-/** 回合内阶段 */
+/** 回合内阶段 - 简化为4个阶段 */
 export type TurnPhase = 
-  | 'start'       // 回合开始（鬼火+1）
-  | 'summon'      // 召唤阶段（可选：召唤/置换式神）
-  | 'action'      // 行动阶段（打牌、使用技能）
-  | 'combat'      // 退治阶段（分配伤害）
-  | 'buy'         // 购买阶段（购买令牌/妖怪）
-  | 'cleanup'     // 清理阶段（弃牌、抓牌）
-  | 'end';        // 回合结束
+  | 'ghostFire'   // 鬼火阶段（鬼火+1）
+  | 'shikigami'   // 式神调整阶段（可选）
+  | 'action'      // 行动阶段（打牌、使用技能、分配伤害）
+  | 'cleanup';    // 清理阶段（弃牌、抓牌、补充妖怪）
 
 // ============ 玩家状态 ============
 
@@ -30,22 +27,24 @@ export interface PlayerState {
   // 角色
   onmyoji: OnmyojiCard | null;
   shikigami: ShikigamiCard[];
+  maxShikigami: number;       // 式神上限（默认3）
   
   // 资源
-  ghostFire: number;        // 当前鬼火
-  maxGhostFire: number;     // 鬼火上限（默认5）
-  spellPower: number;       // 当前咒力（回合内累加）
+  ghostFire: number;          // 当前鬼火
+  maxGhostFire: number;       // 鬼火上限（固定5）
+  damage: number;             // 当前累积伤害（回合内）
   
   // 牌区
   hand: CardInstance[];           // 手牌
   deck: CardInstance[];           // 牌库
   discard: CardInstance[];        // 弃牌堆
-  played: CardInstance[];         // 本回合已打出的牌
+  played: CardInstance[];         // 本回合已打出的牌（旁置）
   exiled: CardInstance[];         // 超度区（移出游戏）
   
   // 统计
-  totalCharm: number;       // 符咒总计（胜利点数）
-  cardsPlayed: number;      // 本回合已打出卡牌数
+  totalCharm: number;         // 声誉总计（胜利点数）
+  cardsPlayedThisTurn: number;// 本回合已打出卡牌数
+  hasDamageAllocated: boolean;// 本回合是否已分配伤害
   
   // 状态
   isConnected: boolean;
@@ -58,7 +57,7 @@ export interface PlayerState {
 export interface ShikigamiState {
   cardId: string;
   isExhausted: boolean;     // 是否已行动
-  markers: Record<string, number>;  // 指示物（如酒气、会心、红枫娃娃等）
+  markers: Record<string, number>;  // 指示物
 }
 
 // ============ 战场状态 ============
@@ -69,21 +68,27 @@ export interface FieldState {
   
   // 鬼王区
   currentBoss: BossCard | null;
-  bossHp: number;
-  bossDeck: BossCard[];
+  bossCurrentHp: number;         // 鬼王当前生命
+  bossDeck: BossCard[];          // 鬼王牌库（阶段Ⅲ→Ⅱ→Ⅰ→麒麟）
   
-  // 商店区
-  tokenShop: {
-    token1: number;   // 招福达摩剩余
-    token3: number;   // 大吉达摩剩余
-    token6: number;   // 奉为达摩剩余
+  // 阴阳术商店区
+  spellShop: {
+    basic: number;     // 基础术式剩余
+    medium: number;    // 中级符咒剩余
+    advanced: number;  // 高级灵符剩余
   };
+  
+  // 令牌商店
+  tokenShop: number;        // 招福达摩剩余
   
   // 恶评堆
   penaltyPile: CardInstance[];
   
   // 游荡妖怪牌库
   yokaiDeck: CardInstance[];
+  
+  // 公共超度区
+  exileZone: CardInstance[];
 }
 
 // ============ 游戏状态 ============
@@ -92,6 +97,7 @@ export interface GameState {
   // 基础信息
   roomId: string;
   phase: GamePhase;
+  playerCount: number;
   
   // 玩家
   players: PlayerState[];
@@ -103,6 +109,9 @@ export interface GameState {
   
   // 战场
   field: FieldState;
+  
+  // 式神牌库（用于选择/置换）
+  shikigamiDeck: ShikigamiCard[];
   
   // 游戏日志
   log: GameLogEntry[];
@@ -116,17 +125,17 @@ export interface GameState {
 export type GameLogType = 
   | 'game_start'
   | 'turn_start'
+  | 'phase_change'
   | 'turn_end'
   | 'play_card'
   | 'use_skill'
-  | 'attack'
-  | 'kill'
-  | 'buy'
+  | 'damage_allocate'
+  | 'defeat_yokai'
+  | 'defeat_boss'
   | 'draw'
   | 'discard'
   | 'exile'
   | 'boss_arrival'
-  | 'boss_defeated'
   | 'game_end';
 
 export interface GameLogEntry {
@@ -143,15 +152,17 @@ export interface GameLogEntry {
 // ============ 游戏动作 ============
 
 export type GameAction = 
+  // 行动阶段
   | { type: 'PLAY_CARD'; cardInstanceId: string }
   | { type: 'USE_SKILL'; shikigamiId: string; targetId?: string }
-  | { type: 'ATTACK'; targetId: string; damage: number }
-  | { type: 'BUY_TOKEN'; tokenType: 'token1' | 'token3' | 'token6' }
-  | { type: 'BUY_YOKAI'; slotIndex: number }
+  | { type: 'ALLOCATE_DAMAGE'; targets: { targetId: string; damage: number }[] }
+  | { type: 'GET_SPELL'; spellType: 'basic' | 'medium' | 'advanced' }
+  // 阶段控制
   | { type: 'END_PHASE' }
   | { type: 'END_TURN' }
-  | { type: 'SUMMON_SHIKIGAMI'; shikigamiId: string }
-  | { type: 'REPLACE_SHIKIGAMI'; oldId: string; newId: string };
+  // 式神调整
+  | { type: 'SKIP_SHIKIGAMI_PHASE' }
+  | { type: 'REPLACE_SHIKIGAMI'; oldId: string };
 
 // ============ 游戏事件 ============
 
@@ -159,10 +170,11 @@ export type GameEvent =
   | { type: 'GAME_STARTED'; state: GameState }
   | { type: 'STATE_UPDATE'; state: GameState }
   | { type: 'TURN_CHANGED'; playerId: string }
+  | { type: 'PHASE_CHANGED'; phase: TurnPhase }
   | { type: 'CARD_PLAYED'; playerId: string; card: CardInstance }
   | { type: 'CARD_DRAWN'; playerId: string; count: number }
-  | { type: 'DAMAGE_DEALT'; targetId: string; damage: number }
-  | { type: 'UNIT_KILLED'; targetId: string; killerId: string }
+  | { type: 'DAMAGE_ALLOCATED'; results: { targetId: string; damage: number; defeated: boolean }[] }
+  | { type: 'YOKAI_DEFEATED'; card: CardInstance; playerId: string }
   | { type: 'BOSS_ARRIVAL'; boss: BossCard }
   | { type: 'BOSS_DEFEATED'; boss: BossCard; playerId: string }
   | { type: 'GAME_ENDED'; winner: string; scores: Record<string, number> };
@@ -171,16 +183,41 @@ export type GameEvent =
 
 export interface GameConfig {
   playerCount: number;
-  yokaiPerType: number;
-  tokenCounts: {
-    token1: number;
-    token3: number;
-    token6: number;
-  };
-  penaltyCounts: {
-    penalty1: number;
-    penalty2: number;
-  };
-  startingHandSize: number;
-  startingShikigamiCount: number;
+  removeMultiPlayerCards: boolean;  // 4人以下移除纸人符号卡
+  
+  // 起始牌库
+  startingSpells: number;           // 基础术式数量（默认6）
+  startingTokens: number;           // 招福达摩数量（默认4）
+  
+  // 手牌
+  startingHandSize: number;         // 起始手牌（默认5）
+  maxHandSize: number;              // 手牌上限（默认无限制）
+  
+  // 式神
+  shikigamiDraw: number;            // 抽几张式神（默认4）
+  shikigamiKeep: number;            // 保留几张（默认2）
+  maxShikigami: number;             // 最多拥有几张（默认3）
+  
+  // 资源
+  maxGhostFire: number;             // 鬼火上限（固定5）
+  ghostFirePerTurn: number;         // 每回合获得鬼火（固定1）
+  
+  // 战场
+  yokaiSlots: number;               // 妖怪槽位（固定6）
 }
+
+/** 默认游戏配置 */
+export const DEFAULT_GAME_CONFIG: GameConfig = {
+  playerCount: 2,
+  removeMultiPlayerCards: true,
+  startingSpells: 6,
+  startingTokens: 4,
+  startingHandSize: 5,
+  maxHandSize: -1,
+  shikigamiDraw: 4,
+  shikigamiKeep: 2,
+  maxShikigami: 3,
+  maxGhostFire: 5,
+  ghostFirePerTurn: 1,
+  yokaiSlots: 6,
+};

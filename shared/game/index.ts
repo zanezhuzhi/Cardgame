@@ -5,3 +5,4 @@
  */
 
 export * from './GameManager';
+export * from './DeckManager';

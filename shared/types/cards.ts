@@ -168,9 +168,16 @@ export interface PlayerSetup {
 
 export interface GameSetupConfig {
   yokaiPerType: number;
-  tokens: number;
-  penalties: { farmer: number; warrior: number };
-  removeMultiPlayer: boolean;  // 是否移除多人卡牌
+  fortuneDaruma: number;       // 招福达摩数量
+  farmer: number;              // 农夫恶评数量
+  warrior?: number;            // 武士恶评数量
+}
+
+export interface GameConstants {
+  maxGhostFire: number;        // 鬼火上限
+  ghostFirePerTurn: number;    // 每回合获得鬼火
+  yokaiSlots: number;          // 战场妖怪槽位
+  maxShikigami: number;        // 式神上限
 }
 
 export interface CardDatabase {
@@ -185,7 +192,11 @@ export interface CardDatabase {
   yokai: YokaiCard[];
   playerSetup: PlayerSetup;
   gameSetup: {
-    '2-4players': GameSetupConfig;
-    '5-6players': GameSetupConfig;
+    '2players': GameSetupConfig;
+    '3players': GameSetupConfig;
+    '4players': GameSetupConfig;
+    '5players': GameSetupConfig;
+    '6players': GameSetupConfig;
   };
+  gameConstants: GameConstants;
 }

@@ -43,8 +43,7 @@ export interface PlayerState {
   
   // 统计
   totalCharm: number;         // 声誉总计（胜利点数）
-  cardsPlayedThisTurn: number;// 本回合已打出卡牌数
-  hasDamageAllocated: boolean;// 本回合是否已分配伤害
+  cardsPlayed: number;        // 本回合已打出卡牌数
   
   // 状态
   isConnected: boolean;
@@ -155,14 +154,13 @@ export type GameAction =
   // 行动阶段
   | { type: 'PLAY_CARD'; cardInstanceId: string }
   | { type: 'USE_SKILL'; shikigamiId: string; targetId?: string }
-  | { type: 'ALLOCATE_DAMAGE'; targets: { targetId: string; damage: number }[] }
-  | { type: 'GET_SPELL'; spellType: 'basic' | 'medium' | 'advanced' }
-  // 阶段控制
-  | { type: 'END_PHASE' }
-  | { type: 'END_TURN' }
-  // 式神调整
-  | { type: 'SKIP_SHIKIGAMI_PHASE' }
-  | { type: 'REPLACE_SHIKIGAMI'; oldId: string };
+  | { type: 'ATTACK'; targetId: string; damage: number }
+  | { type: 'BUY_SPELL'; spellId: string; exileCardIds: string[] }
+  // 式神调整阶段
+  | { type: 'CONFIRM_SHIKIGAMI' }
+  | { type: 'REPLACE_SHIKIGAMI'; oldId: string; newId: string }
+  // 回合控制
+  | { type: 'END_TURN' };
 
 // ============ 游戏事件 ============
 

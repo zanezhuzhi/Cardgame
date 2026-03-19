@@ -462,21 +462,14 @@
   },
 
   "gameSetup": {
-    "2-4players": {
-      "removeMultiPlayerCards": true,
-      "tokens": 18,
-      "penalties": { "farmer": 20, "warrior": 10 },
-      "spells": { "basic": 50, "medium": 20, "advanced": 10 }
-    },
-    "5-6players": {
-      "removeMultiPlayerCards": false,
-      "tokens": 18,
-      "penalties": { "farmer": 20, "warrior": 10 },
-      "spells": { "basic": 50, "medium": 20, "advanced": 10 }
-    }
+    "2players": { "yokaiPerType": 2, "fortuneDaruma": 18, "farmer": 20, "warrior": 10 },
+    "3players": { "yokaiPerType": 2, "fortuneDaruma": 18, "farmer": 20, "warrior": 10 },
+    "4players": { "yokaiPerType": 2, "fortuneDaruma": 18, "farmer": 20, "warrior": 10 },
+    "5players": { "yokaiPerType": 3, "fortuneDaruma": 18, "farmer": 20, "warrior": 10 },
+    "6players": { "yokaiPerType": 3, "fortuneDaruma": 18, "farmer": 20, "warrior": 10 }
   },
 
-  "constants": {
+  "gameConstants": {
     "maxGhostFire": 5,
     "ghostFirePerTurn": 1,
     "yokaiSlots": 6,

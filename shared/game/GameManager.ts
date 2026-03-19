@@ -2,6 +2,7 @@
 /**
  * 御魂传说 - 游戏管理器
  * @file shared/game/GameManager.ts
+ * @version 0.3 - 4阶段回合系统
  */
 
 import type {
@@ -28,13 +29,16 @@ import {
   getGameConfig,
   createStartingDeck,
   createYokaiInstance,
+  createSpellInstance,
   createTokenInstance,
   createPenaltyInstance,
   shuffle,
   getAllBosses,
-  getAllYokai,
+  getAllSpells,
+  getYokaiForPlayerCount,
   getAllTokens,
-  getAllPenalties
+  getAllPenalties,
+  GAME_CONSTANTS
 } from '../data/loader';
 
 // ============ 游戏管理器 ============
@@ -67,7 +71,7 @@ export class GameManager {
       players: [],
       currentPlayerIndex: 0,
       turnNumber: 0,
-      turnPhase: 'start',
+      turnPhase: 'ghostFire', // 新的4阶段系统
       field: this.createInitialField(),
       log: [],
       lastUpdate: Date.now()
@@ -102,11 +106,12 @@ export class GameManager {
   }
 
   private createYokaiDeck(): CardInstance[] {
-    const allYokai = getAllYokai();
+    // 根据玩家数过滤（移除纸人标记卡）
+    const yokaiForGame = getYokaiForPlayerCount(this.config.playerCount);
     const deck: CardInstance[] = [];
     
     // 每种妖怪根据人数配置添加
-    for (const yokai of allYokai) {
+    for (const yokai of yokaiForGame) {
       for (let i = 0; i < this.config.yokaiPerType; i++) {
         deck.push(createYokaiInstance(yokai));
       }
@@ -147,8 +152,8 @@ export class GameManager {
       onmyoji: null,
       shikigami: [],
       ghostFire: 0,
-      maxGhostFire: 5,
-      spellPower: 0,
+      maxGhostFire: GAME_CONSTANTS.maxGhostFire, // 鬼火上限5
+      damage: 0, // 本回合累积伤害（回合结束清零）
       hand: [],
       deck: [],
       discard: [],
@@ -217,37 +222,87 @@ export class GameManager {
     this.updateState();
   }
 
-  // ============ 回合管理 ============
+  // ============ 回合管理（4阶段系统） ============
+  // 阶段1: ghostFire   - 鬼火阶段（固定+1）
+  // 阶段2: shikigami   - 式神调整（可选换/召唤）
+  // 阶段3: action      - 行动阶段（主要游戏区）
+  // 阶段4: cleanup     - 清理阶段（重置并抓5张）
 
   startTurn(): void {
     const player = this.getCurrentPlayer();
     
-    // 回合开始：鬼火+1
-    player.ghostFire = Math.min(player.ghostFire + 1, player.maxGhostFire);
+    this.addLog('turn_start', `${player.name} 的回合开始`, player.id);
+    
+    // 重置回合统计
+    player.damage = 0;
+    player.cardsPlayed = 0;
+    player.played = [];
     
     // 重置式神状态
     for (const state of player.shikigamiState) {
       state.isExhausted = false;
     }
     
-    // 重置回合内统计
-    player.spellPower = 0;
-    player.cardsPlayed = 0;
-    player.played = [];
-    
-    this.state.turnPhase = 'action';
-    
-    this.addLog('turn_start', `${player.name} 的回合开始`, player.id);
-    this.updateState();
+    // 进入鬼火阶段
+    this.enterGhostFirePhase();
   }
 
+  /** 阶段1: 鬼火阶段 - 鬼火+1 */
+  private enterGhostFirePhase(): void {
+    const player = this.getCurrentPlayer();
+    this.state.turnPhase = 'ghostFire';
+    
+    // 鬼火固定+1，不超过上限
+    player.ghostFire = Math.min(
+      player.ghostFire + GAME_CONSTANTS.ghostFirePerTurn, 
+      player.maxGhostFire
+    );
+    
+    this.addLog('ghost_fire', `${player.name} 获得1点鬼火（当前:${player.ghostFire}）`, player.id);
+    this.updateState();
+    
+    // 自动进入下一阶段
+    this.enterShikigamiPhase();
+  }
+
+  /** 阶段2: 式神调整阶段 */
+  private enterShikigamiPhase(): void {
+    this.state.turnPhase = 'shikigami';
+    this.updateState();
+    // 等待玩家操作（调整/跳过）
+  }
+
+  /** 确认式神调整完成，进入行动阶段 */
+  confirmShikigamiPhase(): void {
+    this.enterActionPhase();
+  }
+
+  /** 阶段3: 行动阶段 */
+  private enterActionPhase(): void {
+    this.state.turnPhase = 'action';
+    this.updateState();
+    // 等待玩家操作（打牌、使用技能、分配伤害等）
+  }
+
+  /** 阶段4: 清理阶段 - 结束回合 */
   endTurn(): void {
     const player = this.getCurrentPlayer();
     
-    // 清理阶段
-    this.cleanupPhase(player);
+    // 进入清理阶段
+    this.state.turnPhase = 'cleanup';
     
-    // 刷新战场
+    // 伤害归零（回合结束清零）
+    player.damage = 0;
+    
+    // 将所有手牌和已打出的牌放入弃牌堆
+    player.discard.push(...player.hand, ...player.played);
+    player.hand = [];
+    player.played = [];
+    
+    // 抓5张新牌
+    this.drawCards(player, this.config.startingHandSize);
+    
+    // 刷新战场妖怪
     this.fillYokaiSlots();
     
     this.addLog('turn_end', `${player.name} 的回合结束`, player.id);
@@ -268,18 +323,6 @@ export class GameManager {
     
     // 开始新回合
     this.startTurn();
-  }
-
-  private cleanupPhase(player: PlayerState): void {
-    // 将所有手牌和已打出的牌放入弃牌堆
-    player.discard.push(...player.hand, ...player.played);
-    player.hand = [];
-    player.played = [];
-    
-    // 抓5张新牌
-    this.drawCards(player, this.config.startingHandSize);
-    
-    this.state.turnPhase = 'cleanup';
   }
 
   // ============ 牌库操作 ============
@@ -354,15 +397,12 @@ export class GameManager {
     player.played.push(card);
     player.cardsPlayed++;
     
-    // 累加咒力（基于生命值）
-    player.spellPower += card.hp;
-    
-    // 累加鬼火（如果是鬼火卡）
-    if (card.ghostFire) {
-      player.ghostFire = Math.min(player.ghostFire + card.ghostFire, player.maxGhostFire);
+    // 累加伤害（基于卡牌伤害值）
+    if (card.damage) {
+      player.damage += card.damage;
     }
     
-    this.addLog('play_card', `${player.name} 打出了 ${card.name}`, player.id);
+    this.addLog('play_card', `${player.name} 打出了 ${card.name}（伤害+${card.damage || 0}）`, player.id);
     this.updateState();
     
     return true;
@@ -457,33 +497,49 @@ export class GameManager {
     this.revealNextBoss();
   }
 
-  buyToken(player: PlayerState, tokenType: 'token1' | 'token3' | 'token6'): boolean {
-    const tokens = getAllTokens();
-    const costs = { token1: 1, token3: 3, token6: 6 };
-    const cost = costs[tokenType];
+  /**
+   * 购买阴阳术（超度升级）
+   * 使用已打出卡牌的HP值来"超度"购买更高级的阴阳术
+   */
+  buySpell(player: PlayerState, spellId: string, exileCardIds: string[]): boolean {
+    const spells = getAllSpells();
+    const targetSpell = spells.find(s => s.id === spellId);
+    if (!targetSpell) return false;
     
-    // 检查咒力是否足够
-    if (player.spellPower < cost) return false;
+    // 计算要超度的卡牌HP总和
+    let totalHp = 0;
+    const cardsToExile: CardInstance[] = [];
     
-    // 检查商店库存
-    if (this.state.field.tokenShop[tokenType] <= 0) return false;
-    
-    // 扣除咒力
-    player.spellPower -= cost;
-    
-    // 减少库存
-    this.state.field.tokenShop[tokenType]--;
-    
-    // 获得令牌
-    const tokenIndex = tokenType === 'token1' ? 0 : tokenType === 'token3' ? 1 : 2;
-    const token = tokens[tokenIndex];
-    if (token) {
-      player.discard.push(createTokenInstance(token));
-      player.totalCharm += token.charm;
-      
-      this.addLog('buy', `${player.name} 购买了 ${token.name}`, player.id);
+    for (const cardId of exileCardIds) {
+      const card = player.played.find(c => c.instanceId === cardId) 
+                || player.discard.find(c => c.instanceId === cardId);
+      if (card) {
+        totalHp += card.hp;
+        cardsToExile.push(card);
+      }
     }
     
+    // 检查HP是否足够
+    if (totalHp < targetSpell.hp) return false;
+    
+    // 执行超度：从played/discard中移除，加入exiled
+    for (const card of cardsToExile) {
+      let idx = player.played.findIndex(c => c.instanceId === card.instanceId);
+      if (idx !== -1) {
+        player.played.splice(idx, 1);
+      } else {
+        idx = player.discard.findIndex(c => c.instanceId === card.instanceId);
+        if (idx !== -1) {
+          player.discard.splice(idx, 1);
+        }
+      }
+      player.exiled.push(card);
+    }
+    
+    // 获得新阴阳术
+    player.discard.push(createSpellInstance(targetSpell));
+    
+    this.addLog('buy_spell', `${player.name} 超度获得了 ${targetSpell.name}`, player.id);
     this.updateState();
     return true;
   }
@@ -592,23 +648,29 @@ export class GameManager {
     
     switch (action.type) {
       case 'PLAY_CARD':
+        if (this.state.turnPhase !== 'action') return false;
         return this.playCard(player, action.cardInstanceId);
         
       case 'USE_SKILL':
+        if (this.state.turnPhase !== 'action') return false;
         const shikigamiIndex = player.shikigami.findIndex(s => s.id === action.shikigamiId);
         return this.useShikigamiSkill(player, shikigamiIndex, action.targetId);
         
       case 'ATTACK':
+        if (this.state.turnPhase !== 'action') return false;
         return this.attackTarget(player, action.targetId, action.damage);
         
-      case 'BUY_TOKEN':
-        return this.buyToken(player, action.tokenType);
+      case 'BUY_SPELL':
+        if (this.state.turnPhase !== 'action') return false;
+        return this.buySpell(player, action.spellId, action.exileCardIds);
         
-      case 'BUY_YOKAI':
-        // TODO: 实现购买妖怪逻辑
-        return false;
+      case 'CONFIRM_SHIKIGAMI':
+        if (this.state.turnPhase !== 'shikigami') return false;
+        this.confirmShikigamiPhase();
+        return true;
         
       case 'END_TURN':
+        if (this.state.turnPhase !== 'action') return false;
         this.endTurn();
         return true;
         

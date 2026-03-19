@@ -1,14 +1,14 @@
-
 /**
  * 御魂传说 - 卡牌数据加载器
  * @file shared/data/loader.ts
+ * @version 0.3 - 阴阳术系统
  */
 
 import type {
   CardDatabase,
   OnmyojiCard,
   ShikigamiCard,
-  GhostFireCard,
+  SpellCard,
   TokenCard,
   PenaltyCard,
   BossCard,
@@ -41,9 +41,19 @@ export function getAllShikigami(): ShikigamiCard[] {
   return cardDatabase.shikigami;
 }
 
-/** 获取所有鬼火卡 */
-export function getAllGhostFire(): GhostFireCard[] {
-  return cardDatabase.ghostFire;
+/** 获取所有阴阳术卡 */
+export function getAllSpells(): SpellCard[] {
+  return cardDatabase.spell;
+}
+
+/** 根据等级获取阴阳术 */
+export function getSpellsByTier(tier: 'basic' | 'medium' | 'advanced'): SpellCard[] {
+  const tierMap = {
+    basic: '基础术式',
+    medium: '中级符咒',
+    advanced: '高级符咒'
+  };
+  return cardDatabase.spell.filter(s => s.name === tierMap[tier]);
 }
 
 /** 获取所有令牌卡 */
@@ -64,6 +74,15 @@ export function getAllBosses(): BossCard[] {
 /** 获取所有游荡妖怪 */
 export function getAllYokai(): YokaiCard[] {
   return cardDatabase.yokai;
+}
+
+/** 根据玩家数量过滤妖怪（移除纸人标记卡） */
+export function getYokaiForPlayerCount(playerCount: number): YokaiCard[] {
+  if (playerCount >= 5) {
+    return cardDatabase.yokai; // 5人以上使用全部妖怪
+  }
+  // 4人及以下移除多人专属卡
+  return cardDatabase.yokai.filter(y => !y.multiPlayer);
 }
 
 // ============ 按ID查找 ============
@@ -90,6 +109,9 @@ export function getYokaiById(id: string): YokaiCard | undefined {
 
 // ============ 游戏配置 ============
 
+/** 游戏常量 */
+export const GAME_CONSTANTS = cardDatabase.gameConstants;
+
 /** 根据玩家数量获取游戏配置 */
 export function getGameConfig(playerCount: number): GameConfig {
   const key = `${playerCount}players` as keyof typeof cardDatabase.gameSetup;
@@ -99,16 +121,18 @@ export function getGameConfig(playerCount: number): GameConfig {
     playerCount,
     yokaiPerType: setup.yokaiPerType,
     tokenCounts: {
-      token1: setup.token1,
-      token3: setup.token3,
-      token6: setup.token6,
+      fortuneDaruma: setup.fortuneDaruma,
     },
     penaltyCounts: {
-      penalty1: setup.penalty1,
-      penalty2: setup.penalty2 || 0,
+      farmer: setup.farmer,
+      warrior: setup.warrior || 0,
     },
     startingHandSize: cardDatabase.playerSetup.handSize,
     startingShikigamiCount: cardDatabase.playerSetup.shikigamiCount,
+    maxGhostFire: GAME_CONSTANTS.maxGhostFire,
+    ghostFirePerTurn: GAME_CONSTANTS.ghostFirePerTurn,
+    yokaiSlots: GAME_CONSTANTS.yokaiSlots,
+    maxShikigami: GAME_CONSTANTS.maxShikigami,
   };
 }
 
@@ -121,17 +145,17 @@ function generateInstanceId(): string {
   return `card_${Date.now()}_${++instanceCounter}`;
 }
 
-/** 从鬼火卡创建实例 */
-export function createGhostFireInstance(card: GhostFireCard): CardInstance {
+/** 从阴阳术卡创建实例 */
+export function createSpellInstance(card: SpellCard): CardInstance {
   return {
     instanceId: generateInstanceId(),
     cardId: card.id,
-    cardType: 'ghostFire',
+    cardType: 'spell',
     name: card.name,
     hp: card.hp,
     maxHp: card.hp,
-    armor: card.armor,
-    ghostFire: card.ghostFire,
+    damage: card.damage,
+    charm: card.charm,
     image: card.image,
   };
 }
@@ -145,7 +169,6 @@ export function createTokenInstance(card: TokenCard): CardInstance {
     name: card.name,
     hp: card.hp,
     maxHp: card.hp,
-    armor: card.armor,
     charm: card.charm,
     image: card.image,
   };
@@ -160,7 +183,6 @@ export function createPenaltyInstance(card: PenaltyCard): CardInstance {
     name: card.name,
     hp: card.hp,
     maxHp: card.hp,
-    armor: card.armor,
     charm: card.charm,
     image: card.image,
   };
@@ -175,8 +197,7 @@ export function createYokaiInstance(card: YokaiCard): CardInstance {
     name: card.name,
     hp: card.hp,
     maxHp: card.hp,
-    armor: card.armor,
-    cost: card.cost,
+    charm: card.charm || 0,
     effect: card.effect,
     image: card.image,
   };
@@ -191,7 +212,6 @@ export function createBossInstance(card: BossCard): CardInstance {
     name: card.name,
     hp: card.hp,
     maxHp: card.hp,
-    armor: card.armor,
     effect: card.effect,
     image: card.image,
   };
@@ -199,24 +219,24 @@ export function createBossInstance(card: BossCard): CardInstance {
 
 // ============ 初始牌库生成 ============
 
-/** 生成玩家初始牌库 */
+/** 生成玩家初始牌库（6基础术式 + 4招福达摩） */
 export function createStartingDeck(): CardInstance[] {
   const deck: CardInstance[] = [];
   const setup = cardDatabase.playerSetup.startingDeck;
   
-  // 添加灯笼鬼（7张）
-  const ghostFire1 = cardDatabase.ghostFire.find(c => c.name === setup.ghostFire.name);
-  if (ghostFire1) {
-    for (let i = 0; i < setup.ghostFire.count; i++) {
-      deck.push(createGhostFireInstance(ghostFire1));
+  // 添加基础术式（6张）
+  const basicSpell = cardDatabase.spell.find(c => c.name === setup.spell.name);
+  if (basicSpell) {
+    for (let i = 0; i < setup.spell.count; i++) {
+      deck.push(createSpellInstance(basicSpell));
     }
   }
   
-  // 添加招福达摩（3张）
-  const token1 = cardDatabase.token.find(c => c.name === setup.token.name);
-  if (token1) {
+  // 添加招福达摩（4张）
+  const fortuneDaruma = cardDatabase.token.find(c => c.name === setup.token.name);
+  if (fortuneDaruma) {
     for (let i = 0; i < setup.token.count; i++) {
-      deck.push(createTokenInstance(token1));
+      deck.push(createTokenInstance(fortuneDaruma));
     }
   }
   
@@ -239,7 +259,6 @@ export function shuffle<T>(array: T[]): T[] {
 
 /** 获取卡牌图片路径 */
 export function getCardImagePath(cardType: CardType, imageName: string): string {
-  // 根据卡牌类型返回对应目录
   const basePath = '/assets/cards/';
   
   switch (cardType) {
@@ -262,7 +281,7 @@ export const DATA_SUMMARY = {
   counts: {
     onmyoji: cardDatabase.onmyoji.length,
     shikigami: cardDatabase.shikigami.length,
-    ghostFire: cardDatabase.ghostFire.reduce((sum, c) => sum + c.count, 0),
+    spell: cardDatabase.spell.reduce((sum, c) => sum + c.count, 0),
     token: cardDatabase.token.reduce((sum, c) => sum + c.count, 0),
     penalty: cardDatabase.penalty.reduce((sum, c) => sum + c.count, 0),
     boss: cardDatabase.boss.length,

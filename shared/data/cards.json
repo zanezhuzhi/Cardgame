@@ -1,57 +1,15 @@
 
 {
-  "version": "1.0.0",
+  "version": "0.3.0",
   "totalCards": 400,
   
   "onmyoji": [
-    {
-      "id": "onmyoji_001",
-      "name": "晴明",
-      "type": "onmyoji",
-      "skill": "言灵·缚",
-      "effect": "退治阶段消耗1点[鬼火]可令目标单位[护甲]-1，不限次数。",
-      "image": "阴阳师01.png"
-    },
-    {
-      "id": "onmyoji_002",
-      "name": "神乐",
-      "type": "onmyoji",
-      "skill": "通灵·疾风",
-      "effect": "退治阶段消耗2点[鬼火]可令目标式神再次行动。",
-      "image": "阴阳师02.png"
-    },
-    {
-      "id": "onmyoji_003",
-      "name": "源博雅",
-      "type": "onmyoji",
-      "skill": "多重箭",
-      "effect": "御魂阶段中每使用3张[御魂卡]，则获得2[鬼火]。",
-      "image": "阴阳师03.png"
-    },
-    {
-      "id": "onmyoji_004",
-      "name": "八百比丘尼",
-      "type": "onmyoji",
-      "skill": "星陨",
-      "effect": "退治阶段超度1张[鬼火卡]，可对战场所有单位造成2点伤害。",
-      "image": "阴阳师04.png"
-    },
-    {
-      "id": "onmyoji_005",
-      "name": "源赖光",
-      "type": "onmyoji",
-      "skill": "律令·献祭",
-      "effect": "退治阶段可以获得1张[恶评]，令目标式神伤害+3。",
-      "image": "阴阳师05.png"
-    },
-    {
-      "id": "onmyoji_006",
-      "name": "贺茂义心",
-      "type": "onmyoji",
-      "skill": "交心",
-      "effect": "召唤阶段购买[神秘的符咒]时，所消耗的[令牌]-1。",
-      "image": "阴阳师06.png"
-    }
+    { "id": "onmyoji_001", "name": "晴明", "type": "onmyoji", "image": "阴阳师01.png" },
+    { "id": "onmyoji_002", "name": "神乐", "type": "onmyoji", "image": "阴阳师02.png" },
+    { "id": "onmyoji_003", "name": "源博雅", "type": "onmyoji", "image": "阴阳师03.png" },
+    { "id": "onmyoji_004", "name": "八百比丘尼", "type": "onmyoji", "image": "阴阳师04.png" },
+    { "id": "onmyoji_005", "name": "源赖光", "type": "onmyoji", "image": "阴阳师05.png" },
+    { "id": "onmyoji_006", "name": "贺茂义心", "type": "onmyoji", "image": "阴阳师06.png" }
   ],
 
   "shikigami": [
@@ -273,36 +231,39 @@
     }
   ],
 
-  "ghostFire": [
+  "spell": [
     {
-      "id": "ghostfire_001",
-      "name": "灯笼鬼",
-      "type": "ghostFire",
+      "id": "spell_001",
+      "name": "基础术式",
+      "type": "spell",
       "hp": 1,
-      "armor": 0,
-      "ghostFire": 1,
+      "damage": 1,
+      "charm": 0,
+      "effect": "【启】超度此牌+弃牌堆中生命≥2的妖怪，获得「中级符咒」",
       "count": 50,
-      "image": "鬼火01.png"
+      "image": "阴阳术01.png"
     },
     {
-      "id": "ghostfire_002",
-      "name": "招财猫",
-      "type": "ghostFire",
+      "id": "spell_002",
+      "name": "中级符咒",
+      "type": "spell",
+      "hp": 2,
+      "damage": 2,
+      "charm": 0,
+      "effect": "【启】超度此牌+弃牌堆中生命≥4的妖怪，获得「高级符咒」",
+      "count": 20,
+      "image": "阴阳术02.png"
+    },
+    {
+      "id": "spell_003",
+      "name": "高级符咒",
+      "type": "spell",
       "hp": 3,
-      "armor": 0,
-      "ghostFire": 2,
-      "count": 40,
-      "image": "鬼火02.png"
-    },
-    {
-      "id": "ghostfire_003",
-      "name": "火灵",
-      "type": "ghostFire",
-      "hp": 6,
-      "armor": 0,
-      "ghostFire": 3,
-      "count": 30,
-      "image": "鬼火03.png"
+      "damage": 3,
+      "charm": 1,
+      "effect": "【启】超度此牌，获得任意「专属符咒」",
+      "count": 10,
+      "image": "阴阳术03.png"
     }
   ],
 
@@ -311,31 +272,10 @@
       "id": "token_001",
       "name": "招福达摩",
       "type": "token",
-      "hp": 5,
-      "armor": 0,
+      "hp": 1,
       "charm": 1,
-      "count": 30,
+      "count": 18,
       "image": "令牌01.png"
-    },
-    {
-      "id": "token_002",
-      "name": "大吉达摩",
-      "type": "token",
-      "hp": 9,
-      "armor": 1,
-      "charm": 3,
-      "count": 15,
-      "image": "令牌02.png"
-    },
-    {
-      "id": "token_003",
-      "name": "奉为达摩",
-      "type": "token",
-      "hp": 13,
-      "armor": 2,
-      "charm": 6,
-      "count": 15,
-      "image": "令牌03.png"
     }
   ],
 
@@ -345,9 +285,8 @@
       "name": "农夫",
       "type": "penalty",
       "hp": 1,
-      "armor": 0,
       "charm": -1,
-      "count": 30,
+      "count": 20,
       "image": "恶评01.png"
     },
     {
@@ -355,9 +294,8 @@
       "name": "武士",
       "type": "penalty",
       "hp": 2,
-      "armor": 1,
       "charm": -2,
-      "count": 20,
+      "count": 10,
       "image": "恶评02.png"
     }
   ],
@@ -515,18 +453,33 @@
 
   "playerSetup": {
     "startingDeck": {
-      "ghostFire": { "name": "灯笼鬼", "count": 7 },
-      "token": { "name": "招福达摩", "count": 3 }
+      "spell": { "name": "基础术式", "count": 6 },
+      "token": { "name": "招福达摩", "count": 4 }
     },
     "handSize": 5,
-    "shikigamiCount": 2
+    "shikigamiDraw": 4,
+    "shikigamiKeep": 2
   },
 
   "gameSetup": {
-    "2players": { "yokaiPerType": 4, "token1": 8, "token3": 8, "token6": 8, "penalty1": 10 },
-    "3players": { "yokaiPerType": 5, "token1": 12, "token3": 12, "token6": 12, "penalty1": 20 },
-    "4players": { "yokaiPerType": 6, "token1": 12, "token3": 12, "token6": 12, "penalty1": 30 },
-    "5players": { "yokaiPerType": 7, "token1": 12, "token3": 15, "token6": 16, "penalty1": 30, "penalty2": 10 },
-    "6players": { "yokaiPerType": 8, "token1": 12, "token3": 18, "token6": 21, "penalty1": 30, "penalty2": 20 }
+    "2-4players": {
+      "removeMultiPlayerCards": true,
+      "tokens": 18,
+      "penalties": { "farmer": 20, "warrior": 10 },
+      "spells": { "basic": 50, "medium": 20, "advanced": 10 }
+    },
+    "5-6players": {
+      "removeMultiPlayerCards": false,
+      "tokens": 18,
+      "penalties": { "farmer": 20, "warrior": 10 },
+      "spells": { "basic": 50, "medium": 20, "advanced": 10 }
+    }
+  },
+
+  "constants": {
+    "maxGhostFire": 5,
+    "ghostFirePerTurn": 1,
+    "yokaiSlots": 6,
+    "maxShikigami": 3
   }
 }

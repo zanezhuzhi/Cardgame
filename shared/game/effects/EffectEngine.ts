@@ -1,298 +1,311 @@
-
 /**
- * 御魂传说 - 效果执行引擎
+ * 御魂传说 - 效果执行引擎 v2
  * @file shared/game/effects/EffectEngine.ts
+ *
+ * 职责：接收 CardEffect[] + EffectContext，直接修改 PlayerState/GameState
  */
 
 import type {
-  Effect,
-  EffectContext,
-  EffectResult,
-  ExecutedEffect,
-  EffectCondition,
-  DrawEffect,
-  GhostFireEffect,
-  SpellPowerEffect,
-  DamageEffect,
-  DiscardEffect,
-  AttackBonusEffect,
-  ChoiceEffect,
-  InterfereEffect
+  CardEffect, AtomEffect, ChoiceEffect, ConditionalEffect,
+  EffectContext, EffectCondition,
+  DrawEffect, GhostFireEffect, DamageEffect, DiscardEffect,
+  ExileHandEffect, GainSpellEffect, GainPenaltyEffect,
+  MarkerAddEffect, MarkerRemoveEffect, KillYokaiEffect,
+  InterfereEffect,
 } from './types';
 
-import type { PlayerState, GameState } from '../../types/game';
 import type { CardInstance } from '../../types/cards';
+import type { PlayerState } from '../../types/game';
+import { shuffle } from '../../data/loader';
 
-/**
- * 效果执行引擎
- */
 export class EffectEngine {
-  
-  /**
-   * 执行效果列表
-   */
-  async executeEffects(
-    effects: Effect[],
-    context: EffectContext
-  ): Promise<EffectResult> {
-    const executed: ExecutedEffect[] = [];
-    
+
+  // ============ 主入口 ============
+
+  async execute(effects: CardEffect[], ctx: EffectContext): Promise<void> {
     for (const effect of effects) {
-      // 检查条件
-      if (effect.condition && !this.checkCondition(effect.condition, context)) {
-        continue;
-      }
-      
-      const result = await this.executeEffect(effect, context);
-      executed.push(...result);
+      await this.executeOne(effect, ctx);
     }
-    
-    return {
-      success: true,
-      effects: executed
-    };
   }
-  
-  /**
-   * 执行单个效果
-   */
-  private async executeEffect(
-    effect: Effect,
-    context: EffectContext
-  ): Promise<ExecutedEffect[]> {
+
+  private async executeOne(effect: CardEffect, ctx: EffectContext): Promise<void> {
+    if (effect.type === 'CHOICE') {
+      return this.executeChoice(effect as ChoiceEffect, ctx);
+    }
+    if (effect.type === 'CONDITIONAL') {
+      return this.executeConditional(effect as ConditionalEffect, ctx);
+    }
+    return this.executeAtom(effect as AtomEffect, ctx);
+  }
+
+  // ============ 原子效果 ============
+
+  private async executeAtom(effect: AtomEffect, ctx: EffectContext): Promise<void> {
+    const { player, gameState } = ctx;
+
     switch (effect.type) {
-      case 'DRAW':
-        return this.executeDraw(effect as DrawEffect, context);
-        
-      case 'GHOST_FIRE':
-        return this.executeGhostFire(effect as GhostFireEffect, context);
-        
-      case 'SPELL_POWER':
-        return this.executeSpellPower(effect as SpellPowerEffect, context);
-        
-      case 'DAMAGE':
-        return this.executeDamage(effect as DamageEffect, context);
-        
-      case 'DISCARD':
-        return this.executeDiscard(effect as DiscardEffect, context);
-        
-      case 'ATTACK_BONUS':
-        return this.executeAttackBonus(effect as AttackBonusEffect, context);
-        
-      case 'CHOICE':
-        return this.executeChoice(effect as ChoiceEffect, context);
-        
-      case 'INTERFERE':
-        return this.executeInterfere(effect as InterfereEffect, context);
-        
-      default:
-        return [{
-          type: effect.type,
-          description: `未实现的效果: ${effect.type}`
-        }];
-    }
-  }
-  
-  // ============ 基础效果实现 ============
-  
-  /**
-   * 抓牌效果
-   */
-  private executeDraw(effect: DrawEffect, context: EffectContext): ExecutedEffect[] {
-    const player = context.sourcePlayer;
-    const count = effect.value + context.turnDrawBonus;
-    
-    // 实际抓牌逻辑由GameManager处理
-    // 这里只返回描述
-    return [{
-      type: 'DRAW',
-      value: count,
-      description: `抓 ${count} 张牌`
-    }];
-  }
-  
-  /**
-   * 鬼火效果
-   */
-  private executeGhostFire(effect: GhostFireEffect, context: EffectContext): ExecutedEffect[] {
-    const player = context.sourcePlayer;
-    const value = effect.value;
-    
-    // 限制最大值
-    const newValue = Math.min(player.ghostFire + value, player.maxGhostFire);
-    const actual = newValue - player.ghostFire;
-    
-    return [{
-      type: 'GHOST_FIRE',
-      value: actual,
-      description: `鬼火 ${actual >= 0 ? '+' : ''}${actual}`
-    }];
-  }
-  
-  /**
-   * 咒力效果
-   */
-  private executeSpellPower(effect: SpellPowerEffect, context: EffectContext): ExecutedEffect[] {
-    return [{
-      type: 'SPELL_POWER',
-      value: effect.value,
-      description: `咒力 +${effect.value}`
-    }];
-  }
-  
-  /**
-   * 伤害效果
-   */
-  private executeDamage(effect: DamageEffect, context: EffectContext): ExecutedEffect[] {
-    const damage = effect.value + context.turnDamageBonus;
-    
-    const result: ExecutedEffect = {
-      type: 'DAMAGE',
-      value: damage,
-      description: `造成 ${damage} 点伤害`
-    };
-    
-    if (effect.targetId) {
-      result.targetId = effect.targetId;
-    }
-    
-    return [result];
-  }
-  
-  /**
-   * 弃置效果
-   */
-  private executeDiscard(effect: DiscardEffect, context: EffectContext): ExecutedEffect[] {
-    return [{
-      type: 'DISCARD',
-      value: effect.value,
-      description: `弃置 ${effect.value} 张牌`
-    }];
-  }
-  
-  /**
-   * 伤害加成效果
-   */
-  private executeAttackBonus(effect: AttackBonusEffect, context: EffectContext): ExecutedEffect[] {
-    context.turnDamageBonus += effect.value;
-    
-    return [{
-      type: 'ATTACK_BONUS',
-      value: effect.value,
-      description: `伤害 +${effect.value}`
-    }];
-  }
-  
-  /**
-   * 选择效果
-   */
-  private async executeChoice(effect: ChoiceEffect, context: EffectContext): Promise<ExecutedEffect[]> {
-    if (!context.onChoice) {
-      // 没有选择回调，默认选第一个
-      const firstOption = effect.options[0];
-      if (firstOption) {
-        const result = await this.executeEffects(firstOption.effects, context);
-        return result.effects;
+
+      case 'DRAW': {
+        this.drawCards(player, effect.count);
+        break;
       }
-      return [];
+
+      case 'GHOST_FIRE': {
+        player.ghostFire = Math.max(0,
+          Math.min(player.ghostFire + effect.value, player.maxGhostFire)
+        );
+        break;
+      }
+
+      case 'DAMAGE': {
+        player.damage += effect.value;
+        break;
+      }
+
+      case 'DISCARD': {
+        const target = effect.target ?? 'SELF';
+        const targets = this.resolvePlayers(target, player, gameState);
+        for (const p of targets) {
+          if (effect.random) {
+            // 随机弃指定数量
+            for (let i = 0; i < effect.count && p.hand.length > 0; i++) {
+              const idx = Math.floor(Math.random() * p.hand.length);
+              const card = p.hand.splice(idx, 1)[0]!;
+              p.discard.push(card);
+            }
+          } else {
+            // 玩家自选（需要回调）
+            if (ctx.onSelectCards && p === player) {
+              const ids = await ctx.onSelectCards(p.hand, effect.count);
+              for (const id of ids) {
+                const idx = p.hand.findIndex(c => c.instanceId === id);
+                if (idx !== -1) {
+                  p.discard.push(p.hand.splice(idx, 1)[0]!);
+                }
+              }
+            } else {
+              // fallback: 随机弃（AI 或无回调场景）
+              for (let i = 0; i < effect.count && p.hand.length > 0; i++) {
+                const idx = Math.floor(Math.random() * p.hand.length);
+                p.discard.push(p.hand.splice(idx, 1)[0]!);
+              }
+            }
+          }
+        }
+        break;
+      }
+
+      case 'EXILE_HAND': {
+        if (ctx.onSelectCards) {
+          const ids = await ctx.onSelectCards(player.hand, effect.count);
+          for (const id of ids) {
+            const idx = player.hand.findIndex(c => c.instanceId === id);
+            if (idx !== -1) {
+              player.exiled.push(player.hand.splice(idx, 1)[0]!);
+            }
+          }
+        } else {
+          // fallback: 超度第一张
+          for (let i = 0; i < effect.count && player.hand.length > 0; i++) {
+            player.exiled.push(player.hand.splice(0, 1)[0]!);
+          }
+        }
+        break;
+      }
+
+      case 'GAIN_SPELL': {
+        const tierMap = { basic: '基础术式', medium: '中级符咒', advanced: '高级符咒' };
+        const spellName = tierMap[effect.tier];
+        const supply = gameState.field.spellSupply;
+        const key = effect.tier;
+        if (supply[key] && gameState.field.spellCounts[key] > 0) {
+          const template = supply[key]!;
+          player.discard.push({
+            instanceId: `spell_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            cardId: template.cardId,
+            cardType: 'spell',
+            name: spellName,
+            hp: template.hp,
+            maxHp: template.maxHp,
+            damage: template.damage,
+            charm: template.charm ?? 0,
+            image: template.image,
+          });
+          gameState.field.spellCounts[key]--;
+        }
+        break;
+      }
+
+      case 'GAIN_PENALTY': {
+        const targets = this.resolvePlayers(effect.target, player, gameState);
+        for (const p of targets) {
+          const pile = gameState.field.penaltyPile;
+          const penalty = pile.find(c =>
+            (effect.penaltyType === 'farmer' && c.name === '农夫') ||
+            (effect.penaltyType === 'warrior' && c.name === '武士')
+          );
+          if (penalty) {
+            pile.splice(pile.indexOf(penalty), 1);
+            p.discard.push({ ...penalty, instanceId: `pen_${Date.now()}` });
+          }
+        }
+        break;
+      }
+
+      case 'MARKER_ADD': {
+        const state = ctx.player.shikigamiState[0]; // 触发的式神状态由调用者指定
+        if (state) {
+          const cur = (state.markers[effect.markerKey] as number) || 0;
+          const max = effect.max ?? Infinity;
+          state.markers[effect.markerKey] = Math.min(cur + effect.count, max);
+        }
+        break;
+      }
+
+      case 'MARKER_REMOVE': {
+        const state = ctx.player.shikigamiState[0];
+        if (state) {
+          if (effect.count === 'ALL') {
+            delete state.markers[effect.markerKey];
+          } else {
+            const cur = (state.markers[effect.markerKey] as number) || 0;
+            const next = cur - effect.count;
+            if (next <= 0) delete state.markers[effect.markerKey];
+            else state.markers[effect.markerKey] = next;
+          }
+        }
+        break;
+      }
+
+      case 'KILL_YOKAI': {
+        // 玩家选择一个生命不高于maxHp的妖怪直接退治
+        const eligible = gameState.field.yokaiSlots
+          .map((c, i) => ({ card: c, idx: i }))
+          .filter(({ card }) => card !== null && card.hp <= effect.maxHp);
+
+        if (eligible.length === 0) break;
+
+        let targetIdx: number;
+        if (ctx.onSelectTarget) {
+          const id = await ctx.onSelectTarget(eligible.map(e => e.card!));
+          targetIdx = eligible.find(e => e.card!.instanceId === id)?.idx ?? eligible[0]!.idx;
+        } else {
+          targetIdx = eligible[0]!.idx;
+        }
+
+        const killed = gameState.field.yokaiSlots[targetIdx]!;
+        player.discard.push(killed);
+        player.totalCharm = [...player.deck, ...player.hand, ...player.discard, ...player.played]
+          .reduce((s, c) => s + (c.charm || 0), 0);
+        gameState.field.yokaiSlots[targetIdx] = null;
+        break;
+      }
+
+      case 'INTERFERE': {
+        const targets = gameState.players.filter(p =>
+          effect.target === 'OTHER_PLAYERS'
+            ? p.id !== player.id
+            : true
+        );
+        for (const target of targets) {
+          const subCtx: EffectContext = { ...ctx, player: target };
+          for (const sub of effect.subEffects) {
+            await this.executeAtom(sub, subCtx);
+          }
+        }
+        break;
+      }
     }
-    
+  }
+
+  // ============ 复合效果 ============
+
+  private async executeChoice(effect: ChoiceEffect, ctx: EffectContext): Promise<void> {
     const labels = effect.options.map(o => o.label);
-    const choice = await context.onChoice(labels);
-    const selected = effect.options[choice];
-    
-    if (selected) {
-      const result = await this.executeEffects(selected.effects, context);
-      return result.effects;
+    let chosen = 0;
+    if (ctx.onChoice) {
+      chosen = await ctx.onChoice(labels);
     }
-    
-    return [];
-  }
-  
-  /**
-   * 妨害效果
-   */
-  private async executeInterfere(effect: InterfereEffect, context: EffectContext): Promise<ExecutedEffect[]> {
-    const results: ExecutedEffect[] = [];
-    const { gameState, sourcePlayer } = context;
-    
-    // 获取目标玩家
-    const targetPlayers = gameState.players.filter(p => {
-      if (effect.target === 'OTHER_PLAYERS') {
-        return p.id !== sourcePlayer.id;
-      }
-      return true;
-    });
-    
-    // 对每个目标执行效果
-    for (const target of targetPlayers) {
-      const targetContext: EffectContext = {
-        ...context,
-        targetPlayer: target
-      };
-      
-      const result = await this.executeEffects(effect.subEffects, targetContext);
-      results.push(...result.effects.map(e => ({
-        ...e,
-        description: `[${target.name}] ${e.description}`
-      })));
+    const option = effect.options[chosen];
+    if (option) {
+      await this.execute(option.effects, ctx);
     }
-    
-    return results;
   }
-  
+
+  private async executeConditional(effect: ConditionalEffect, ctx: EffectContext): Promise<void> {
+    if (this.checkCondition(effect.condition, ctx)) {
+      await this.execute(effect.thenEffects, ctx);
+    } else if (effect.elseEffects) {
+      await this.execute(effect.elseEffects, ctx);
+    }
+  }
+
   // ============ 条件检查 ============
-  
-  /**
-   * 检查条件是否满足
-   */
-  checkCondition(condition: EffectCondition, context: EffectContext): boolean {
-    const actualValue = this.getConditionValue(condition.type, context);
-    const expectedValue = condition.value;
-    
-    switch (condition.operator) {
-      case '>': return actualValue > expectedValue;
-      case '<': return actualValue < expectedValue;
-      case '=': return actualValue === expectedValue;
-      case '>=': return actualValue >= expectedValue;
-      case '<=': return actualValue <= expectedValue;
-      case '!=': return actualValue !== expectedValue;
-      default: return false;
+
+  checkCondition(cond: EffectCondition, ctx: EffectContext): boolean {
+    const { player } = ctx;
+    let actual: number;
+
+    switch (cond.key) {
+      case 'CARDS_PLAYED_THIS_TURN':
+        actual = player.cardsPlayed; break;
+      case 'YOKAI_PLAYED_THIS_TURN':
+        actual = player.played.filter(c => c.cardType === 'yokai').length; break;
+      case 'SPELL_PLAYED_THIS_TURN':
+        actual = player.played.filter(c => c.cardType === 'spell').length; break;
+      case 'DISCARD_EMPTY':
+        actual = player.discard.length === 0 ? 1 : 0; break;
+      case 'HAND_COUNT':
+        actual = player.hand.length; break;
+      case 'GHOST_FIRE':
+        actual = player.ghostFire; break;
+      case 'MARKER_COUNT': {
+        const state = player.shikigamiState[0];
+        actual = (state?.markers[cond.markerKey ?? ''] as number) || 0;
+        break;
+      }
+      case 'IS_FIRST_CARD':
+        actual = player.cardsPlayed === 1 ? 1 : 0; break;
+      default:
+        actual = 0;
+    }
+
+    switch (cond.op) {
+      case '>':  return actual > cond.value;
+      case '<':  return actual < cond.value;
+      case '=':  return actual === cond.value;
+      case '>=': return actual >= cond.value;
+      case '<=': return actual <= cond.value;
+      case '!=': return actual !== cond.value;
+      default:   return false;
     }
   }
-  
-  /**
-   * 获取条件值
-   */
-  private getConditionValue(type: EffectCondition['type'], context: EffectContext): number | string {
-    const player = context.sourcePlayer;
-    
-    switch (type) {
-      case 'HAND_COUNT':
-        return player.hand.length;
-      case 'DECK_COUNT':
-        return player.deck.length;
-      case 'DISCARD_COUNT':
-        return player.discard.length;
-      case 'GHOST_FIRE':
-        return player.ghostFire;
-      case 'SPELL_POWER':
-        return player.spellPower;
-      case 'CARDS_PLAYED':
-        return player.cardsPlayed;
-      case 'SHIKIGAMI_COUNT':
-        return player.shikigami.length;
-      case 'FIRST_ATTACK':
-        return context.isFirstAttack ? 1 : 0;
-      case 'TARGET_HP':
-        return context.targetCard?.hp ?? 0;
-      case 'ALWAYS':
-        return 1;
-      default:
-        return 0;
+
+  // ============ 工具方法 ============
+
+  private drawCards(player: PlayerState, count: number): void {
+    for (let i = 0; i < count; i++) {
+      if (player.deck.length === 0) {
+        if (player.discard.length === 0) break;
+        player.deck = shuffle(player.discard);
+        player.discard = [];
+      }
+      const card = player.deck.pop();
+      if (card) player.hand.push(card);
+    }
+  }
+
+  private resolvePlayers(
+    target: 'SELF' | 'OTHER_PLAYERS' | 'ALL_PLAYERS',
+    self: PlayerState,
+    gameState: { players: PlayerState[] }
+  ): PlayerState[] {
+    switch (target) {
+      case 'SELF':          return [self];
+      case 'OTHER_PLAYERS': return gameState.players.filter(p => p.id !== self.id);
+      case 'ALL_PLAYERS':   return gameState.players;
     }
   }
 }
 
-// 导出单例
 export const effectEngine = new EffectEngine();

@@ -7,3 +7,4 @@
 export * from './types';
 export * from './EffectEngine';
 export * from './YokaiEffects';
+export * from './ShikigamiEffects';

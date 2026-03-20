@@ -16,6 +16,7 @@ import type {
   GameAction,
   ShikigamiState
 } from '../types/game';
+import { TempBuffManager } from './TempBuff';
 
 import type {
   CardInstance,
@@ -190,7 +191,8 @@ export class GameManager {
       cardsPlayed: 0,
       isConnected: true,
       isReady: false,
-      shikigamiState: []
+      shikigamiState: [],
+      tempBuffs: []
     };
     
     this.state.players.push(player);
@@ -269,6 +271,9 @@ export class GameManager {
     for (const state of player.shikigamiState) {
       state.isExhausted = false;
     }
+
+    // 清空上回合残余 tempBuff
+    player.tempBuffs = [];
     
     // 进入鬼火阶段
     this.enterGhostFirePhase();
@@ -429,12 +434,39 @@ export class GameManager {
     player.played.push(card);
     player.cardsPlayed++;
 
-    // 累加伤害
-    if (card.damage) {
-      player.damage += card.damage;
+    // 基础伤害
+    let damageToAdd = card.damage ?? 0;
+
+    // ── TempBuff 消费 ──────────────────────────────────────────────
+    const buffManager = new TempBuffManager(player.tempBuffs);
+
+    if (card.cardType === 'spell') {
+      // 阴阳术：叠加 spell 伤害 bonus（如山童【怪力】前2张+1）
+      damageToAdd += buffManager.consumeSpellDamageBonus();
     }
 
-    this.addLog('play_card', `${player.name} 打出了 ${card.name}（伤害+${card.damage || 0}）`, player.id);
+    if (card.cardType === 'yokai') {
+      // 御魂（妖怪效果牌）：检查双倍效果触发
+      const doubled = buffManager.consumeNextYokaiDouble();
+      if (doubled) {
+        damageToAdd *= 2;
+        this.addLog('buff', `${player.name} 的御魂效果触发双倍！`, player.id);
+      }
+    }
+
+    // 通用伤害 bonus（不区分类型，如狂骨【嗜血】）
+    damageToAdd += buffManager.consumeDamageBonus();
+
+    // 将消费后的 buff 列表写回
+    player.tempBuffs = buffManager.getBuffs();
+    // ───────────────────────────────────────────────────────────────
+
+    // 累加伤害
+    if (damageToAdd > 0) {
+      player.damage += damageToAdd;
+    }
+
+    this.addLog('play_card', `${player.name} 打出了 ${card.name}（伤害+${damageToAdd}）`, player.id);
     this.updateState();
 
     return true;
@@ -693,28 +725,43 @@ export class GameManager {
     const effect = shikigami.skill?.effect;
     if (!effect) return;
 
+    const buffManager = new TempBuffManager(player.tempBuffs);
+
     switch (effect) {
-      // 山童【怪力】：前2张阴阳术额外伤害+1
+      // 山童【怪力】：本回合前2张阴阳术伤害+1
       case 'bonus_spell_damage_2':
-        shikigamiState.markers['bonusSpellDamage'] = 2;
+        buffManager.addBuff({ type: 'SPELL_DAMAGE_BONUS', bonusPerSpell: 1, remainingCount: 2 });
         break;
 
-      // 白狼【冥想】：弃置N张手牌，伤害+N（由玩家打牌决定，标记激活状态）
+      // 白狼【冥想】：弃置N张手牌，伤害+N（标记激活状态，打牌时由 consumeDiscardForDamage 处理）
       case 'discard_for_damage':
-        shikigamiState.markers['discardForDamage'] = 1;
+        buffManager.addBuff({ type: 'DISCARD_FOR_DAMAGE', active: true });
         break;
 
-      // 书翁【万象之书】：鬼火-N伤害+N+1（cost已扣，补算effect部分）
+      // 书翁【万象之书】：鬼火-N伤害+N+1（cost已扣，此处直接加伤害）
       case 'variable_damage':
         if (shikigami.skill.usedCost !== undefined) {
           player.damage += shikigami.skill.usedCost + 1;
         }
         break;
 
+      // 狂骨【嗜血】：击杀妖怪后额外伤害+N（通过 killYokai 触发）
+      case 'damage_on_kill':
+        buffManager.addBuff({ type: 'DAMAGE_BONUS', bonus: shikigami.skill.bonusAmount ?? 1, remainingCount: 1 });
+        break;
+
+      // 茨木童子【鬼之力】：下一张御魂牌效果翻倍
+      case 'double_next_yokai':
+        buffManager.addBuff({ type: 'NEXT_YOKAI_DOUBLE' });
+        break;
+
       // 默认：无额外效果（框架已处理鬼火扣除和疲劳）
       default:
         break;
     }
+
+    // 写回 buff 列表
+    player.tempBuffs = buffManager.getBuffs();
   }
 
   // ============ 游戏结束 ============

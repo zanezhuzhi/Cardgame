@@ -5,6 +5,7 @@
  */
 
 import type { CardInstance, OnmyojiCard, ShikigamiCard, BossCard } from './cards';
+import type { TempBuff } from '../game/TempBuff';
 
 // ============ 游戏阶段 ============
 
@@ -51,6 +52,9 @@ export interface PlayerState {
   
   // 式神状态
   shikigamiState: ShikigamiState[];
+
+  // 回合临时增益（回合结束自动清空）
+  tempBuffs: TempBuff[];
 }
 
 export interface ShikigamiState {

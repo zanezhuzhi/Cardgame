@@ -196,13 +196,88 @@ describe('GameManager 游戏管理器', () => {
   });
 
   describe('🔴 退治妖怪', () => {
-    it.todo('伤害>=生命时退治成功');
+    let player: ReturnType<GameManager['getCurrentPlayer']>;
+    let yokaiCard: any;
 
-    it.todo('退治后妖怪进入弃牌堆');
+    beforeEach(() => {
+      game.addPlayer('p1', '玩家1');
+      game.addPlayer('p2', '玩家2');
+      const state = game.getState();
+      state.phase = 'playing';
+      game.startTurn();
+      game.confirmShikigamiPhase();
 
-    it.todo('退治后获得妖怪声誉');
+      player = game.getCurrentPlayer();
 
-    it.todo('回合中妖怪不刷新');
+      // 战场放一只2HP妖怪（声誉1）
+      yokaiCard = {
+        instanceId: 'yokai_test_01',
+        cardId: 'yokai_001',
+        cardType: 'yokai',
+        name: '赤舌',
+        hp: 2,
+        maxHp: 2,
+        charm: 1,
+        image: ''
+      };
+      state.field.yokaiSlots[0] = yokaiCard;
+      state.field.yokaiSlots[1] = null;
+
+      // 给玩家累积4点伤害
+      player.damage = 4;
+    });
+
+    it('伤害>=生命时妖怪HP降至0', () => {
+      game.handleAction('p1', { type: 'ATTACK', targetId: 'yokai_test_01', damage: 2 });
+
+      expect(yokaiCard.hp).toBe(0);
+    });
+
+    it('退治后妖怪槽位清空', () => {
+      const state = game.getState();
+
+      game.handleAction('p1', { type: 'ATTACK', targetId: 'yokai_test_01', damage: 2 });
+
+      // 槽位0应该变为null
+      expect(state.field.yokaiSlots[0]).toBeNull();
+    });
+
+    it('退治后妖怪进入玩家弃牌堆', () => {
+      game.handleAction('p1', { type: 'ATTACK', targetId: 'yokai_test_01', damage: 2 });
+
+      const inDiscard = player.discard.some(c => c.instanceId === 'yokai_test_01');
+      expect(inDiscard).toBe(true);
+    });
+
+    it('退治后玩家获得妖怪声誉', () => {
+      const charmBefore = player.totalCharm;
+
+      game.handleAction('p1', { type: 'ATTACK', targetId: 'yokai_test_01', damage: 2 });
+
+      expect(player.totalCharm).toBe(charmBefore + 1);
+    });
+
+    it('退治妖怪后totalCharm实时更新', () => {
+      expect(player.totalCharm).toBe(0);
+
+      game.handleAction('p1', { type: 'ATTACK', targetId: 'yokai_test_01', damage: 2 });
+
+      // 妖怪进入弃牌堆，声誉应该+1
+      expect(player.totalCharm).toBe(1);
+    });
+
+    it('回合中战场妖怪不自动刷新', () => {
+      const state = game.getState();
+      // 退治妖怪后，本回合不应补充新妖怪
+      state.field.yokaiDeck = [
+        { instanceId: 'yokai_new_01', cardId: 'yokai_002', cardType: 'yokai', name: '新妖怪', hp: 3, maxHp: 3, charm: 0, image: '' }
+      ];
+
+      game.handleAction('p1', { type: 'ATTACK', targetId: 'yokai_test_01', damage: 2 });
+
+      // 行动阶段不补充，槽位0仍为null
+      expect(state.field.yokaiSlots[0]).toBeNull();
+    });
   });
 
   describe('🔴 超度系统', () => {

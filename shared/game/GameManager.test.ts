@@ -153,12 +153,126 @@ describe('GameManager 游戏管理器', () => {
   });
 
   describe('🔴 游戏结束', () => {
-    it.todo('妖怪牌库耗尽时游戏结束');
+    let game: GameManager;
 
-    it.todo('所有鬼王被击败时游戏结束');
+    beforeEach(() => {
+      game = new GameManager('test_room', 4);
+      game.addPlayer('p1', '玩家1');
+      game.addPlayer('p2', '玩家2');
+    });
 
-    it.todo('声誉最高者获胜');
+    it('妖怪牌库耗尽且战场不足6张时游戏结束', () => {
+      const state = game.getState();
+      state.phase = 'playing';
+      
+      // 清空妖怪牌库
+      state.field.yokaiDeck = [];
+      // 战场只有5张（不足6张）
+      state.field.yokaiSlots = [null, null, null, null, null, null];
+      state.field.yokaiSlots[0] = { instanceId: 'y1', cardId: 'yokai_001', cardType: 'yokai', name: '测试妖怪', hp: 2, maxHp: 2, image: '' };
+      
+      // 触发检查
+      const isEnded = (game as any).checkGameEnd();
+      
+      expect(isEnded).toBe(true);
+    });
 
-    it.todo('声誉相同比较牌数');
+    it('所有鬼王被击败时游戏结束', () => {
+      const state = game.getState();
+      state.phase = 'playing';
+      
+      // 清空鬼王牌库和当前鬼王
+      state.field.bossDeck = [];
+      state.field.currentBoss = null;
+      
+      const isEnded = (game as any).checkGameEnd();
+      
+      expect(isEnded).toBe(true);
+    });
+
+    it('声誉最高者获胜', () => {
+      const state = game.getState();
+      state.phase = 'playing';
+      
+      // 给玩家1更多声誉
+      const p1 = state.players[0]!;
+      const p2 = state.players[1]!;
+      
+      p1.deck = [
+        { instanceId: 'c1', cardId: 'yokai_001', cardType: 'yokai', name: '高声誉妖怪', hp: 5, maxHp: 5, charm: 3, image: '' },
+        { instanceId: 'c2', cardId: 'yokai_002', cardType: 'yokai', name: '高声誉妖怪', hp: 5, maxHp: 5, charm: 3, image: '' },
+      ];
+      p2.deck = [
+        { instanceId: 'c3', cardId: 'yokai_003', cardType: 'yokai', name: '低声誉妖怪', hp: 2, maxHp: 2, charm: 1, image: '' },
+      ];
+      
+      // 触发游戏结束
+      (game as any).endGame();
+      
+      expect(state.phase).toBe('ended');
+      // 检查日志中包含玩家1获胜
+      const lastLog = state.log[state.log.length - 1];
+      expect(lastLog?.message).toContain('玩家1');
+      expect(lastLog?.message).toContain('获胜');
+    });
+
+    it('声誉相同时比较牌数，牌多者胜', () => {
+      const state = game.getState();
+      state.phase = 'playing';
+      
+      // 两个玩家相同声誉但不同牌数
+      const p1 = state.players[0]!;
+      const p2 = state.players[1]!;
+      
+      // 玩家1: 2张牌，总声誉2
+      p1.deck = [
+        { instanceId: 'c1', cardId: 'y1', cardType: 'yokai', name: '妖怪A', hp: 2, maxHp: 2, charm: 1, image: '' },
+        { instanceId: 'c2', cardId: 'y2', cardType: 'yokai', name: '妖怪B', hp: 2, maxHp: 2, charm: 1, image: '' },
+      ];
+      p1.hand = [];
+      p1.discard = [];
+      
+      // 玩家2: 1张牌，总声誉2
+      p2.deck = [
+        { instanceId: 'c3', cardId: 'y3', cardType: 'yokai', name: '妖怪C', hp: 3, maxHp: 3, charm: 2, image: '' },
+      ];
+      p2.hand = [];
+      p2.discard = [];
+      
+      // 触发游戏结束
+      (game as any).endGame();
+      
+      expect(state.phase).toBe('ended');
+      // 玩家1牌多，应该获胜
+      const lastLog = state.log[state.log.length - 1];
+      expect(lastLog?.message).toContain('玩家1');
+    });
+
+    it('声誉和牌数都相同时判为平局', () => {
+      const state = game.getState();
+      state.phase = 'playing';
+      
+      const p1 = state.players[0]!;
+      const p2 = state.players[1]!;
+      
+      // 完全相同：各1张牌，声誉都是2
+      p1.deck = [
+        { instanceId: 'c1', cardId: 'y1', cardType: 'yokai', name: '妖怪A', hp: 2, maxHp: 2, charm: 2, image: '' },
+      ];
+      p1.hand = [];
+      p1.discard = [];
+      
+      p2.deck = [
+        { instanceId: 'c2', cardId: 'y2', cardType: 'yokai', name: '妖怪B', hp: 2, maxHp: 2, charm: 2, image: '' },
+      ];
+      p2.hand = [];
+      p2.discard = [];
+      
+      (game as any).endGame();
+      
+      expect(state.phase).toBe('ended');
+      const lastLog = state.log[state.log.length - 1];
+      expect(lastLog?.message).toContain('平局');
+    });
   });
 });

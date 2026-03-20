@@ -591,24 +591,48 @@ export class GameManager {
     this.state.phase = 'ended';
     
     // 计算最终得分
-    const scores: Record<string, number> = {};
-    let winner = '';
-    let maxScore = -Infinity;
+    interface PlayerScore {
+      id: string;
+      name: string;
+      charm: number;
+      cardCount: number;
+    }
+    
+    const playerScores: PlayerScore[] = [];
     
     for (const player of this.state.players) {
-      // 计算牌库中所有卡的符咒值
+      // 计算牌库中所有卡的符咒值（声誉）
       const allCards = [...player.deck, ...player.hand, ...player.discard];
       const totalCharm = allCards.reduce((sum, card) => sum + (card.charm || 0), 0);
       
-      scores[player.id] = totalCharm;
-      
-      if (totalCharm > maxScore) {
-        maxScore = totalCharm;
-        winner = player.name;
-      }
+      playerScores.push({
+        id: player.id,
+        name: player.name,
+        charm: totalCharm,
+        cardCount: allCards.length
+      });
     }
     
-    this.addLog('game_end', `游戏结束！${winner} 获胜！`);
+    // 排序：优先声誉，相同则比较牌数
+    playerScores.sort((a, b) => {
+      if (b.charm !== a.charm) {
+        return b.charm - a.charm; // 声誉高者优先
+      }
+      return b.cardCount - a.cardCount; // 牌数多者优先
+    });
+    
+    const winner = playerScores[0];
+    const runnerUp = playerScores[1];
+    
+    // 检查是否平局
+    if (winner && runnerUp && 
+        winner.charm === runnerUp.charm && 
+        winner.cardCount === runnerUp.cardCount) {
+      this.addLog('game_end', `游戏结束！${winner.name} 和 ${runnerUp.name} 平局！`);
+    } else if (winner) {
+      this.addLog('game_end', `游戏结束！${winner.name} 获胜！（声誉:${winner.charm}，牌数:${winner.cardCount}）`);
+    }
+    
     this.updateState();
   }
 

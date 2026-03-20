@@ -24,7 +24,11 @@ export type AtomEffectType =
   | 'KILL_YOKAI'     // 直接退治指定妖怪（忽略HP）
   | 'HEAL_YOKAI'     // 恢复妖怪生命
   | 'SKIP_CLEANUP'   // 跳过清理阶段
-  | 'INTERFERE';     // 妨害（对其他玩家）
+  | 'INTERFERE'      // 妨害（对其他玩家）
+  | 'TEMP_BUFF'      // 添加临时增益（本回合有效）
+  | 'REDUCE_HP'      // 减少目标生命值
+  | 'RECOVER_FROM_DISCARD' // 从弃牌堆回收卡牌
+  | 'GAIN_SHIKIGAMI'; // 获取式神
 
 // ============ 效果定义 ============
 
@@ -94,6 +98,76 @@ export interface InterfereEffect extends BaseAtomEffect {
   target: 'OTHER_PLAYERS' | 'ALL_PLAYERS';
 }
 
+/** 临时增益效果 */
+export interface TempBuffEffect extends BaseAtomEffect {
+  type: 'TEMP_BUFF';
+  buffType: TempBuffType;
+  value: number;
+  duration?: number;  // 默认1回合
+  condition?: string; // 触发条件描述
+}
+
+export type TempBuffType =
+  | 'SPELL_DAMAGE_BONUS'     // 阴阳术伤害加成
+  | 'SKILL_DAMAGE_BONUS'     // 式神技能伤害加成
+  | 'YOKAI_KILL_BONUS'       // 退治妖怪奖励
+  | 'SKILL_COST_REDUCE'      // 式神技能费用减少
+  | 'FIRST_KILL_TO_HAND'     // 首次退治进入手牌
+  | 'DOUBLE_YOKAI_EFFECT'    // 御魂效果翻倍
+  | 'YOKAI_HP_REDUCE'        // 妖怪生命减少
+  | 'BOSS_HP_REDUCE';        // 鬼王生命减少
+
+/** 减少生命效果 */
+export interface ReduceHpEffect extends BaseAtomEffect {
+  type: 'REDUCE_HP';
+  target: 'YOKAI' | 'BOSS' | 'ALL';
+  value: number;
+}
+
+/** 从弃牌堆回收效果 */
+export interface RecoverFromDiscardEffect extends BaseAtomEffect {
+  type: 'RECOVER_FROM_DISCARD';
+  cardType?: 'spell' | 'yokai' | 'any';
+  count: number;
+}
+
+/** 获取式神效果 */
+export interface GainShikigamiEffect extends BaseAtomEffect {
+  type: 'GAIN_SHIKIGAMI';
+  exileThis?: boolean;  // 是否超度当前卡牌
+}
+
+/** 置顶效果 */
+export interface PutTopEffect extends BaseAtomEffect {
+  type: 'PUT_TOP';
+  count?: number;  // 默认1张
+}
+
+/** 置底效果 */
+export interface PutBottomEffect extends BaseAtomEffect {
+  type: 'PUT_BOTTOM';
+  count?: number;  // 默认1张
+}
+
+/** 展示牌库顶效果 */
+export interface RevealTopEffect extends BaseAtomEffect {
+  type: 'REVEAL_TOP';
+  count: number;
+  canExile?: boolean;  // 是否可以超度展示的牌
+}
+
+/** 跳过清理阶段效果 */
+export interface SkipCleanupEffect extends BaseAtomEffect {
+  type: 'SKIP_CLEANUP';
+}
+
+/** 治疗妖怪效果 */
+export interface HealYokaiEffect extends BaseAtomEffect {
+  type: 'HEAL_YOKAI';
+  value: number;
+  maxHp?: number;  // 只治疗生命不高于此值的妖怪
+}
+
 export type AtomEffect =
   | DrawEffect
   | GhostFireEffect
@@ -105,7 +179,16 @@ export type AtomEffect =
   | MarkerAddEffect
   | MarkerRemoveEffect
   | KillYokaiEffect
-  | InterfereEffect;
+  | InterfereEffect
+  | TempBuffEffect
+  | ReduceHpEffect
+  | RecoverFromDiscardEffect
+  | GainShikigamiEffect
+  | PutTopEffect
+  | PutBottomEffect
+  | RevealTopEffect
+  | SkipCleanupEffect
+  | HealYokaiEffect;
 
 // ============ 复合效果（条件/选择）============
 

@@ -95,6 +95,9 @@ export interface FieldState {
   // 游荡妖怪牌库
   yokaiDeck: CardInstance[];
   
+  // 式神供应堆（商店）
+  shikigamiSupply?: ShikigamiCard[];
+  
   // 公共超度区
   exileZone: CardInstance[];
 }

@@ -21,6 +21,12 @@ import type {
 // 导入卡牌数据（直接从JSON）
 import cardsData from '../../../shared/data/cards.json';
 
+// 导入效果引擎和效果定义
+import { effectEngine } from '../../../shared/game/effects/EffectEngine';
+import { YOKAI_EFFECT_DEFS, getYokaiEffectDef } from '../../../shared/game/effects/YokaiEffects';
+import { SHIKIGAMI_EFFECT_DEFS, getShikigamiEffectDefs } from '../../../shared/game/effects/ShikigamiEffects';
+import type { EffectContext, CardEffect, TempBuffType } from '../../../shared/game/effects/types';
+
 // ============ 常量 ============
 
 const GAME_CONSTANTS = {
@@ -57,6 +63,13 @@ export class SinglePlayerGame {
   private hasAllocatedDamage: boolean = false;  // 本回合是否已分配伤害
   private hasGainedBasicSpell: boolean = false; // 本回合是否已获得基础术式
   private killedYokaiThisTurn: boolean = false; // 本回合是否击杀了妖怪
+  private yokaiKilledCount: number = 0;         // 本回合击杀妖怪数量
+  private cardsDrawnThisTurn: number = 0;       // 本回合因效果抓牌数
+  
+  // UI交互回调（由外部设置）
+  public onChoiceRequired?: (options: string[]) => Promise<number>;
+  public onSelectTargetRequired?: (candidates: CardInstance[]) => Promise<string>;
+  public onSelectCardsRequired?: (candidates: CardInstance[], count: number) => Promise<string[]>;
 
   constructor(playerName: string, onStateChange: (state: GameState) => void) {
     this.onStateChange = onStateChange;
@@ -185,6 +198,9 @@ export class SinglePlayerGame {
       }
     }
 
+    // 创建式神供应堆（洗混后，移除已发给玩家的式神）
+    const allShikigami = shuffle([...cardsData.shikigami]) as ShikigamiCard[];
+
     return {
       yokaiSlots: [null, null, null, null, null, null],
       currentBoss: null,
@@ -192,7 +208,8 @@ export class SinglePlayerGame {
       bossDeck,
       penaltyPile: shuffle(penaltyPile),
       yokaiDeck: shuffle(yokaiDeck),
-      spellSupply  // 阴阳术供应堆
+      spellSupply,  // 阴阳术供应堆
+      shikigamiSupply: allShikigami  // 式神供应堆（商店）
     } as FieldState;
   }
 
@@ -224,6 +241,16 @@ export class SinglePlayerGame {
     // 填充战场（6张游荡妖怪）
     this.fillYokaiSlots();
     
+    // 从式神供应堆移除玩家已选的式神
+    const player = this.getPlayer();
+    const playerShikigamiIds = player.shikigami.map(s => s.id);
+    if (this.state.field.shikigamiSupply) {
+      this.state.field.shikigamiSupply = this.state.field.shikigamiSupply.filter(
+        s => !playerShikigamiIds.includes(s.id)
+      );
+      this.addLog(`📦 式神商店剩余：${this.state.field.shikigamiSupply.length}张`);
+    }
+    
     // 开始游戏
     this.state.phase = 'playing';
     this.state.turnNumber = 1;
@@ -239,6 +266,8 @@ export class SinglePlayerGame {
     this.hasAllocatedDamage = false;
     this.hasGainedBasicSpell = false;
     this.killedYokaiThisTurn = false;
+    this.yokaiKilledCount = 0;
+    this.cardsDrawnThisTurn = 0;
     
     // 清空上回合TempBuff
     player.tempBuffs = [];
@@ -297,46 +326,43 @@ export class SinglePlayerGame {
     this.enterShikigamiPhase();
   }
 
-  // ============ 阶段2：式神调整阶段 ============
+  // ============ 阶段2：行动阶段（含式神调整） ============
   
   private enterShikigamiPhase(): void {
-    this.state.turnPhase = 'shikigami';
-    
-    // 重置式神疲劳状态
-    const player = this.getPlayer();
-    for (const state of player.shikigamiState) {
-      state.isExhausted = false;
-    }
-    
-    this.notifyChange();
-    // 玩家可以在此阶段调整式神，然后手动确认进入行动阶段
+    // 直接进入行动阶段（式神调整合并到行动阶段）
+    this.enterActionPhase();
   }
 
-  /** 确认式神阶段，进入行动阶段 */
+  /** 确认式神阶段，进入行动阶段（保留兼容性） */
   confirmShikigamiPhase(): void {
     if (this.state.turnPhase !== 'shikigami') return;
     this.enterActionPhase();
   }
 
-  // ============ 阶段3：行动阶段 ============
+  // ============ 行动阶段 ============
   
   private enterActionPhase(): void {
     this.state.turnPhase = 'action';
     const player = this.getPlayer();
+    
+    // 重置式神疲劳状态
+    for (const state of player.shikigamiState) {
+      state.isExhausted = false;
+    }
     
     // 重置行动相关状态
     player.damage = 0;
     player.cardsPlayed = 0;
     player.played = [];
     
-    this.addLog(`⚔️ 进入行动阶段 - 打牌累积伤害，然后分配伤害退治妖怪`);
+    this.addLog(`⚔️ 进入行动阶段 - 打牌、技能、式神调整、分配伤害（可自由组合）`);
     this.notifyChange();
   }
 
   // ============ 玩家操作 ============
 
   /** 打出手牌 */
-  playCard(cardInstanceId: string): boolean {
+  async playCard(cardInstanceId: string): Promise<boolean> {
     if (this.state.turnPhase !== 'action') return false;
     
     const player = this.getPlayer();
@@ -347,37 +373,237 @@ export class SinglePlayerGame {
     player.played.push(card);
     player.cardsPlayed++;
 
+    // 检查是否有TempBuff影响伤害
+    const spellDamageBonus = this.getTempBuffValue('SPELL_DAMAGE_BONUS');
+    const spellBonusRemaining = this.getTempBuffRemaining('SPELL_DAMAGE_BONUS');
+
     // 根据卡牌类型产生效果
     if (card.cardType === 'spell') {
       // 阴阳术：累积伤害
-      const damageValue = card.damage || card.hp || 1;
+      let damageValue = card.damage || card.hp || 1;
+      
+      // 应用阴阳术伤害加成（如山童「怪力」）
+      if (spellBonusRemaining > 0) {
+        damageValue += spellDamageBonus;
+        this.consumeTempBuff('SPELL_DAMAGE_BONUS');
+        this.addLog(`📜 打出【${card.name}】，伤害+${card.damage || 1}+${spellDamageBonus}（怪力加成）`);
+      } else {
+        this.addLog(`📜 打出【${card.name}】，伤害+${damageValue}`);
+      }
+      
       player.damage += damageValue;
-      this.addLog(`📜 打出【${card.name}】，伤害+${damageValue}（总计:${player.damage}）`);
+      
     } else if (card.cardType === 'yokai') {
       // 妖怪卡（御魂）：触发御魂效果
-      if (card.damage) {
-        player.damage += card.damage;
-        this.addLog(`� 打出御魂【${card.name}】，伤害+${card.damage}（总计:${player.damage}）`);
-      } else {
-        this.addLog(`� 打出御魂【${card.name}】`);
+      this.addLog(`🎴 打出御魂【${card.name}】`);
+      
+      // 执行御魂效果
+      await this.executeYokaiEffect(card);
+      
+      // 检查轮入道效果（御魂效果翻倍）
+      if (this.hasTempBuff('DOUBLE_YOKAI_EFFECT')) {
+        this.addLog(`🔄 轮入道效果：再次执行御魂效果！`);
+        await this.executeYokaiEffect(card);
+        this.consumeTempBuff('DOUBLE_YOKAI_EFFECT');
       }
     }
 
+    this.addLog(`💥 当前伤害:${player.damage}`);
     this.notifyChange();
     return true;
   }
 
+  /** 执行妖怪御魂效果 */
+  private async executeYokaiEffect(card: CardInstance): Promise<void> {
+    const player = this.getPlayer();
+    
+    // 查找效果定义
+    const effectDef = YOKAI_EFFECT_DEFS.find(d => d.cardId === card.cardId);
+    
+    if (effectDef && effectDef.effects.length > 0) {
+      // 创建效果上下文
+      const ctx = this.createEffectContext(card);
+      
+      // 执行效果
+      await effectEngine.execute(effectDef.effects, ctx);
+      
+      this.addLog(`✨ 执行【${card.name}】的${effectDef.skillName || '御魂'}效果`);
+    } else {
+      // 没有定义的效果，使用默认逻辑（基于卡牌数据）
+      this.executeDefaultYokaiEffect(card);
+    }
+  }
+
+  /** 默认御魂效果（用于未定义的卡牌） */
+  private executeDefaultYokaiEffect(card: CardInstance): void {
+    const player = this.getPlayer();
+    
+    // 基础伤害
+    if (card.damage && card.damage > 0) {
+      player.damage += card.damage;
+      this.addLog(`⚔️ 伤害+${card.damage}`);
+    }
+  }
+
+  /** 创建效果执行上下文 */
+  private createEffectContext(sourceCard?: CardInstance): EffectContext {
+    return {
+      gameState: this.state,
+      player: this.getPlayer(),
+      sourceCard,
+      onChoice: this.onChoiceRequired,
+      onSelectTarget: this.onSelectTargetRequired,
+      onSelectCards: this.onSelectCardsRequired,
+    };
+  }
+
+  // ============ TempBuff 管理 ============
+
+  private getTempBuffValue(buffType: string): number {
+    const player = this.getPlayer();
+    const buff = player.tempBuffs.find(b => b.type === buffType) as any;
+    // 兼容多种buff结构
+    return buff?.value ?? buff?.bonus ?? buff?.bonusPerSpell ?? 0;
+  }
+
+  private getTempBuffRemaining(buffType: string): number {
+    const player = this.getPlayer();
+    const buff = player.tempBuffs.find(b => b.type === buffType) as any;
+    return buff?.remainingUses ?? buff?.remainingCount ?? 0;
+  }
+
+  private hasTempBuff(buffType: string): boolean {
+    const player = this.getPlayer();
+    return player.tempBuffs.some(b => {
+      if (b.type !== buffType) return false;
+      const anyBuff = b as any;
+      const remaining = anyBuff.remainingUses ?? anyBuff.remainingCount ?? 1;
+      return remaining > 0;
+    });
+  }
+
+  private consumeTempBuff(buffType: string): void {
+    const player = this.getPlayer();
+    const buff = player.tempBuffs.find(b => b.type === buffType) as any;
+    if (buff) {
+      // 支持不同的计数字段
+      if (buff.remainingUses !== undefined) {
+        buff.remainingUses--;
+        if (buff.remainingUses <= 0) {
+          const idx = player.tempBuffs.indexOf(buff);
+          if (idx !== -1) player.tempBuffs.splice(idx, 1);
+        }
+      } else if (buff.remainingCount !== undefined) {
+        buff.remainingCount--;
+        if (buff.remainingCount <= 0) {
+          const idx = player.tempBuffs.indexOf(buff);
+          if (idx !== -1) player.tempBuffs.splice(idx, 1);
+        }
+      } else {
+        // 一次性buff，直接移除
+        const idx = player.tempBuffs.indexOf(buff);
+        if (idx !== -1) player.tempBuffs.splice(idx, 1);
+      }
+    }
+  }
+
+  private addTempBuff(buffType: string, value: number, uses: number = 1): void {
+    const player = this.getPlayer();
+    // 使用简化的buff格式，兼容TempBuff类型
+    player.tempBuffs.push({
+      type: buffType as any,
+      value,
+      remainingUses: uses,
+    } as any);
+  }
+
+  private getTempBuffByType(buffType: string): any {
+    const player = this.getPlayer();
+    return player.tempBuffs.find(b => b.type === buffType);
+  }
+
   /** 使用式神技能 */
-  useShikigamiSkill(shikigamiId: string): boolean {
+  async useShikigamiSkill(shikigamiId: string, skillName?: string): Promise<boolean> {
     if (this.state.turnPhase !== 'action') return false;
     
     const player = this.getPlayer();
     const shikigami = player.shikigami.find(s => s.id === shikigamiId);
-    const state = player.shikigamiState.find(s => s.cardId === shikigamiId);
+    const shikigamiState = player.shikigamiState.find(s => s.cardId === shikigamiId);
     
-    if (!shikigami || !state) return false;
-    if (state.isExhausted) {
+    if (!shikigami || !shikigamiState) return false;
+    
+    // 获取技能定义
+    const effectDefs = SHIKIGAMI_EFFECT_DEFS.filter(d => d.cardId === shikigamiId);
+    const skillDef = skillName 
+      ? effectDefs.find(d => d.skillName === skillName)
+      : effectDefs.find(d => d.effectType === '启');  // 默认使用主动技
+    
+    if (!skillDef) {
+      // 没有效果定义，使用旧逻辑
+      return this.useShikigamiSkillLegacy(shikigamiId, shikigamiState);
+    }
+    
+    // 检查疲劳状态
+    if (shikigamiState.isExhausted && skillDef.effectType === '启') {
       this.addLog(`❌ ${shikigami.name} 已疲劳，本回合无法再次使用`);
+      this.notifyChange();
+      return false;
+    }
+    
+    // 检查鬼火消耗
+    const cost = skillDef.cost?.ghostFire || 0;
+    
+    // 检查是否有技能费用减少buff（如涅槃之火）
+    const costReduction = this.getTempBuffValue('SKILL_COST_REDUCE');
+    const actualCost = Math.max(0, cost - costReduction);
+    
+    if (player.ghostFire < actualCost) {
+      this.addLog(`❌ 鬼火不足！需要 ${actualCost}，当前 ${player.ghostFire}`);
+      this.notifyChange();
+      return false;
+    }
+    
+    // 消耗鬼火
+    player.ghostFire -= actualCost;
+    
+    // 如果是主动技，标记疲劳
+    if (skillDef.effectType === '启') {
+      shikigamiState.isExhausted = true;
+    }
+    
+    this.addLog(`🦊 ${shikigami.name} 发动【${skillDef.skillName}】`);
+    
+    // 创建效果上下文
+    const ctx = this.createEffectContext();
+    
+    // 执行技能效果
+    if (skillDef.effects.length > 0) {
+      await effectEngine.execute(skillDef.effects, ctx);
+    }
+    
+    // 检查是否有式神技能伤害加成（如针女御魂）
+    const skillDamageBonus = this.getTempBuffValue('SKILL_DAMAGE_BONUS');
+    if (skillDamageBonus > 0) {
+      player.damage += skillDamageBonus;
+      this.addLog(`💥 针女加成：伤害+${skillDamageBonus}`);
+    }
+    
+    // 特殊技能处理（需要额外逻辑的）
+    await this.handleSpecialShikigamiSkill(shikigamiId, skillDef.skillName || '');
+    
+    this.addLog(`💥 当前伤害:${player.damage}`);
+    this.notifyChange();
+    return true;
+  }
+
+  /** 旧版式神技能（兼容） */
+  private useShikigamiSkillLegacy(shikigamiId: string, state: any): boolean {
+    const player = this.getPlayer();
+    const shikigami = player.shikigami.find(s => s.id === shikigamiId);
+    if (!shikigami) return false;
+    
+    if (state.isExhausted) {
+      this.addLog(`❌ ${shikigami.name} 已疲劳`);
       this.notifyChange();
       return false;
     }
@@ -389,17 +615,55 @@ export class SinglePlayerGame {
       return false;
     }
     
-    // 消耗鬼火
     player.ghostFire -= cost;
     state.isExhausted = true;
     
-    // 简化的技能效果（根据技能名称产生伤害）
     const skillDamage = shikigami.skill?.damage || 2;
     player.damage += skillDamage;
     
-    this.addLog(`🦊 ${shikigami.name} 发动【${shikigami.skill?.name}】，伤害+${skillDamage}（总计:${player.damage}）`);
+    this.addLog(`🦊 ${shikigami.name} 发动【${shikigami.skill?.name}】，伤害+${skillDamage}`);
     this.notifyChange();
     return true;
+  }
+
+  /** 处理特殊式神技能逻辑 */
+  private async handleSpecialShikigamiSkill(shikigamiId: string, skillName: string): Promise<void> {
+    const player = this.getPlayer();
+    
+    switch (shikigamiId) {
+      // 山童「怪力」- 本回合前2张阴阳术+1伤害
+      case 'shikigami_022':
+        if (skillName === '怪力') {
+          this.addTempBuff('SPELL_DAMAGE_BONUS', 1, 2);
+          this.addLog(`💪 怪力：接下来2张阴阳术伤害+1`);
+        }
+        break;
+        
+      // 茨木童子「迁怒」- 每退治/超度妖怪+2伤害
+      case 'shikigami_004':
+        if (skillName === '迁怒') {
+          this.addTempBuff('YOKAI_KILL_BONUS', 2, 99);
+          this.addLog(`👹 迁怒：本回合每退治/超度妖怪+2伤害`);
+        }
+        break;
+        
+      // 涅槃之火御魂效果 - 式神技能费用-1
+      // 注：这个应该在御魂效果中处理，这里仅作示例
+        
+      // 轮入道 - 下一张御魂效果翻倍
+      case 'yokai_020':
+        this.addTempBuff('DOUBLE_YOKAI_EFFECT', 1, 1);
+        this.addLog(`🔄 轮入道：下一张御魂效果将执行两次`);
+        break;
+        
+      // 鬼使白「魂狩」- 首次退治生命≤6妖怪可进入手牌
+      case 'shikigami_009':
+        if (skillName === '魂狩') {
+          this.addTempBuff('FIRST_KILL_TO_HAND', 6, 1);
+          this.addLog(`👻 魂狩：本回合首次退治生命≤6妖怪可置入手牌`);
+        }
+        break;
+    }
   }
 
   /** 每回合免费获得1张基础术式 */
@@ -497,10 +761,28 @@ export class SinglePlayerGame {
 
     // 标记本回合击杀了妖怪
     this.killedYokaiThisTurn = true;
+    this.yokaiKilledCount++;
 
-    // 妖怪进入弃牌堆（成为御魂）
-    player.discard.push(yokai);
+    // 检查「魂狩」效果：首次退治生命≤6妖怪可进入手牌
+    const firstKillToHandBuff = player.tempBuffs.find(b => b.type === 'FIRST_KILL_TO_HAND');
+    if (firstKillToHandBuff && yokai.hp <= (firstKillToHandBuff.value || 6) && this.yokaiKilledCount === 1) {
+      // 进入手牌而非弃牌堆
+      player.hand.push(yokai);
+      this.consumeTempBuff('FIRST_KILL_TO_HAND');
+      this.addLog(`👻 魂狩效果：【${yokai.name}】进入手牌！`);
+    } else {
+      // 妖怪进入弃牌堆（成为御魂）
+      player.discard.push(yokai);
+    }
+    
     this.state.field.yokaiSlots[slotIndex] = null;
+
+    // 检查「迁怒」效果：每退治妖怪+伤害
+    const yokaiKillBonus = this.getTempBuffValue('YOKAI_KILL_BONUS');
+    if (yokaiKillBonus > 0) {
+      player.damage += yokaiKillBonus;
+      this.addLog(`👹 迁怒加成：伤害+${yokaiKillBonus}`);
+    }
 
     // 更新声誉
     if (yokai.charm) {
@@ -508,6 +790,9 @@ export class SinglePlayerGame {
     }
 
     this.addLog(`✨ 退治了【${yokai.name}】！声誉+${yokai.charm || 0}`);
+    
+    // 检查「鲤鱼精」被动效果：首次退治可放牌库顶
+    // 这需要UI确认，暂时跳过
   }
 
   private defeatBoss(): void {
@@ -675,5 +960,267 @@ export class SinglePlayerGame {
   
   getCurrentDamage(): number {
     return this.getPlayer().damage;
+  }
+
+  // ============ 式神获取与置换系统 ============
+
+  /** 计算手牌中阴阳术卡的总伤害值 */
+  getSpellDamageInHand(): number {
+    const player = this.getPlayer();
+    return player.hand
+      .filter(c => c.cardType === 'spell')
+      .reduce((sum, c) => sum + (c.damage || c.hp || 1), 0);
+  }
+
+  /** 获取手牌中的阴阳术卡 */
+  getSpellCardsInHand(): CardInstance[] {
+    const player = this.getPlayer();
+    return player.hand.filter(c => c.cardType === 'spell');
+  }
+
+  /** 检查卡牌是否为高级符咒（高级符咒或专属符咒，伤害=3） */
+  private isAdvancedSpell(card: CardInstance): boolean {
+    const name = card.name || '';
+    // 高级符咒、专属符咒都算高级
+    return name === '高级符咒' || name.includes('专属') || (card.damage === 3 && card.cardType === 'spell');
+  }
+
+  /** 检查手牌中是否有高级符咒 */
+  hasAdvancedSpellInHand(): boolean {
+    const player = this.getPlayer();
+    return player.hand.some(c => c.cardType === 'spell' && this.isAdvancedSpell(c));
+  }
+
+  /** 检查是否可以获取式神（式神<3，有高级符咒，总伤害≥5点） */
+  canAcquireShikigami(): boolean {
+    if (this.state.turnPhase !== 'action') return false;
+    const player = this.getPlayer();
+    if (player.shikigami.length >= GAME_CONSTANTS.MAX_SHIKIGAMI) return false;
+    if (!this.state.field.shikigamiSupply || this.state.field.shikigamiSupply.length === 0) return false;
+    
+    // 必须有高级符咒
+    if (!this.hasAdvancedSpellInHand()) return false;
+    
+    // 总伤害必须≥5点
+    if (this.getSpellDamageInHand() < 5) return false;
+    
+    return true;
+  }
+
+  /** 检查是否可以置换式神（式神=3，有1张高级符咒） */
+  canReplaceShikigami(): boolean {
+    if (this.state.turnPhase !== 'action') return false;
+    const player = this.getPlayer();
+    if (player.shikigami.length !== GAME_CONSTANTS.MAX_SHIKIGAMI) return false;
+    if (!this.state.field.shikigamiSupply || this.state.field.shikigamiSupply.length === 0) return false;
+    
+    // 必须有高级符咒
+    return this.hasAdvancedSpellInHand();
+  }
+
+  /** 获取式神（需要恰好5点伤害，含高级符咒） */
+  async acquireShikigami(spellInstanceIds: string[]): Promise<boolean> {
+    if (!this.canAcquireShikigami()) {
+      this.addLog(`❌ 无法获取式神`);
+      return false;
+    }
+
+    const player = this.getPlayer();
+    
+    // 验证选中的卡牌
+    const selectedSpells = spellInstanceIds
+      .map(id => player.hand.find(c => c.instanceId === id))
+      .filter((c): c is CardInstance => c !== undefined && c.cardType === 'spell');
+    
+    const totalDamage = selectedSpells.reduce((sum, c) => sum + (c.damage || c.hp || 1), 0);
+    
+    // 必须≥5点
+    if (totalDamage < 5) {
+      this.addLog(`❌ 符咒伤害必须≥5点（当前${totalDamage}点）`);
+      return false;
+    }
+    
+    // 必须包含高级符咒
+    if (!selectedSpells.some(c => this.isAdvancedSpell(c))) {
+      this.addLog(`❌ 必须包含至少1张高级符咒`);
+      return false;
+    }
+
+    // 将选中的卡牌移入超度区
+    for (const spell of selectedSpells) {
+      const idx = player.hand.findIndex(c => c.instanceId === spell.instanceId);
+      if (idx !== -1) {
+        player.hand.splice(idx, 1);
+        player.exiled.push(spell);
+      }
+    }
+    this.addLog(`📿 超度 ${selectedSpells.map(s => s.name).join('、')}（共${totalDamage}点伤害）`);
+
+    // 从式神供应堆抽取2张
+    const supply = this.state.field.shikigamiSupply!;
+    const drawnShikigami = supply.splice(0, Math.min(2, supply.length));
+    
+    if (drawnShikigami.length === 0) {
+      this.addLog(`❌ 式神供应堆已空`);
+      return false;
+    }
+
+    // 让玩家选择1张
+    let selectedIndex = 0;
+    if (drawnShikigami.length > 1 && this.onChoiceRequired) {
+      const options = drawnShikigami.map(s => `${s.name}（${s.rarity}）`);
+      selectedIndex = await this.onChoiceRequired(options);
+    }
+
+    const selectedShikigami = drawnShikigami[selectedIndex]!;
+    const notSelected = drawnShikigami.filter((_, i) => i !== selectedIndex);
+
+    // 将选中的式神加入玩家式神区
+    player.shikigami.push(selectedShikigami);
+    player.shikigamiState.push({
+      cardId: selectedShikigami.id,
+      isExhausted: false,
+      markers: {}
+    });
+
+    // 将未选中的放回供应堆底部
+    supply.push(...notSelected);
+
+    this.addLog(`🦊 获得式神【${selectedShikigami.name}】！（${selectedShikigami.rarity}）`);
+    this.addLog(`📋 当前式神数量：${player.shikigami.length}/${GAME_CONSTANTS.MAX_SHIKIGAMI}`);
+    
+    this.notifyChange();
+    return true;
+  }
+
+  /** 置换式神（需要1张高级符咒=3点） */
+  async replaceShikigami(spellInstanceIds: string[], oldShikigamiId: string): Promise<boolean> {
+    if (!this.canReplaceShikigami()) {
+      this.addLog(`❌ 无法置换式神`);
+      return false;
+    }
+
+    const player = this.getPlayer();
+
+    // 验证选中的卡牌（必须是1张高级符咒）
+    const selectedSpells = spellInstanceIds
+      .map(id => player.hand.find(c => c.instanceId === id))
+      .filter((c): c is CardInstance => c !== undefined && c.cardType === 'spell');
+    
+    // 必须恰好选择1张
+    if (selectedSpells.length !== 1) {
+      this.addLog(`❌ 置换需要恰好选择1张高级符咒`);
+      return false;
+    }
+    
+    // 必须是高级符咒
+    if (!this.isAdvancedSpell(selectedSpells[0]!)) {
+      this.addLog(`❌ 置换需要1张高级符咒或专属符咒`);
+      return false;
+    }
+
+    // 验证要替换的式神
+    const oldShikigamiIndex = player.shikigami.findIndex(s => s.id === oldShikigamiId);
+    if (oldShikigamiIndex === -1) {
+      this.addLog(`❌ 未找到要替换的式神`);
+      return false;
+    }
+    const oldShikigami = player.shikigami[oldShikigamiIndex]!;
+
+    // 将选中的卡牌移入超度区
+    for (const spell of selectedSpells) {
+      const idx = player.hand.findIndex(c => c.instanceId === spell.instanceId);
+      if (idx !== -1) {
+        player.hand.splice(idx, 1);
+        player.exiled.push(spell);
+      }
+    }
+    this.addLog(`📿 超度 ${selectedSpells.map(s => s.name).join('、')}（共${totalDamage}点伤害）`);
+
+    // 将旧式神放回供应堆底部
+    const supply = this.state.field.shikigamiSupply!;
+    supply.push(oldShikigami);
+    this.addLog(`↩️ ${oldShikigami.name} 返回式神供应堆`);
+
+    // 从供应堆抽取2张
+    const drawnShikigami = supply.splice(0, Math.min(2, supply.length));
+    
+    if (drawnShikigami.length === 0) {
+      this.addLog(`❌ 式神供应堆已空`);
+      return false;
+    }
+
+    // 让玩家选择1张
+    let selectedIndex = 0;
+    if (drawnShikigami.length > 1 && this.onChoiceRequired) {
+      const options = drawnShikigami.map(s => `${s.name}（${s.rarity}）`);
+      selectedIndex = await this.onChoiceRequired(options);
+    }
+
+    const selectedShikigami = drawnShikigami[selectedIndex]!;
+    const notSelected = drawnShikigami.filter((_, i) => i !== selectedIndex);
+
+    // 替换式神
+    player.shikigami[oldShikigamiIndex] = selectedShikigami;
+    player.shikigamiState[oldShikigamiIndex] = {
+      cardId: selectedShikigami.id,
+      isExhausted: false,
+      markers: {}
+    };
+
+    // 将未选中的放回供应堆底部
+    supply.push(...notSelected);
+
+    this.addLog(`🔄 置换式神：${oldShikigami.name} → ${selectedShikigami.name}（${selectedShikigami.rarity}）`);
+    
+    this.notifyChange();
+    return true;
+  }
+
+  /** 通过地藏像获取式神（免费，不消耗阴阳术） */
+  async acquireShikigamiFromJizo(): Promise<boolean> {
+    const player = this.getPlayer();
+    
+    // 检查式神上限
+    if (player.shikigami.length >= GAME_CONSTANTS.MAX_SHIKIGAMI) {
+      this.addLog(`❌ 已达式神上限（${GAME_CONSTANTS.MAX_SHIKIGAMI}个）`);
+      return false;
+    }
+
+    const supply = this.state.field.shikigamiSupply;
+    if (!supply || supply.length === 0) {
+      this.addLog(`❌ 式神供应堆已空`);
+      return false;
+    }
+
+    // 从式神供应堆抽取2张
+    const drawnShikigami = supply.splice(0, Math.min(2, supply.length));
+
+    // 让玩家选择1张
+    let selectedIndex = 0;
+    if (drawnShikigami.length > 1 && this.onChoiceRequired) {
+      const options = drawnShikigami.map(s => `${s.name}（${s.rarity}）`);
+      selectedIndex = await this.onChoiceRequired(options);
+    }
+
+    const selectedShikigami = drawnShikigami[selectedIndex]!;
+    const notSelected = drawnShikigami.filter((_, i) => i !== selectedIndex);
+
+    // 将选中的式神加入玩家式神区
+    player.shikigami.push(selectedShikigami);
+    player.shikigamiState.push({
+      cardId: selectedShikigami.id,
+      isExhausted: false,
+      markers: {}
+    });
+
+    // 将未选中的放回供应堆底部
+    supply.push(...notSelected);
+
+    this.addLog(`🗿 地藏像效果：获得式神【${selectedShikigami.name}】！`);
+    this.addLog(`📋 当前式神数量：${player.shikigami.length}/${GAME_CONSTANTS.MAX_SHIKIGAMI}`);
+    
+    this.notifyChange();
+    return true;
   }
 }

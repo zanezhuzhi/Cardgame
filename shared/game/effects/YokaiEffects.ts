@@ -1,533 +1,850 @@
 /**
- * 御魂传说 - 游荡妖怪效果数据 v2
- * @file shared/game/effects/YokaiEffects.ts
- *
- * 39 张游荡妖怪的效果定义，使用 CardEffectDef 结构
- * 数据来源：202005_阴阳师+桌游+游戏反馈.xlsx「妖怪」sheet
+ * 妖怪御魂效果处理器
+ * 实现38种妖怪的御魂效果
  */
 
-import type { CardEffectDef } from './types';
+import { CardInstance, PlayerState, GameState } from '../../types';
 
-export const YOKAI_EFFECT_DEFS: CardEffectDef[] = [
-
-  // ===== 2 费妖怪 =====
-
-  // 赤舌 - 妨害：所有对手将牌库顶1张置于弃牌堆（恶评牌放顶）
-  {
-    cardId: 'yokai_001',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '赤舌诅咒',
-    effects: [{
-      type: 'INTERFERE',
-      target: 'OTHER_PLAYERS',
-      subEffects: [{ type: 'DISCARD', count: 1, random: true }]
-    }],
-    description: '【妨害】所有对手弃置牌库顶1张牌',
-  },
-
-  // 唐纸伞妖 - 伤害+1，展示自己牌库顶1张
-  {
-    cardId: 'yokai_002',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '伞下窥视',
-    effects: [
-      { type: 'DAMAGE', value: 1 },
-      { type: 'REVEAL_TOP' } as any, // REVEAL_TOP 不消耗只展示
-    ],
-    description: '伤害+1，展示牌库顶1张牌',
-  },
-
-  // 天邪鬼绿 - 直接退治生命≤4的妖怪
-  {
-    cardId: 'yokai_003',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '绿魔之力',
-    effects: [{ type: 'KILL_YOKAI', maxHp: 4 }],
-    description: '直接退治1个生命值不高于4的游荡妖怪',
-  },
-
-  // 天邪鬼青 - 抓牌+1 或 鬼火+1（二选一）
-  {
-    cardId: 'yokai_004',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '青魔赐福',
-    effects: [{
-      type: 'CHOICE',
-      options: [
-        { label: '抓牌+1', effects: [{ type: 'DRAW', count: 1 }] },
-        { label: '鬼火+1', effects: [{ type: 'GHOST_FIRE', value: 1 }] },
-      ]
-    }],
-    description: '选择：抓牌+1 或 鬼火+1',
-  },
-
-  // 天邪鬼赤 - 伤害+1，弃置任意手牌后抓等量
-  {
-    cardId: 'yokai_005',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '赤魔换牌',
-    effects: [
-      { type: 'DAMAGE', value: 1 },
-      // 弃置任意数量然后抓等量——此为特殊逻辑，DISCARD count=0 表示"玩家自选任意数量"
-      // 后续 EffectEngine 需专门处理 count=0 为"玩家决定数量"
-      { type: 'DISCARD', count: 0, target: 'SELF' },
-    ],
-    description: '伤害+1，弃置任意张手牌后抓等量牌',
-  },
-
-  // 天邪鬼黄 - 抓牌+2，将1张手牌置于牌库顶
-  {
-    cardId: 'yokai_006',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '黄魔布局',
-    effects: [
-      { type: 'DRAW', count: 2 },
-      { type: 'PUT_TOP' } as any,
-    ],
-    description: '抓牌+2，然后将1张手牌置于牌库顶',
-  },
-
-  // ===== 3 费妖怪 =====
-
-  // 钟灵 - 抓牌+2，所有玩家交换手牌（顺时针各传1张）
-  {
-    cardId: 'yokai_007',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '钟声轮转',
-    effects: [
-      { type: 'DRAW', count: 2 },
-      // 交换手牌是多玩家联动，标记为 CUSTOM 由 GameManager 处理
-      { type: 'INTERFERE', target: 'ALL_PLAYERS', subEffects: [] },
-    ],
-    description: '抓牌+2，然后所有玩家顺时针各传递1张手牌',
-  },
-
-  // 魅妖 - 使用（打出）1名对手牌库顶的牌（效果照常）
-  {
-    cardId: 'yokai_008',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '魅惑窃牌',
-    effects: [], // 特殊处理：从对手库顶拿1张使用
-    description: '打出1名对手牌库顶的牌，效果照常结算',
-  },
-
-  // 被服 - 鬼火+1，展示牌库直到合计鬼火≥X
-  {
-    cardId: 'yokai_009',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '被服覆盖',
-    effects: [
-      { type: 'GHOST_FIRE', value: 1 },
-      // 特殊展示效果，暂留 REVEAL_TOP 作占位
-    ],
-    description: '鬼火+1，展示牌库直到累计鬼火值等于当前鬼火数',
-  },
-
-  // 树妖 - 进入手牌时抓牌+2，打出时抓牌+1
-  {
-    cardId: 'yokai_010',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '木灵庇护',
-    effects: [{ type: 'DRAW', count: 1 }],
-    description: '抓牌+1（被弃置进手牌时改为抓牌+2）',
-  },
-
-  // 日女巳时 - 三选一：抓牌+2 / 鬼火+2 / 伤害+2
-  {
-    cardId: 'yokai_011',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '巳时祝福',
-    effects: [{
-      type: 'CHOICE',
-      options: [
-        { label: '抓牌+2', effects: [{ type: 'DRAW', count: 2 }] },
-        { label: '鬼火+2', effects: [{ type: 'GHOST_FIRE', value: 2 }] },
-        { label: '伤害+2', effects: [{ type: 'DAMAGE', value: 2 }] },
-      ]
-    }],
-    description: '选择一项：抓牌+2 / 鬼火+2 / 伤害+2',
-  },
-
-  // 蚌精 - 抓牌+1（游戏结束每有此牌得1声誉，声誉已含）
-  {
-    cardId: 'yokai_012',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '珍珠心愿',
-    effects: [{ type: 'DRAW', count: 1 }],
-    description: '抓牌+1',
-  },
-
-  // 鸣屋 - 若弃牌堆为空则伤害+4，否则伤害+2
-  {
-    cardId: 'yokai_013',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '空屋鸣响',
-    effects: [{
-      type: 'CONDITIONAL',
-      condition: { key: 'DISCARD_EMPTY', op: '=', value: 1 },
-      thenEffects: [{ type: 'DAMAGE', value: 4 }],
-      elseEffects: [{ type: 'DAMAGE', value: 2 }],
-    }],
-    description: '若自己弃牌堆为空：伤害+4，否则伤害+2',
-  },
-
-  // 蝶翼 - 伤害+1，抓牌+1
-  {
-    cardId: 'yokai_014',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '翼展夜巡',
-    effects: [
-      { type: 'DAMAGE', value: 1 },
-      { type: 'DRAW', count: 1 },
-    ],
-    description: '伤害+1，抓牌+1',
-  },
-
-  // 兵主部 - 伤害+2
-  {
-    cardId: 'yokai_015',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '百鬼统领',
-    effects: [{ type: 'DAMAGE', value: 2 }],
-    description: '伤害+2',
-  },
-
-  // ===== 4 费妖怪 =====
-
-  // 魍魉之匣 - 抓牌+1，伤害+1，【妨害】所有玩家弃牌库顶1张
-  {
-    cardId: 'yokai_016',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '匣中混沌',
-    effects: [
-      { type: 'DRAW', count: 1 },
-      { type: 'DAMAGE', value: 1 },
-      {
-        type: 'INTERFERE',
-        target: 'ALL_PLAYERS',
-        subEffects: [{ type: 'DISCARD', count: 1, random: true }]
-      },
-    ],
-    description: '抓牌+1，伤害+1，【妨害】所有玩家弃牌库顶1张',
-  },
-
-  // 骰子鬼 - 超度1张手牌，退治等生命的妖怪
-  {
-    cardId: 'yokai_017',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '骰命轮回',
-    effects: [
-      { type: 'EXILE_HAND', count: 1 },
-      // KILL_YOKAI 的 maxHp 等于被超度牌的 HP，由 GameManager 动态传入
-    ],
-    description: '超度1张手牌，退治生命值等于该牌生命的游荡妖怪',
-  },
-
-  // 涅槃之火 - 鬼火+1；若本回合打出过御魂，再+1
-  {
-    cardId: 'yokai_018',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '涅槃重燃',
-    effects: [
-      { type: 'GHOST_FIRE', value: 1 },
-      {
-        type: 'CONDITIONAL',
-        condition: { key: 'YOKAI_PLAYED_THIS_TURN', op: '>', value: 0 },
-        thenEffects: [{ type: 'GHOST_FIRE', value: 1 }],
-      },
-    ],
-    description: '鬼火+1；若本回合打出过御魂牌，再获得鬼火+1',
-  },
-
-  // 雪幽魂 - 抓牌+2，【妨害】对手弃牌或获得恶评
-  {
-    cardId: 'yokai_019',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '寒冬封印',
-    effects: [
-      { type: 'DRAW', count: 2 },
-      {
-        type: 'INTERFERE',
-        target: 'OTHER_PLAYERS',
-        subEffects: [
-          // 对手自选：弃1张手牌 or 得1张恶评
-          { type: 'DISCARD', count: 1, target: 'SELF' }, // 简化：对手被动弃1张
-        ]
-      },
-    ],
-    description: '抓牌+2，【妨害】每名对手弃1张手牌或获得1张恶评（对手选择）',
-  },
-
-  // 轮入道 - 再打出1张御魂并让效果执行2次
-  {
-    cardId: 'yokai_020',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '轮回复制',
-    effects: [], // 特殊：打出的下1张御魂效果执行2次，由 GameManager 状态标记处理
-    description: '本回合中，你打出的下1张御魂效果额外执行1次',
-  },
-
-  // 网切 - 场上所有妖怪生命-1，鬼王生命-2
-  {
-    cardId: 'yokai_021',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '网罗万灵',
-    effects: [], // 全场AOE，GameManager 统一处理
-    description: '场上所有妖怪生命-1，鬼王生命-2',
-  },
-
-  // 铮 - 抓牌+1，伤害+2
-  {
-    cardId: 'yokai_022',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '铮鸣斩魄',
-    effects: [
-      { type: 'DRAW', count: 1 },
-      { type: 'DAMAGE', value: 2 },
-    ],
-    description: '抓牌+1，伤害+2',
-  },
-
-  // 薙魂 - 本回合如已打出3张以上御魂，鬼火+2
-  {
-    cardId: 'yokai_023',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '薙灵收割',
-    effects: [{
-      type: 'CONDITIONAL',
-      condition: { key: 'YOKAI_PLAYED_THIS_TURN', op: '>=', value: 3 },
-      thenEffects: [{ type: 'GHOST_FIRE', value: 2 }],
-    }],
-    description: '若本回合已打出3张或以上御魂（含本张），鬼火+2',
-  },
-
-  // ===== 5 费妖怪 =====
-
-  // 狂骨 - 抓牌+1，本回合式神技能额外伤害+2
-  {
-    cardId: 'yokai_024',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '狂骨附体',
-    effects: [
-      { type: 'DRAW', count: 1 },
-      // 标记本回合式神技能+2，由 GameManager 的 tempBuff 处理
-    ],
-    description: '抓牌+1，本回合你使用式神技能时额外伤害+2',
-  },
-
-  // 返魂香 - 抓牌+2，【妨害】每名对手弃2张手牌
-  {
-    cardId: 'yokai_025',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '返魂禁香',
-    effects: [
-      { type: 'DRAW', count: 2 },
-      {
-        type: 'INTERFERE',
-        target: 'OTHER_PLAYERS',
-        subEffects: [{ type: 'DISCARD', count: 2, target: 'SELF', random: false }]
-      },
-    ],
-    description: '抓牌+2，【妨害】每名对手弃置2张手牌',
-  },
-
-  // 镇墓兽 - 抓牌+1，伤害+2，鬼火+2
-  {
-    cardId: 'yokai_026',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '墓守怒吼',
-    effects: [
-      { type: 'DRAW', count: 1 },
-      { type: 'DAMAGE', value: 2 },
-      { type: 'GHOST_FIRE', value: 2 },
-    ],
-    description: '抓牌+1，伤害+2，鬼火+2',
-  },
-
-  // 针女 - 抓牌+3，然后弃置1张手牌换伤害+2
-  {
-    cardId: 'yokai_027',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '针刺诅咒',
-    effects: [
-      { type: 'DRAW', count: 3 },
-      { type: 'DISCARD', count: 1, target: 'SELF' }, // 弃置后获得伤害+2
-      { type: 'DAMAGE', value: 2 },
-    ],
-    description: '抓牌+3，弃置1张手牌，然后伤害+2',
-  },
-
-  // 心眼 - 伤害+3
-  {
-    cardId: 'yokai_028',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '心眼洞察',
-    effects: [{ type: 'DAMAGE', value: 3 }],
-    description: '伤害+3',
-  },
-
-  // 涂佛 - 从弃牌堆取回至多3张阴阳术（置于手牌）
-  {
-    cardId: 'yokai_029',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '涂佛苏醒',
-    effects: [], // 特殊：从弃牌区回收阴阳术，由 GameManager 处理
-    description: '从你的弃牌堆取回至多3张阴阳术，置入手牌',
-  },
-
-  // 地藏像 - 抓牌+1（游戏结束每8张池牌额外+1声誉，声誉已由 charm 体现）
-  {
-    cardId: 'yokai_030',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '地藏庇护',
-    effects: [{ type: 'DRAW', count: 1 }],
-    description: '抓牌+1',
-  },
-
-  // ===== 6 费妖怪 =====
-
-  // 飞缘魔 - 使用牌库顶的鬼王牌（若有）
-  {
-    cardId: 'yokai_031',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '飞缘召唤',
-    effects: [], // 特殊：拿牌库顶的鬼王牌直接使用，GameManager 处理
-    description: '使用你牌库顶1张鬼王牌的效果（若为鬼王牌则触发）',
-  },
-
-  // 破势 - 伤害+4；首次攻击掷骰得额外鬼火
-  {
-    cardId: 'yokai_032',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '破势冲锋',
-    effects: [
-      { type: 'DAMAGE', value: 4 },
-      // 掷骰为游戏物理逻辑，暂不在引擎内处理
-    ],
-    description: '伤害+4（如为本回合首次攻击，可掷1颗鬼火骰获得额外鬼火）',
-  },
-
-  // 镜姬 - 抓牌+2，伤害+1，鬼火+2
-  {
-    cardId: 'yokai_033',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '镜中魔影',
-    effects: [
-      { type: 'DRAW', count: 2 },
-      { type: 'DAMAGE', value: 1 },
-      { type: 'GHOST_FIRE', value: 2 },
-    ],
-    description: '抓牌+2，伤害+1，鬼火+2',
-  },
-
-  // 木魅 - 展示牌库直到翻出2张鬼火牌（放入手牌）
-  {
-    cardId: 'yokai_034',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '木魅寻宝',
-    effects: [], // 特殊展示逻辑，GameManager 处理
-    description: '展示自己牌库，直到翻出2张鬼火牌并置入手牌',
-  },
-
-  // ===== 7 费妖怪 =====
-
-  // 幽谷响 - 使用所有对手牌库顶牌
-  {
-    cardId: 'yokai_035',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '谷响回鸣',
-    effects: [], // 特殊：从每名对手库顶取牌使用，GameManager 处理
-    description: '使用所有对手牌库顶1张牌的效果',
-  },
-
-  // 伤魂鸟 - 超度手牌，退治等生命目标
-  {
-    cardId: 'yokai_036',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '伤魂裂啼',
-    effects: [
-      { type: 'EXILE_HAND', count: 1 },
-      // KILL_YOKAI 的 maxHp 等于被超度牌的 HP，GameManager 动态传入
-    ],
-    description: '超度1张手牌，退治场上生命值恰好等于该牌生命的游荡妖怪',
-  },
-
-  // 阴摩罗 - 超度1张，退治生命+3以内
-  {
-    cardId: 'yokai_037',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '阴摩索魂',
-    effects: [
-      { type: 'EXILE_HAND', count: 1 },
-      // KILL_YOKAI maxHp = exiledCard.hp + 3，GameManager 动态传入
-    ],
-    description: '超度1张手牌，退治生命不高于（该牌生命+3）的游荡妖怪',
-  },
-
-  // ===== 8 费妖怪 =====
-
-  // 青女房 - 获得1张「火灵」符文牌置于牌库顶
-  {
-    cardId: 'yokai_038',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '青女降霜',
-    effects: [{ type: 'GAIN_SPELL', tier: 'medium' }],
-    description: '获得1张中级符咒并置于你的牌库顶',
-  },
-
-  // 三味 - 鬼火+2；本回合每使用1张鬼火牌额外+2鬼火
-  {
-    cardId: 'yokai_039',
-    effectType: '触',
-    trigger: 'ON_PLAY',
-    skillName: '三味共鸣',
-    effects: [
-      { type: 'GHOST_FIRE', value: 2 },
-      // 额外效果：本回合鬼火卡+2 bonus，标记在 GameManager tempBuff
-    ],
-    description: '鬼火+2，本回合你每使用1张鬼火相关牌额外获得鬼火+2',
-  },
-];
-
-/** 根据 cardId 获取妖怪效果定义 */
-export function getYokaiEffectDef(cardId: string): CardEffectDef | undefined {
-  return YOKAI_EFFECT_DEFS.find(d => d.cardId === cardId);
+// 效果执行结果
+interface EffectResult {
+  success: boolean;
+  message: string;
+  draw?: number;
+  damage?: number;
+  ghostFire?: number;
 }
+
+// 效果上下文
+interface EffectContext {
+  player: PlayerState;
+  gameState: GameState;
+  card: CardInstance;
+  onSelectCards?: (cards: CardInstance[], count: number) => Promise<string[]>;
+  onChoice?: (options: string[]) => Promise<number>;
+  onSelectTarget?: (targets: CardInstance[]) => Promise<string>;
+}
+
+// 效果处理器类型
+type EffectHandler = (ctx: EffectContext) => Promise<EffectResult>;
+
+// 效果注册表
+const effectHandlers = new Map<string, EffectHandler>();
+
+// 注册效果
+function registerEffect(name: string, handler: EffectHandler): void {
+  effectHandlers.set(name, handler);
+}
+
+// 执行御魂效果
+export async function executeYokaiEffect(
+  yokaiName: string,
+  ctx: EffectContext
+): Promise<EffectResult> {
+  const handler = effectHandlers.get(yokaiName);
+  if (!handler) {
+    return { success: false, message: `未找到妖怪效果: ${yokaiName}` };
+  }
+  return handler(ctx);
+}
+
+// 辅助函数：抓牌
+function drawCards(player: PlayerState, count: number): number {
+  let drawn = 0;
+  for (let i = 0; i < count && player.deck.length > 0; i++) {
+    player.hand.push(player.deck.pop()!);
+    drawn++;
+  }
+  return drawn;
+}
+
+// ============================================
+// 生命2 妖怪效果
+// ============================================
+
+// 招福达摩 - 无效果（初始卡）
+registerEffect('招福达摩', async () => {
+  return { success: true, message: '招福达摩：无御魂效果' };
+});
+
+// 唐纸伞妖 - 伤害+1，查看牌库顶牌，可超度
+registerEffect('唐纸伞妖', async (ctx) => {
+  const { player, onChoice } = ctx;
+  player.damage += 1;
+  
+  if (player.deck.length > 0) {
+    const topCard = player.deck[player.deck.length - 1]!;
+    const choice = onChoice ? await onChoice(['保留', '超度']) : 0;
+    
+    if (choice === 1) {
+      player.exiled.push(player.deck.pop()!);
+      return { success: true, message: `唐纸伞妖：伤害+1，超度${topCard.name}`, damage: 1 };
+    }
+  }
+  
+  return { success: true, message: '唐纸伞妖：伤害+1', damage: 1 };
+});
+
+// 天邪鬼绿 - 退治1个生命≤4的游荡妖怪
+registerEffect('天邪鬼绿', async (ctx) => {
+  const { gameState, onSelectTarget } = ctx;
+  const validTargets = gameState.field.yokaiSlots
+    .filter((y): y is CardInstance => y !== null && (y.hp || 0) <= 4);
+  
+  if (validTargets.length === 0) {
+    return { success: true, message: '天邪鬼绿：场上没有符合条件的妖怪' };
+  }
+  
+  const targetId = onSelectTarget 
+    ? await onSelectTarget(validTargets) 
+    : validTargets[0]!.instanceId;
+  
+  const idx = gameState.field.yokaiSlots.findIndex(y => y?.instanceId === targetId);
+  if (idx !== -1) {
+    const target = gameState.field.yokaiSlots[idx]!;
+    gameState.field.yokaiSlots[idx] = null;
+    return { success: true, message: `天邪鬼绿：退治${target.name}` };
+  }
+  
+  return { success: true, message: '天邪鬼绿：退治失败' };
+});
+
+// 天邪鬼青 - 选择：抓牌+1 或 伤害+1
+registerEffect('天邪鬼青', async (ctx) => {
+  const { player, onChoice } = ctx;
+  const choice = onChoice ? await onChoice(['抓牌+1', '伤害+1']) : 0;
+  
+  if (choice === 0) {
+    drawCards(player, 1);
+    return { success: true, message: '天邪鬼青：抓牌+1', draw: 1 };
+  } else {
+    player.damage += 1;
+    return { success: true, message: '天邪鬼青：伤害+1', damage: 1 };
+  }
+});
+
+// 天邪鬼赤 - 伤害+1，弃置任意手牌，抓等量牌
+registerEffect('天邪鬼赤', async (ctx) => {
+  const { player, onSelectCards } = ctx;
+  player.damage += 1;
+  
+  if (player.hand.length > 0 && onSelectCards) {
+    const ids = await onSelectCards(player.hand, player.hand.length);
+    const discardCount = ids.length;
+    
+    for (const id of ids) {
+      const idx = player.hand.findIndex(c => c.instanceId === id);
+      if (idx !== -1) {
+        player.discard.push(player.hand.splice(idx, 1)[0]!);
+      }
+    }
+    
+    drawCards(player, discardCount);
+    return { success: true, message: `天邪鬼赤：伤害+1，换${discardCount}张牌`, damage: 1, draw: discardCount };
+  }
+  
+  return { success: true, message: '天邪鬼赤：伤害+1', damage: 1 };
+});
+
+// 天邪鬼黄 - 抓牌+2，将1张手牌放牌库顶
+registerEffect('天邪鬼黄', async (ctx) => {
+  const { player, onSelectCards } = ctx;
+  drawCards(player, 2);
+  
+  if (player.hand.length > 0) {
+    let cardId: string;
+    if (onSelectCards) {
+      const ids = await onSelectCards(player.hand, 1);
+      cardId = ids[0]!;
+    } else {
+      cardId = player.hand[0]!.instanceId;
+    }
+    
+    const idx = player.hand.findIndex(c => c.instanceId === cardId);
+    if (idx !== -1) {
+      player.deck.push(player.hand.splice(idx, 1)[0]!);
+    }
+  }
+  
+  return { success: true, message: '天邪鬼黄：抓牌+2，置顶1张', draw: 2 };
+});
+
+// 赤舌 - [妨害] 对手从弃牌堆选基础术式或达摩置于牌库顶
+registerEffect('赤舌', async (ctx) => {
+  const { player, gameState } = ctx;
+  
+  for (const p of gameState.players) {
+    if (p.id === player.id) continue;
+    
+    const validCards = p.discard.filter(c => 
+      c.name === '招福达摩' || c.tags?.includes('基础')
+    );
+    
+    if (validCards.length > 0) {
+      const card = validCards[0]!;
+      const idx = p.discard.findIndex(c => c.instanceId === card.instanceId);
+      if (idx !== -1) {
+        p.deck.push(p.discard.splice(idx, 1)[0]!);
+      }
+    }
+  }
+  
+  return { success: true, message: '[妨害] 赤舌：对手将弃牌堆卡牌置于牌库顶' };
+});
+
+// ============================================
+// 生命3 妖怪效果
+// ============================================
+
+// 灯笼鬼 - 鬼火+1，抓牌+1
+registerEffect('灯笼鬼', async (ctx) => {
+  const { player } = ctx;
+  player.ghostFire = Math.min(player.ghostFire + 1, player.maxGhostFire);
+  drawCards(player, 1);
+  return { success: true, message: '灯笼鬼：鬼火+1，抓牌+1', ghostFire: 1, draw: 1 };
+});
+
+// 树妖 - 抓牌+2，弃置1张手牌
+registerEffect('树妖', async (ctx) => {
+  const { player, onSelectCards } = ctx;
+  drawCards(player, 2);
+  
+  if (player.hand.length > 0) {
+    let cardId: string;
+    if (onSelectCards) {
+      const ids = await onSelectCards(player.hand, 1);
+      cardId = ids[0]!;
+    } else {
+      cardId = player.hand[0]!.instanceId;
+    }
+    
+    const idx = player.hand.findIndex(c => c.instanceId === cardId);
+    if (idx !== -1) {
+      player.discard.push(player.hand.splice(idx, 1)[0]!);
+    }
+  }
+  
+  return { success: true, message: '树妖：抓牌+2，弃置1张', draw: 2 };
+});
+
+// 日女巳时 - 选择：鬼火+1 / 抓牌+2 / 伤害+2
+registerEffect('日女巳时', async (ctx) => {
+  const { player, onChoice } = ctx;
+  const choice = onChoice ? await onChoice(['鬼火+1', '抓牌+2', '伤害+2']) : 0;
+  
+  switch (choice) {
+    case 0:
+      player.ghostFire = Math.min(player.ghostFire + 1, player.maxGhostFire);
+      return { success: true, message: '日女巳时：鬼火+1', ghostFire: 1 };
+    case 1:
+      drawCards(player, 2);
+      return { success: true, message: '日女巳时：抓牌+2', draw: 2 };
+    case 2:
+      player.damage += 2;
+      return { success: true, message: '日女巳时：伤害+2', damage: 2 };
+    default:
+      return { success: false, message: '无效选择' };
+  }
+});
+
+// 蚌精 - 超度1张手牌，抓牌+2
+registerEffect('蚌精', async (ctx) => {
+  const { player, onSelectCards } = ctx;
+  
+  if (player.hand.length === 0) {
+    return { success: false, message: '蚌精：没有手牌可超度' };
+  }
+  
+  let cardId: string;
+  if (onSelectCards) {
+    const ids = await onSelectCards(player.hand, 1);
+    cardId = ids[0]!;
+  } else {
+    cardId = player.hand[0]!.instanceId;
+  }
+  
+  const idx = player.hand.findIndex(c => c.instanceId === cardId);
+  if (idx !== -1) {
+    player.exiled.push(player.hand.splice(idx, 1)[0]!);
+  }
+  
+  drawCards(player, 2);
+  return { success: true, message: '蚌精：超度1张手牌，抓牌+2', draw: 2 };
+});
+
+// 鸣屋 - 弃牌堆空则伤害+4，否则伤害+2
+registerEffect('鸣屋', async (ctx) => {
+  const { player } = ctx;
+  const damage = player.discard.length === 0 ? 4 : 2;
+  player.damage += damage;
+  return { success: true, message: `鸣屋：伤害+${damage}`, damage };
+});
+
+// 蝠翼 - 抓牌+1，伤害+1
+registerEffect('蝠翼', async (ctx) => {
+  const { player } = ctx;
+  drawCards(player, 1);
+  player.damage += 1;
+  return { success: true, message: '蝠翼：抓牌+1，伤害+1', draw: 1, damage: 1 };
+});
+
+// 兵主部 - 伤害+2
+registerEffect('兵主部', async (ctx) => {
+  const { player } = ctx;
+  player.damage += 2;
+  return { success: true, message: '兵主部：伤害+2', damage: 2 };
+});
+
+// 魅妖 - [妨害] 对手展示牌库顶，选择生命<5的牌使用效果
+registerEffect('魅妖', async (ctx) => {
+  const { player, gameState, onSelectCards } = ctx;
+  const opponents = gameState.players.filter(p => p.id !== player.id);
+  
+  const validCards: CardInstance[] = [];
+  for (const opp of opponents) {
+    if (opp.deck.length > 0) {
+      const topCard = opp.deck[opp.deck.length - 1]!;
+      if ((topCard.hp || 0) < 5) {
+        validCards.push(topCard);
+      }
+    }
+  }
+  
+  if (validCards.length === 0) {
+    return { success: true, message: '[妨害] 魅妖：没有符合条件的牌' };
+  }
+  
+  // 简化处理：选择第一张符合条件的牌
+  const selectedCard = validCards[0]!;
+  
+  // 使用效果后置入弃牌区（这里简化为直接弃置）
+  for (const opp of opponents) {
+    const idx = opp.deck.findIndex(c => c.instanceId === selectedCard.instanceId);
+    if (idx !== -1) {
+      opp.discard.push(opp.deck.splice(idx, 1)[0]!);
+      break;
+    }
+  }
+  
+  return { success: true, message: `[妨害] 魅妖：使用${selectedCard.name}的效果` };
+});
+
+// ============================================
+// 生命4 妖怪效果
+// ============================================
+
+// 骰子鬼 - 超度1张手牌，退治生命不高于超度牌+2的妖怪
+registerEffect('骰子鬼', async (ctx) => {
+  const { player, gameState, onSelectCards, onSelectTarget } = ctx;
+  
+  if (player.hand.length === 0) {
+    return { success: false, message: '骰子鬼：没有手牌可超度' };
+  }
+  
+  // 选择超度的牌
+  let cardId: string;
+  if (onSelectCards) {
+    const ids = await onSelectCards(player.hand, 1);
+    cardId = ids[0]!;
+  } else {
+    cardId = player.hand[0]!.instanceId;
+  }
+  
+  const cardIdx = player.hand.findIndex(c => c.instanceId === cardId);
+  if (cardIdx === -1) return { success: false, message: '选择的卡牌无效' };
+  
+  const exiledCard = player.hand.splice(cardIdx, 1)[0]!;
+  player.exiled.push(exiledCard);
+  const maxHp = (exiledCard.hp || 0) + 2;
+  
+  // 退治生命不高于maxHp的妖怪
+  const validTargets = gameState.field.yokaiSlots
+    .filter((y): y is CardInstance => y !== null && (y.hp || 0) <= maxHp);
+  
+  if (validTargets.length === 0) {
+    return { success: true, message: `骰子鬼：超度${exiledCard.name}，没有可退治的妖怪` };
+  }
+  
+  const targetId = onSelectTarget 
+    ? await onSelectTarget(validTargets) 
+    : validTargets[0]!.instanceId;
+  
+  const idx = gameState.field.yokaiSlots.findIndex(y => y?.instanceId === targetId);
+  if (idx !== -1) {
+    const target = gameState.field.yokaiSlots[idx]!;
+    gameState.field.yokaiSlots[idx] = null;
+    return { success: true, message: `骰子鬼：超度${exiledCard.name}，退治${target.name}` };
+  }
+  
+  return { success: true, message: `骰子鬼：超度${exiledCard.name}` };
+});
+
+// 涅槃之火 - 本回合式神技能鬼火消耗-1
+registerEffect('涅槃之火', async (ctx) => {
+  const { player } = ctx;
+  player.tempBuffs.push({
+    type: 'SKILL_COST_REDUCTION' as any,
+    value: 1,
+    duration: 1,
+    source: '涅槃之火'
+  } as any);
+  return { success: true, message: '涅槃之火：本回合式神技能鬼火消耗-1' };
+});
+
+// 雪幽魂 - [妨害] 抓牌+1，对手弃置恶评或获得恶评
+registerEffect('雪幽魂', async (ctx) => {
+  const { player, gameState } = ctx;
+  drawCards(player, 1);
+  
+  for (const p of gameState.players) {
+    if (p.id === player.id) continue;
+    
+    const penaltyIdx = p.hand.findIndex(c => c.cardType === 'penalty');
+    if (penaltyIdx !== -1) {
+      p.discard.push(p.hand.splice(penaltyIdx, 1)[0]!);
+    } else {
+      // 获得1张恶评
+      const penaltyCard: CardInstance = {
+        instanceId: `penalty_${Date.now()}_${Math.random()}`,
+        cardId: 'penalty_001',
+        cardType: 'penalty',
+        name: '恶评',
+        hp: 0,
+        maxHp: 0
+      };
+      p.hand.push(penaltyCard);
+    }
+  }
+  
+  return { success: true, message: '[妨害] 雪幽魂：抓牌+1，对手弃置/获得恶评', draw: 1 };
+});
+
+// 轮入道 - 弃置生命≤6的御魂，执行其效果两次
+registerEffect('轮入道', async (ctx) => {
+  const { player, gameState, onSelectCards } = ctx;
+  
+  const validCards = player.hand.filter(c => 
+    c.cardType === 'yokai' && (c.hp || 0) <= 6
+  );
+  
+  if (validCards.length === 0) {
+    return { success: false, message: '轮入道：没有符合条件的御魂' };
+  }
+  
+  let cardId: string;
+  if (onSelectCards) {
+    const ids = await onSelectCards(validCards, 1);
+    cardId = ids[0]!;
+  } else {
+    cardId = validCards[0]!.instanceId;
+  }
+  
+  const idx = player.hand.findIndex(c => c.instanceId === cardId);
+  if (idx === -1) return { success: false, message: '选择的卡牌无效' };
+  
+  const targetCard = player.hand.splice(idx, 1)[0]!;
+  player.discard.push(targetCard);
+  
+  // 执行两次效果（简化处理，这里只返回消息）
+  return { success: true, message: `轮入道：弃置${targetCard.name}，执行其效果两次` };
+});
+
+// 网切 - 本回合妖怪生命-1，鬼王生命-2（最低1）
+registerEffect('网切', async (ctx) => {
+  const { player } = ctx;
+  player.tempBuffs.push({
+    type: 'HP_REDUCTION' as any,
+    value: 1,
+    duration: 1,
+    source: '网切',
+    yokaiReduction: 1,
+    bossReduction: 2
+  } as any);
+  return { success: true, message: '网切：本回合妖怪生命-1，鬼王生命-2' };
+});
+
+// 铮 - 抓牌+1，伤害+2
+registerEffect('铮', async (ctx) => {
+  const { player } = ctx;
+  drawCards(player, 1);
+  player.damage += 2;
+  return { success: true, message: '铮：抓牌+1，伤害+2', draw: 1, damage: 2 };
+});
+
+// 薙魂 - 抓牌+1，弃置1张。打出3张御魂时鬼火+2
+registerEffect('薙魂', async (ctx) => {
+  const { player, onSelectCards } = ctx;
+  drawCards(player, 1);
+  
+  if (player.hand.length > 0) {
+    let cardId: string;
+    if (onSelectCards) {
+      const ids = await onSelectCards(player.hand, 1);
+      cardId = ids[0]!;
+    } else {
+      cardId = player.hand[0]!.instanceId;
+    }
+    
+    const idx = player.hand.findIndex(c => c.instanceId === cardId);
+    if (idx !== -1) {
+      player.discard.push(player.hand.splice(idx, 1)[0]!);
+    }
+  }
+  
+  // 添加计数器，供后续判断
+  player.tempBuffs.push({
+    type: 'YOKAI_PLAY_COUNT' as any,
+    value: 1,
+    duration: 1,
+    source: '薙魂'
+  } as any);
+  
+  return { success: true, message: '薙魂：抓牌+1，弃置1张', draw: 1 };
+});
+
+// 魍魉之匣 - 抓牌+1，伤害+1，所有玩家展示牌库顶
+registerEffect('魍魉之匣', async (ctx) => {
+  const { player, gameState, onChoice } = ctx;
+  drawCards(player, 1);
+  player.damage += 1;
+  
+  // 所有玩家展示牌库顶，由你决定保留或弃置
+  for (const p of gameState.players) {
+    if (p.deck.length > 0) {
+      const choice = onChoice ? await onChoice([`保留${p.name}的牌`, `弃置${p.name}的牌`]) : 0;
+      if (choice === 1) {
+        p.discard.push(p.deck.pop()!);
+      }
+    }
+  }
+  
+  return { success: true, message: '[妨害] 魍魉之匣：抓牌+1，伤害+1', draw: 1, damage: 1 };
+});
+
+// ============================================
+// 生命5 妖怪效果
+// ============================================
+
+// 狂骨 - 抓牌+1，伤害+X（X=当前鬼火）
+registerEffect('狂骨', async (ctx) => {
+  const { player } = ctx;
+  drawCards(player, 1);
+  const damage = player.ghostFire;
+  player.damage += damage;
+  return { success: true, message: `狂骨：抓牌+1，伤害+${damage}`, draw: 1, damage };
+});
+
+// 返魂香 - [妨害] 抓牌+1，伤害+1，对手弃牌或获得恶评
+registerEffect('返魂香', async (ctx) => {
+  const { player, gameState } = ctx;
+  drawCards(player, 1);
+  player.damage += 1;
+  
+  for (const p of gameState.players) {
+    if (p.id === player.id) continue;
+    
+    if (p.hand.length > 0) {
+      // 弃置1张手牌
+      p.discard.push(p.hand.shift()!);
+    } else {
+      // 获得恶评
+      const penaltyCard: CardInstance = {
+        instanceId: `penalty_${Date.now()}_${Math.random()}`,
+        cardId: 'penalty_001',
+        cardType: 'penalty',
+        name: '恶评',
+        hp: 0,
+        maxHp: 0
+      };
+      p.hand.push(penaltyCard);
+    }
+  }
+  
+  return { success: true, message: '[妨害] 返魂香：抓牌+1，伤害+1', draw: 1, damage: 1 };
+});
+
+// 镇墓兽 - 鬼火+1，抓牌+1，伤害+2
+registerEffect('镇墓兽', async (ctx) => {
+  const { player } = ctx;
+  player.ghostFire = Math.min(player.ghostFire + 1, player.maxGhostFire);
+  drawCards(player, 1);
+  player.damage += 2;
+  return { success: true, message: '镇墓兽：鬼火+1，抓牌+1，伤害+2', ghostFire: 1, draw: 1, damage: 2 };
+});
+
+// 针女 - 伤害+1，本回合使用式神技能时伤害+2
+registerEffect('针女', async (ctx) => {
+  const { player } = ctx;
+  player.damage += 1;
+  player.tempBuffs.push({
+    type: 'SKILL_DAMAGE_BONUS' as any,
+    value: 2,
+    duration: 1,
+    source: '针女'
+  } as any);
+  return { success: true, message: '针女：伤害+1，本回合技能伤害+2', damage: 1 };
+});
+
+// 心眼 - 伤害+3
+registerEffect('心眼', async (ctx) => {
+  const { player } = ctx;
+  player.damage += 3;
+  return { success: true, message: '心眼：伤害+3', damage: 3 };
+});
+
+// 涂佛 - 从弃牌区选择3张阴阳术置入手牌
+registerEffect('涂佛', async (ctx) => {
+  const { player, onSelectCards } = ctx;
+  const spells = player.discard.filter(c => c.cardType === 'spell');
+  
+  if (spells.length === 0) {
+    return { success: true, message: '涂佛：弃牌区没有阴阳术' };
+  }
+  
+  const count = Math.min(3, spells.length);
+  let selectedIds: string[];
+  
+  if (onSelectCards) {
+    selectedIds = await onSelectCards(spells, count);
+  } else {
+    selectedIds = spells.slice(0, count).map(c => c.instanceId);
+  }
+  
+  for (const id of selectedIds) {
+    const idx = player.discard.findIndex(c => c.instanceId === id);
+    if (idx !== -1) {
+      player.hand.push(player.discard.splice(idx, 1)[0]!);
+    }
+  }
+  
+  return { success: true, message: `涂佛：从弃牌区取回${selectedIds.length}张阴阳术` };
+});
+
+// 地藏像 - 超度此牌，获取1个式神
+registerEffect('地藏像', async (ctx) => {
+  const { player, card } = ctx;
+  player.exiled.push(card);
+  // 获取式神的逻辑需要与游戏流程配合
+  return { success: true, message: '地藏像：超度此牌，获取1个式神' };
+});
+
+// ============================================
+// 生命6 妖怪效果
+// ============================================
+
+// 飞缘魔 - 使用当前鬼王的御魂效果
+registerEffect('飞缘魔', async (ctx) => {
+  const { gameState } = ctx;
+  const boss = gameState.field.bossSlot;
+  
+  if (!boss) {
+    return { success: true, message: '飞缘魔：没有鬼王' };
+  }
+  
+  // 执行鬼王效果（需要配合鬼王效果系统）
+  return { success: true, message: `飞缘魔：使用${boss.name}的效果` };
+});
+
+// 破势 - 伤害+3，首张牌时伤害+5
+registerEffect('破势', async (ctx) => {
+  const { player } = ctx;
+  // 检查是否为本回合第一张牌（简化处理）
+  const isFirst = player.tempBuffs.every(b => (b as any).source !== '破势_played');
+  
+  const damage = isFirst ? 5 : 3;
+  player.damage += damage;
+  
+  player.tempBuffs.push({
+    type: 'CARD_PLAYED' as any,
+    value: 0,
+    duration: 1,
+    source: '破势_played'
+  } as any);
+  
+  return { success: true, message: `破势：伤害+${damage}`, damage };
+});
+
+// 镜姬 - 抓牌+2，伤害+1，鬼火+1
+registerEffect('镜姬', async (ctx) => {
+  const { player } = ctx;
+  drawCards(player, 2);
+  player.damage += 1;
+  player.ghostFire = Math.min(player.ghostFire + 1, player.maxGhostFire);
+  return { success: true, message: '镜姬：抓牌+2，伤害+1，鬼火+1', draw: 2, damage: 1, ghostFire: 1 };
+});
+
+// 木魅 - 展示牌库顶直到出现3张阴阳术
+registerEffect('木魅', async (ctx) => {
+  const { player } = ctx;
+  const revealed: CardInstance[] = [];
+  const spells: CardInstance[] = [];
+  
+  while (player.deck.length > 0 && spells.length < 3) {
+    const card = player.deck.pop()!;
+    revealed.push(card);
+    if (card.cardType === 'spell') {
+      spells.push(card);
+    }
+  }
+  
+  // 阴阳术置入手牌
+  for (const spell of spells) {
+    player.hand.push(spell);
+  }
+  
+  // 其余弃置
+  for (const card of revealed) {
+    if (!spells.includes(card)) {
+      player.discard.push(card);
+    }
+  }
+  
+  return { success: true, message: `木魅：获得${spells.length}张阴阳术` };
+});
+
+// ============================================
+// 生命7 妖怪效果
+// ============================================
+
+// 幽谷响 - [妨害] 使用对手牌库顶至多3张非鬼王效果
+registerEffect('幽谷响', async (ctx) => {
+  const { player, gameState } = ctx;
+  let usedCount = 0;
+  
+  for (const p of gameState.players) {
+    if (p.id === player.id) continue;
+    if (usedCount >= 3) break;
+    
+    if (p.deck.length > 0) {
+      const topCard = p.deck[p.deck.length - 1]!;
+      if (topCard.cardType !== 'boss') {
+        // 使用效果（简化处理）
+        p.discard.push(p.deck.pop()!);
+        usedCount++;
+      }
+    }
+  }
+  
+  return { success: true, message: `[妨害] 幽谷响：使用${usedCount}张对手牌的效果` };
+});
+
+// 伤魂鸟 - 超度X张手牌，伤害+2X
+registerEffect('伤魂鸟', async (ctx) => {
+  const { player, onSelectCards } = ctx;
+  
+  if (player.hand.length === 0) {
+    return { success: true, message: '伤魂鸟：没有手牌可超度' };
+  }
+  
+  let selectedIds: string[];
+  if (onSelectCards) {
+    selectedIds = await onSelectCards(player.hand, player.hand.length);
+  } else {
+    selectedIds = [];
+  }
+  
+  for (const id of selectedIds) {
+    const idx = player.hand.findIndex(c => c.instanceId === id);
+    if (idx !== -1) {
+      player.exiled.push(player.hand.splice(idx, 1)[0]!);
+    }
+  }
+  
+  const damage = selectedIds.length * 2;
+  player.damage += damage;
+  
+  return { success: true, message: `伤魂鸟：超度${selectedIds.length}张，伤害+${damage}`, damage };
+});
+
+// 阴摩罗 - 选择弃牌区2张生命<6的牌使用
+registerEffect('阴摩罗', async (ctx) => {
+  const { player, onSelectCards } = ctx;
+  const validCards = player.discard.filter(c => (c.hp || 0) < 6);
+  
+  if (validCards.length === 0) {
+    return { success: true, message: '阴摩罗：弃牌区没有符合条件的牌' };
+  }
+  
+  const count = Math.min(2, validCards.length);
+  let selectedIds: string[];
+  
+  if (onSelectCards) {
+    selectedIds = await onSelectCards(validCards, count);
+  } else {
+    selectedIds = validCards.slice(0, count).map(c => c.instanceId);
+  }
+  
+  // 使用效果后返回牌库底（简化处理）
+  for (const id of selectedIds) {
+    const idx = player.discard.findIndex(c => c.instanceId === id);
+    if (idx !== -1) {
+      const card = player.discard.splice(idx, 1)[0]!;
+      player.deck.unshift(card); // 置于牌库底
+    }
+  }
+  
+  return { success: true, message: `阴摩罗：使用${selectedIds.length}张弃牌区的牌` };
+});
+
+// ============================================
+// 生命8 妖怪效果
+// ============================================
+
+// 青女房 - 抓牌+2，鬼火+1
+registerEffect('青女房', async (ctx) => {
+  const { player } = ctx;
+  drawCards(player, 2);
+  player.ghostFire = Math.min(player.ghostFire + 1, player.maxGhostFire);
+  return { success: true, message: '青女房：抓牌+2，鬼火+1', draw: 2, ghostFire: 1 };
+});
+
+// 三味 - 本回合每使用1张鬼火牌或阴阳术伤害+2
+registerEffect('三味', async (ctx) => {
+  const { player } = ctx;
+  player.tempBuffs.push({
+    type: 'SPELL_DAMAGE_BONUS' as any,
+    value: 2,
+    duration: 1,
+    source: '三味'
+  } as any);
+  return { success: true, message: '三味：本回合每使用阴阳术伤害+2' };
+});
+
+// ============================================
+// 触发效果辅助函数
+// ============================================
+
+// 树妖：被弃置时抓牌+2
+export function onTreeDemonDiscard(player: PlayerState, card: CardInstance): void {
+  if (card.name === '树妖') {
+    drawCards(player, 2);
+  }
+}
+
+// 三味：被弃置时抓牌+3
+export function onSanmiDiscard(player: PlayerState, card: CardInstance): void {
+  if (card.name === '三味') {
+    drawCards(player, 3);
+  }
+}
+
+// 铮：受到妨害时可弃置此牌抓牌+2并免疫
+export function canZhengCounter(player: PlayerState): CardInstance | null {
+  return player.hand.find(c => c.name === '铮') || null;
+}
+
+export function useZhengCounter(player: PlayerState): boolean {
+  const idx = player.hand.findIndex(c => c.name === '铮');
+  if (idx !== -1) {
+    player.discard.push(player.hand.splice(idx, 1)[0]!);
+    drawCards(player, 2);
+    return true;
+  }
+  return false;
+}
+
+// 青女房：展示可免疫妨害和鬼王来袭
+export function canQingnvfangImmune(player: PlayerState): boolean {
+  return player.hand.some(c => c.name === '青女房');
+}
+
+export { drawCards, registerEffect, effectHandlers };

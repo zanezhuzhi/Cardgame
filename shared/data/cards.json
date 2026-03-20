@@ -45,14 +45,10 @@
       "name": "妖刀姬",
       "type": "shikigami",
       "category": "输出/连击",
-      "passive": {
-        "name": "幽锋",
-        "effect": "首次使用[御魂卡]时，抓1张牌。"
-      },
       "skill": {
         "name": "杀戮",
-        "cost": 3,
-        "effect": "造成2点伤害并抓1张牌。"
+        "cost": 2,
+        "effect": "【启】鬼火-2：抓牌+1，伤害+1。可额外鬼火-1，重复一次效果。"
       },
       "image": "式神01.png",
       "rarity": "SSR",
@@ -64,14 +60,10 @@
       "name": "大天狗",
       "type": "shikigami",
       "category": "输出/群体",
-      "passive": {
-        "name": "钢铁之羽",
-        "effect": "免疫首次[妨害]或[鬼王来袭]。行动时重置。"
-      },
       "skill": {
         "name": "羽刃暴风",
-        "cost": 4,
-        "effect": "对所有单位造成2点伤害。"
+        "cost": 2,
+        "effect": "【启】鬼火-2：回合中你可以选择1个目标。当你对其他目标造成N点伤害时，对其造成N-2点伤害。"
       },
       "image": "式神02.png",
       "rarity": "SSR",
@@ -83,14 +75,10 @@
       "name": "酒吞童子",
       "type": "shikigami",
       "category": "防御/爆发",
-      "passive": {
-        "name": "狂气",
-        "effect": "每回合可以超度1张[惩令]并放置1枚[酒气]，每枚[酒气]+1攻（最多为2）。"
-      },
       "skill": {
-        "name": "狂啸",
-        "cost": 3,
-        "effect": "弃置1张[鬼火]或移除1枚酒气，造成5点伤害。"
+        "name": "酒葫芦",
+        "cost": 2,
+        "effect": "【启】鬼火-2：超度1张手牌并放置1枚「酒气」指示物（上限为3）。【启】移除N枚「酒气」指示物：伤害+N。"
       },
       "image": "式神03.png",
       "rarity": "SSR",
@@ -102,14 +90,10 @@
       "name": "茨木童子",
       "type": "shikigami",
       "category": "输出/爆发",
-      "passive": {
-        "name": "迁怒",
-        "effect": "首次击杀目标后，对新目标造成2点伤害。"
-      },
       "skill": {
-        "name": "地狱之手",
-        "cost": 3,
-        "effect": "造成4点伤害。"
+        "name": "迁怒",
+        "cost": 2,
+        "effect": "【启】鬼火-2：本回合中，你每超度或退治1个妖怪，获得伤害+2。"
       },
       "image": "式神04.png",
       "rarity": "SSR",
@@ -118,17 +102,17 @@
     },
     {
       "id": "shikigami_005",
-      "name": "辉夜姬",
+      "name": "花鸟卷",
       "type": "shikigami",
-      "category": "辅助/打火",
+      "category": "防御/反制",
       "passive": {
-        "name": "火鼠裘",
-        "effect": "弃置1张[令牌卡]，鬼火+1，每回合最多2次。"
+        "name": "画境",
+        "effect": "【自】受到[妨害]效果影响时，鬼火-1：抓牌+2，将1张手牌置于牌库顶，然后结算妨害。"
       },
       "skill": {
-        "name": "龙首之玉",
-        "cost": 1,
-        "effect": "每有1个式神，鬼火+1。（仅限1次）"
+        "name": "画境",
+        "cost": 2,
+        "effect": "【启】鬼火-2：抓牌+3，然后，将1张手牌置于牌库底。"
       },
       "image": "式神05.png",
       "rarity": "SSR",
@@ -137,74 +121,58 @@
     },
     {
       "id": "shikigami_006",
-      "name": "花鸟卷",
-      "type": "shikigami",
-      "category": "防御/反制",
-      "passive": {
-        "name": "画境",
-        "effect": "首次被[妨害]时，先抓2牌后将1张手牌置于牌库顶，然后执行。行动时重置。"
-      },
-      "skill": {
-        "name": "花鸟相闻",
-        "cost": 2,
-        "effect": "抓1张牌，你可以选择将其超度。"
-      },
-      "image": "式神06.png",
-      "rarity": "SSR",
-      "charm": 3,
-      "multiPlayer": false
-    },
-    {
-      "id": "shikigami_007",
       "name": "书翁",
       "type": "shikigami",
-      "category": "辅助/反制",
-      "passive": {
-        "name": "云游",
-        "effect": "回合内及回合外首次弃置手牌时，你可先抓1张牌。"
-      },
+      "category": "辅助/输出",
       "skill": {
         "name": "万象之书",
-        "cost": 3,
-        "effect": "对目标造成伤害，等同于其已损失生命。"
+        "cost": 0,
+        "effect": "【启】鬼火-N：伤害+N+1（N不能为0）。"
       },
-      "image": "式神07.png",
+      "image": "式神06.png",
       "rarity": "SR",
       "charm": 2,
       "multiPlayer": false
     },
     {
-      "id": "shikigami_008",
+      "id": "shikigami_007",
       "name": "百目鬼",
       "type": "shikigami",
-      "category": "诅咒/优化",
-      "passive": {
-        "name": "鬼眸",
-        "effect": "回合内首次抓牌前，可以先查看该牌并可选择弃置。"
-      },
+      "category": "诅咒/妨害",
       "skill": {
         "name": "诅咒之眼",
-        "cost": 3,
-        "effect": "[妨害]其他玩家弃1张牌，你抓1张牌。（仅限1次）"
+        "cost": 1,
+        "effect": "【启】[妨害] 鬼火-1：所有玩家弃置1张手牌，然后你抓牌+1。"
       },
-      "image": "式神08.png",
+      "image": "式神07.png",
       "rarity": "SR",
       "charm": 2,
       "multiPlayer": true
     },
     {
-      "id": "shikigami_009",
-      "name": "白狼",
+      "id": "shikigami_008",
+      "name": "鬼使白",
       "type": "shikigami",
-      "category": "输出/爆发",
-      "passive": {
-        "name": "冥想",
-        "effect": "对[生命]>4的目标造成伤害，其值等同于[会心]指示物个数。"
-      },
+      "category": "辅助/优化",
       "skill": {
-        "name": "无我",
-        "cost": 4,
-        "effect": "造成4点伤害，若击杀则放置1个[会心]指示物。（最高为3）"
+        "name": "魂狩",
+        "cost": 1,
+        "effect": "【启】鬼火-1：本回合中，首次退治生命不高于6的妖怪时，你可以将其置入手牌。"
+      },
+      "image": "式神08.png",
+      "rarity": "SR",
+      "charm": 2,
+      "multiPlayer": false
+    },
+    {
+      "id": "shikigami_009",
+      "name": "般若",
+      "type": "shikigami",
+      "category": "诅咒/妨害",
+      "skill": {
+        "name": "嫉恨之心",
+        "cost": 1,
+        "effect": "【启】[妨害] 鬼火-1：所有玩家弃置牌库顶牌，你可以将你弃置的牌置入手牌，或将其超度。"
       },
       "image": "式神09.png",
       "rarity": "SR",
@@ -213,17 +181,12 @@
     },
     {
       "id": "shikigami_010",
-      "name": "姑获鸟",
+      "name": "追月神",
       "type": "shikigami",
-      "category": "输出/群体",
+      "category": "辅助/触发",
       "passive": {
-        "name": "协战",
-        "effect": "每回合可弃置1张[鬼火卡]对目标造成伤害，其值等于式神数量。"
-      },
-      "skill": {
-        "name": "天翔鹤斩",
-        "cost": 4,
-        "effect": "你对三个目标各造成3,2,1点伤害。"
+        "name": "明月潮升",
+        "effect": "【触】在你的回合中，因卡牌效果抓牌达到3张时，可选择一项：· 鬼火+1 · 伤害+1 · 超度1张手牌"
       },
       "image": "式神10.png",
       "rarity": "SR",
@@ -232,17 +195,13 @@
     },
     {
       "id": "shikigami_011",
-      "name": "鬼使黑",
+      "name": "白狼",
       "type": "shikigami",
-      "category": "输出/连动",
-      "passive": {
-        "name": "索命",
-        "effect": "击杀[生命]>4目标时，获得2点鬼火。"
-      },
+      "category": "输出/爆发",
       "skill": {
-        "name": "死亡宣判",
-        "cost": 2,
-        "effect": "造成1点伤害，本回合每击杀1张生命不为1的目标，伤害+1。"
+        "name": "冥想",
+        "cost": 1,
+        "effect": "【启】鬼火-1，弃置N张手牌：伤害+N。"
       },
       "image": "式神11.png",
       "rarity": "SR",
@@ -251,36 +210,27 @@
     },
     {
       "id": "shikigami_012",
-      "name": "鬼使白",
+      "name": "食梦貘",
       "type": "shikigami",
-      "category": "辅助/优化",
-      "passive": {
-        "name": "魂狩",
-        "effect": "击杀[生命]>4目标时，你可以将其放置在牌库顶。"
-      },
+      "category": "辅助/抓牌",
       "skill": {
-        "name": "无常夺命",
-        "cost": 3,
-        "effect": "造成1点伤害，你可以超度1张手牌使伤害+2。"
+        "name": "沉睡",
+        "cost": 1,
+        "effect": "【启】鬼火-1：抓牌+4，立即结束行动并跳过弃牌与补牌阶段。直到下个你的回合开始前，你进入[沉睡]状态。【触】在[沉睡]状态下，你受到[妨害]效果影响时，先弃置1张手牌。"
       },
       "image": "式神12.png",
       "rarity": "SR",
       "charm": 2,
-      "multiPlayer": false
+      "multiPlayer": true
     },
     {
       "id": "shikigami_013",
       "name": "鲤鱼精",
       "type": "shikigami",
-      "category": "辅助/增强",
+      "category": "辅助/优化",
       "passive": {
         "name": "泡泡之盾",
-        "effect": "回合内首次击杀目标时，你可以将其放置在你的牌库顶。"
-      },
-      "skill": {
-        "name": "泡泡之牢",
-        "cost": 2,
-        "effect": "在回合结束时，你可以本回合已使用的牌中选择1张保留。"
+        "effect": "【自】回合内首次退治妖怪或鬼王时，你可以将其放置在你的牌库顶。"
       },
       "image": "式神13.png",
       "rarity": "R",
@@ -289,36 +239,27 @@
     },
     {
       "id": "shikigami_014",
-      "name": "铁鼠",
+      "name": "萤草",
       "type": "shikigami",
-      "category": "诅咒/优化",
-      "passive": {
-        "name": "钱即正义",
-        "effect": "每回合你可以弃置1张手牌，超度1张[鬼火卡]并获得更高1阶的[鬼火卡]。"
-      },
+      "category": "辅助/增强",
       "skill": {
-        "name": "横财护身",
-        "cost": 3,
-        "effect": "[妨害]每个其他玩家展示2张牌库顶牌，你可以选择获取其中1张[鬼火卡]。然后你选择其他卡弃置。"
+        "name": "生花",
+        "cost": 1,
+        "effect": "【启】鬼火-1或弃置1张妖怪牌：放置1枚「祝福种子」指示物（可各1次）。【触】回合开始时可选择移除所有「祝福种子」，每以此法移除1枚，则抓牌+1或伤害+1。【触】受到[妨害]效果时，移除1枚种子。若已执行，则不受[妨害]效果的影响。"
       },
       "image": "式神14.png",
       "rarity": "R",
       "charm": 1,
-      "multiPlayer": true
+      "multiPlayer": false
     },
     {
       "id": "shikigami_015",
-      "name": "丑时之女",
+      "name": "独眼小僧",
       "type": "shikigami",
-      "category": "诅咒/优化",
+      "category": "诅咒/永久",
       "passive": {
-        "name": "咒火",
-        "effect": "每个目标首次受到攻击时伤害+1。"
-      },
-      "skill": {
-        "name": "草人替身",
-        "cost": 3,
-        "effect": "[妨害]可将1张手牌给予目标玩家，未获给予的其他玩家获得[恶评]。"
+        "name": "金刚经",
+        "effect": "【永】你的回合外，所有生命低于5的妖怪生命+1。"
       },
       "image": "式神15.png",
       "rarity": "R",
@@ -327,17 +268,13 @@
     },
     {
       "id": "shikigami_016",
-      "name": "青蛙瓷器",
+      "name": "食发鬼",
       "type": "shikigami",
-      "category": "输出/随机",
-      "passive": {
-        "name": "岭上开花",
-        "effect": "每次投掷若为6，则立刻获得[大吉达摩]。"
-      },
+      "category": "辅助/控场",
       "skill": {
-        "name": "转运",
-        "cost": 3,
-        "effect": "投掷1个六面骰，对目标造成总点数的伤害。"
+        "name": "真实之颜",
+        "cost": 1,
+        "effect": "【启】鬼火-1：选择至多3个场上的游荡妖怪置于妖怪牌库底。立刻补充妖怪且其生命-1。"
       },
       "image": "式神16.png",
       "rarity": "R",
@@ -346,36 +283,27 @@
     },
     {
       "id": "shikigami_017",
-      "name": "三尾狐",
+      "name": "巫蛊师",
       "type": "shikigami",
-      "category": "输出/优化",
+      "category": "诅咒/妨害",
       "passive": {
-        "name": "诱惑",
-        "effect": "对非女性目标造成1点伤害。（以图片为准）"
-      },
-      "skill": {
-        "name": "红颜怒发",
-        "cost": 2,
-        "effect": "造成2点伤害，展示牌库顶牌，你可以选择将其弃置。"
+        "name": "迷魂蛊",
+        "effect": "【触】当你超度1张手牌时，鬼火-1：你可以令任一对手展示手牌并用该牌交换其中1张，交换的牌张生命差距不大于2。（无生命的牌视作生命0）"
       },
       "image": "式神17.png",
       "rarity": "R",
       "charm": 1,
-      "multiPlayer": false
+      "multiPlayer": true
     },
     {
       "id": "shikigami_018",
       "name": "山童",
       "type": "shikigami",
-      "category": "输出/爆发",
-      "passive": {
-        "name": "怪力",
-        "effect": "施放技能时，每张手牌令山童技能伤害+1。（最高+3）"
-      },
+      "category": "输出/增强",
       "skill": {
-        "name": "崩山",
-        "cost": 3,
-        "effect": "对目标造成2点伤害。"
+        "name": "怪力",
+        "cost": 1,
+        "effect": "【启】鬼火-1：本回合中，你使用的前2张阴阳术额外伤害+1。"
       },
       "image": "式神18.png",
       "rarity": "R",
@@ -384,17 +312,17 @@
     },
     {
       "id": "shikigami_019",
-      "name": "巫蛊师",
+      "name": "丑时之女",
       "type": "shikigami",
-      "category": "诅咒/爆发",
+      "category": "诅咒/妨害",
       "passive": {
-        "name": "迷魂蛊",
-        "effect": "[妨害]当你超度卡牌后，你可以令另一玩家展示手牌，交换1张[生命值]差距不>2的手牌。（不可连续指定）"
+        "name": "草人替身",
+        "effect": "【触】本回合中，当你首次进行妨害时，抓牌+1。"
       },
       "skill": {
-        "name": "魔蛊毒爆",
-        "cost": 3,
-        "effect": "超度1张手牌对目标造成伤害，为该卡生命值。"
+        "name": "草人替身",
+        "cost": 2,
+        "effect": "【启】[妨害] 鬼火-2：选择1张手牌，将其给予一名对手，其他对手获得1张「恶评」牌。"
       },
       "image": "式神19.png",
       "rarity": "R",
@@ -403,17 +331,12 @@
     },
     {
       "id": "shikigami_020",
-      "name": "食发鬼",
+      "name": "三尾狐",
       "type": "shikigami",
-      "category": "辅助/反制",
+      "category": "输出/被动",
       "passive": {
-        "name": "迷烟",
-        "effect": "当你被妨害后，抓1张牌。回合外获得卡时，将他置于手上。"
-      },
-      "skill": {
-        "name": "真实之颜",
-        "cost": 3,
-        "effect": "对目标造成2点伤害。你可以将任意数量的游荡妖怪置入牌库底并立刻刷新之。"
+        "name": "诱惑",
+        "effect": "【永】回合内首次对非女性目标造成的伤害+1。（这是一个娱乐向的设定，玩家可以自行讨论，会认为有明显女性特征的则不符合标准）"
       },
       "image": "式神20.png",
       "rarity": "R",
@@ -422,17 +345,13 @@
     },
     {
       "id": "shikigami_021",
-      "name": "青行灯",
+      "name": "青蛙瓷器",
       "type": "shikigami",
-      "category": "辅助/增强",
-      "passive": {
-        "name": "明灯",
-        "effect": "每回合你可以弃置1张生命>5的手牌，立刻施放1次技能。"
-      },
+      "category": "输出/随机",
       "skill": {
-        "name": "吸魂灯",
-        "cost": 3,
-        "effect": "对目标造成1伤害，击杀该目标时将其置入手牌。"
+        "name": "岭上开花",
+        "cost": 1,
+        "effect": "【启】鬼火-1：投掷1颗鬼火骰，若结果为4-5或鬼面，则伤害+2。"
       },
       "image": "式神21.png",
       "rarity": "R",
@@ -441,55 +360,43 @@
     },
     {
       "id": "shikigami_022",
-      "name": "鬼女红叶",
+      "name": "铁鼠",
       "type": "shikigami",
-      "category": "辅助/输出",
-      "passive": {
-        "name": "爆炸之咒",
-        "effect": "单位死亡时对另2个目标造成1点伤害。对有红枫娃娃的则伤害+1。"
-      },
+      "category": "诅咒/妨害",
       "skill": {
-        "name": "死亡之舞",
+        "name": "横财护身",
         "cost": 2,
-        "effect": "对2个目标各造成1点伤害且放置1个[红枫娃娃]。"
+        "effect": "【启】[妨害] 鬼火-2：每名对手弃置库顶牌2张牌，若弃置的牌中含有阴阳术，你可以选择其中1张并置入自己的弃牌区。"
       },
       "image": "式神22.png",
-      "rarity": "R",
-      "charm": 1,
-      "multiPlayer": false
-    },
-    {
-      "id": "shikigami_023",
-      "name": "独眼小僧",
-      "type": "shikigami",
-      "category": "诅咒/随机",
-      "passive": {
-        "name": "金刚经",
-        "effect": "回合外，所有的游荡妖怪生命值+1。"
-      },
-      "skill": {
-        "name": "石像冲击",
-        "cost": 2,
-        "effect": "将目标游荡妖怪置于牌库底并立刻刷新，登场妖怪生命-3。"
-      },
-      "image": "式神23.png",
       "rarity": "R",
       "charm": 1,
       "multiPlayer": true
     },
     {
-      "id": "shikigami_024",
-      "name": "萤草",
+      "id": "shikigami_023",
+      "name": "座敷童子",
       "type": "shikigami",
-      "category": "辅助/反制",
-      "passive": {
-        "name": "生花",
-        "effect": "回合开始时移除所有[祝福种子]，每个+1抓牌并对目标造成1点伤害。"
-      },
+      "category": "辅助/打火",
       "skill": {
-        "name": "治愈之光",
-        "cost": 3,
-        "effect": "获得1枚[祝福种子]指示物。可移除1枚[祝福种子]无视[鬼王来袭]。"
+        "name": "魂之火",
+        "cost": 0,
+        "effect": "【启】弃置1张妖怪牌：鬼火+1。"
+      },
+      "image": "式神23.png",
+      "rarity": "R",
+      "charm": 1,
+      "multiPlayer": false
+    },
+    {
+      "id": "shikigami_024",
+      "name": "山兔",
+      "type": "shikigami",
+      "category": "辅助/抓牌",
+      "skill": {
+        "name": "兔子舞",
+        "cost": 1,
+        "effect": "【启】鬼火-1：抓牌+1，然后弃置1张牌。若弃置了妖怪牌，则伤害+1。"
       },
       "image": "式神24.png",
       "rarity": "R",
@@ -693,508 +600,457 @@
       "id": "yokai_001",
       "name": "赤舌",
       "type": "yokai",
-      "cost": 2,
       "hp": 2,
-      "armor": 0,
       "subtype": "御魂/妨害",
-      "effect": "每位对手从他的弃牌堆中，选择1张[灯笼鬼]或[红蛋]置于牌库顶。",
+      "effect": "每名对手从他的弃牌堆中，选择1张「基础术式」或「招福达摩」置于各自牌库顶。",
       "image": "游荡01.png",
       "charm": 1,
-      "multiPlayer": false
+      "count": 2,
+      "multiPlayer": 0
     },
     {
       "id": "yokai_002",
       "name": "唐纸伞妖",
       "type": "yokai",
-      "cost": 2,
-      "hp": 3,
-      "armor": 0,
+      "hp": 2,
       "subtype": "御魂",
-      "effect": "伤害+1，检视你的牌库顶牌，你可以超度它。",
+      "effect": "伤害+1，查看你牌库顶牌，你可以超度它。",
       "image": "游荡02.png",
       "charm": 0,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_003",
       "name": "天邪鬼绿",
       "type": "yokai",
-      "cost": 2,
       "hp": 2,
-      "armor": 0,
       "subtype": "御魂",
-      "effect": "立刻退治1名生命为4或以下的游荡妖怪。",
+      "effect": "退治1个生命不高于4的游荡妖怪。",
       "image": "游荡03.png",
       "charm": 0,
-      "multiPlayer": false
+      "count": 2,
+      "multiPlayer": 0
     },
     {
       "id": "yokai_004",
       "name": "天邪鬼青",
       "type": "yokai",
-      "cost": 2,
-      "hp": 3,
-      "armor": 0,
+      "hp": 2,
       "subtype": "御魂",
-      "effect": "抓牌+1或鬼火+1。",
+      "effect": "选择一项：· 抓牌+1 · 伤害+1",
       "image": "游荡04.png",
       "charm": 0,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_005",
       "name": "天邪鬼赤",
       "type": "yokai",
-      "cost": 2,
-      "hp": 4,
-      "armor": 0,
+      "hp": 2,
       "subtype": "御魂",
-      "effect": "伤害+1，从手上弃置任意数量张牌，并抓等量的牌。",
+      "effect": "伤害+1，弃置任意数量的手牌，然后抓等量的牌。",
       "image": "游荡05.png",
       "charm": 0,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_006",
       "name": "天邪鬼黄",
       "type": "yokai",
-      "cost": 2,
-      "hp": 4,
-      "armor": 0,
+      "hp": 2,
       "subtype": "御魂",
-      "effect": "抓牌+2，将1张手牌放置到牌库顶。",
+      "effect": "抓牌+2，然后将1张手牌放置到牌库顶。",
       "image": "游荡06.png",
       "charm": 0,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_007",
-      "name": "钟灵",
+      "name": "魅妖",
       "type": "yokai",
-      "cost": 3,
-      "hp": 2,
-      "armor": 0,
+      "hp": 3,
       "subtype": "御魂/妨害",
-      "effect": "抓牌+2，每位玩家将1张手牌交给左侧玩家。然后你可以超度1张手牌。",
+      "effect": "每名对手展示他的牌库顶牌，你选择其中一张生命低于5的牌，使用其效果，然后将其置于拥有者的弃牌区。",
       "image": "游荡07.png",
       "charm": 0,
-      "multiPlayer": false
+      "count": 2,
+      "multiPlayer": 0
     },
     {
       "id": "yokai_008",
-      "name": "魅妖",
+      "name": "灯笼鬼",
       "type": "yokai",
-      "cost": 3,
-      "hp": 2,
-      "armor": 0,
-      "subtype": "御魂",
-      "effect": "每位对手展示他的牌库顶牌，你选择其中一张非鬼王卡立刻打出，然后将他放回拥有者的牌库顶。",
+      "hp": 3,
+      "subtype": "御魂/鬼火",
+      "effect": "鬼火+1，抓牌+1。",
       "image": "游荡08.png",
       "charm": 0,
-      "multiPlayer": false
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_009",
-      "name": "被服",
+      "name": "树妖",
       "type": "yokai",
-      "cost": 3,
       "hp": 3,
-      "armor": 0,
-      "subtype": "鬼火",
-      "effect": "鬼火+1。从牌库顶开始展示直到展示出1张鬼火，你可以选择超度它或与其他展示牌一并弃置。",
+      "subtype": "御魂",
+      "effect": "抓牌+2，然后，弃置1张手牌。【触】当此牌被弃置时，则获得抓牌+2。",
       "image": "游荡09.png",
       "charm": 0,
-      "multiPlayer": false
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_010",
-      "name": "树妖",
+      "name": "日女巳时",
       "type": "yokai",
-      "cost": 3,
       "hp": 3,
-      "armor": 0,
-      "subtype": "御魂",
-      "effect": "抓1张牌。若此牌回合内被弃置，则抓2张牌。",
+      "subtype": "御魂/鬼火",
+      "effect": "选择一项：· 鬼火+1 · 抓牌+2 · 伤害+2",
       "image": "游荡10.png",
       "charm": 0,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_011",
-      "name": "日女巳时",
+      "name": "蚌精",
       "type": "yokai",
-      "cost": 3,
-      "hp": 4,
-      "armor": 0,
+      "hp": 3,
       "subtype": "御魂",
-      "effect": "选择一项：抓牌+2，鬼火+2，伤害+2。",
+      "effect": "超度1张手牌，抓牌+2。",
       "image": "游荡11.png",
       "charm": 0,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_012",
-      "name": "蚌精",
+      "name": "鸣屋",
       "type": "yokai",
-      "cost": 3,
-      "hp": 4,
-      "armor": 0,
-      "subtype": "御魂/令牌",
-      "effect": "抓1张牌。游戏结束时，令牌+1。",
+      "hp": 3,
+      "subtype": "御魂",
+      "effect": "若你的弃牌堆没有牌，则伤害+4，否则伤害+2。",
       "image": "游荡12.png",
       "charm": 0,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_013",
-      "name": "鸣屋",
+      "name": "蝠翼",
       "type": "yokai",
-      "cost": 3,
-      "hp": 4,
-      "armor": 0,
+      "hp": 3,
       "subtype": "御魂",
-      "effect": "若你的弃牌堆没有牌，则伤害+4，否则伤害+2。",
+      "effect": "抓牌+1，伤害+1。",
       "image": "游荡13.png",
-      "charm": 0,
-      "multiPlayer": true
+      "charm": 1,
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_014",
-      "name": "蝠翼",
+      "name": "兵主部",
       "type": "yokai",
-      "cost": 3,
-      "hp": 5,
-      "armor": 0,
+      "hp": 3,
       "subtype": "御魂",
-      "effect": "伤害+1，抓牌+1。",
+      "effect": "伤害+2。",
       "image": "游荡14.png",
       "charm": 1,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_015",
-      "name": "兵主部",
+      "name": "魍魉之匣",
       "type": "yokai",
-      "cost": 3,
-      "hp": 5,
-      "armor": 0,
-      "subtype": "御魂",
-      "effect": "伤害+2。",
+      "hp": 4,
+      "subtype": "御魂/妨害",
+      "effect": "抓牌+1，伤害+1。所有玩家展示牌库顶牌，由你决定这些牌保留或弃置。",
       "image": "游荡15.png",
-      "charm": 1,
-      "multiPlayer": true
+      "charm": 0,
+      "count": 1,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_016",
-      "name": "魍魉之匣",
+      "name": "骰子鬼",
       "type": "yokai",
-      "cost": 4,
-      "hp": 2,
-      "armor": 0,
-      "subtype": "御魂/妨害",
-      "effect": "抓牌+1，攻击+1。所有玩家展示牌库顶，你来决定这些牌保留或弃置。",
+      "hp": 4,
+      "subtype": "御魂",
+      "effect": "超度1张手牌。然后选择1张生命不高于超度牌2点的游荡妖怪，将其退治。",
       "image": "游荡16.png",
-      "charm": 0,
-      "multiPlayer": true
+      "charm": 1,
+      "count": 2,
+      "multiPlayer": 0
     },
     {
       "id": "yokai_017",
-      "name": "骰子鬼",
+      "name": "涅槃之火",
       "type": "yokai",
-      "cost": 4,
-      "hp": 2,
-      "armor": 0,
-      "subtype": "御魂",
-      "effect": "从你手上超度另一张牌，并立刻退治生命不超过该牌2点的单位。",
+      "hp": 4,
+      "subtype": "御魂/鬼火",
+      "effect": "本回合中，所有式神技能的鬼火消耗-1。（最低为0）",
       "image": "游荡17.png",
       "charm": 1,
-      "multiPlayer": false
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_018",
-      "name": "涅槃之火",
+      "name": "雪幽魂",
       "type": "yokai",
-      "cost": 4,
-      "hp": 2,
-      "armor": 0,
-      "subtype": "鬼火",
-      "effect": "鬼火+1，所有的[灯笼鬼]额外+1鬼火。",
+      "hp": 4,
+      "subtype": "御魂/妨害",
+      "effect": "抓牌+1，每名对手玩家弃置1张恶评，否则获得1张恶评。",
       "image": "游荡18.png",
       "charm": 1,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_019",
-      "name": "雪幽魂",
+      "name": "轮入道",
       "type": "yokai",
-      "cost": 4,
-      "hp": 3,
-      "armor": 0,
-      "subtype": "御魂/妨害",
-      "effect": "抓牌+2，所有其他玩家须弃置一张[恶评]，若不能则获得1张[恶评]卡及1张[三昧]卡。",
+      "hp": 4,
+      "subtype": "御魂",
+      "effect": "弃置你手上另一张生命不高于6的御魂，执行其效果两次。",
       "image": "游荡19.png",
-      "charm": 1,
-      "multiPlayer": true
+      "charm": 0,
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_020",
-      "name": "轮入道",
+      "name": "网切",
       "type": "yokai",
-      "cost": 4,
-      "hp": 3,
-      "armor": 0,
+      "hp": 4,
       "subtype": "御魂",
-      "effect": "打出你手上另一张御魂（不视作使用），并执行其效果2次。",
+      "effect": "本回合中，所有妖怪（包括手牌）生命-1，鬼王生命-2，但不会低于1点。",
       "image": "游荡20.png",
       "charm": 0,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_021",
-      "name": "网切",
+      "name": "铮",
       "type": "yokai",
-      "cost": 4,
       "hp": 4,
-      "armor": 0,
-      "subtype": "御魂",
-      "effect": "所有的卡（包括手牌）生命-1，鬼王生命-2，但不会低于1点。",
+      "subtype": "御魂/反制",
+      "effect": "抓牌+1，伤害+2。【触】受到[妨害]效果时，可以弃置此牌：抓牌+2，不受[妨害]效果影响。",
       "image": "游荡21.png",
       "charm": 0,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_022",
-      "name": "铮",
+      "name": "薙魂",
       "type": "yokai",
-      "cost": 4,
       "hp": 4,
-      "armor": 0,
-      "subtype": "御魂",
-      "effect": "抓牌+1，伤害+2。",
+      "subtype": "御魂/鬼火",
+      "effect": "抓牌+1，弃置1张手牌。本回合中，若你打出了至少3张「御魂」（包括此牌），则鬼火+2。",
       "image": "游荡22.png",
-      "charm": 0,
-      "multiPlayer": true
+      "charm": 1,
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_023",
-      "name": "薙魂",
+      "name": "狂骨",
       "type": "yokai",
-      "cost": 4,
-      "hp": 6,
-      "armor": 0,
-      "subtype": "御魂/令牌",
-      "effect": "如果回合内你使用过3张御魂（包括本卡），则鬼火+2。游戏结束时，令牌+X。（X为本卡张数的平方）",
+      "hp": 5,
+      "subtype": "御魂",
+      "effect": "抓牌+1，伤害+X，X等于你当前的鬼火数量。",
       "image": "游荡23.png",
-      "charm": 1,
-      "multiPlayer": true
+      "charm": 0,
+      "count": 2,
+      "multiPlayer": 0
     },
     {
       "id": "yokai_024",
-      "name": "狂骨",
+      "name": "返魂香",
       "type": "yokai",
-      "cost": 5,
-      "hp": 2,
-      "armor": 0,
-      "subtype": "御魂",
-      "effect": "抓1张牌，回合内每次施放式神技能，对目标额外造成2点伤害。",
+      "hp": 5,
+      "subtype": "御魂/妨害",
+      "effect": "抓牌+1，伤害+1。每名对手选择一项：· 弃置1张手牌（无手牌时不可选）· 获得1张恶评",
       "image": "游荡24.png",
-      "charm": 0,
-      "multiPlayer": false
+      "charm": 1,
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_025",
-      "name": "返魂香",
+      "name": "镇墓兽",
       "type": "yokai",
-      "cost": 5,
-      "hp": 3,
-      "armor": 0,
-      "subtype": "御魂/妨害",
-      "effect": "抓牌+2，每位其他玩家选择一项：弃置2张手牌，或者将1张恶评卡置于手上。",
+      "hp": 5,
+      "subtype": "御魂/鬼火",
+      "effect": "鬼火+1，抓牌+1，伤害+2，你左手边的玩家指定一个游荡妖怪或鬼王，本回合中你不能将其退治。",
       "image": "游荡25.png",
       "charm": 1,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_026",
-      "name": "镇墓兽",
+      "name": "针女",
       "type": "yokai",
-      "cost": 5,
-      "hp": 3,
-      "armor": 0,
-      "subtype": "御魂/鬼火",
-      "effect": "抓牌+1，伤害+2，鬼火+2，使用它时，你左侧的玩家指定一个单位，你不能于本回合退治它。",
+      "hp": 5,
+      "subtype": "御魂",
+      "effect": "伤害+1。本回合中，每当你使用式神技能时，伤害+2。",
       "image": "游荡26.png",
       "charm": 1,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_027",
-      "name": "针女",
+      "name": "心眼",
       "type": "yokai",
-      "cost": 5,
-      "hp": 4,
-      "armor": 0,
+      "hp": 5,
       "subtype": "御魂",
-      "effect": "抓牌+3，然后弃置任意数量的手牌，回合内每弃置1张手牌，攻击+1。",
+      "effect": "伤害+3。",
       "image": "游荡27.png",
-      "charm": 1,
-      "multiPlayer": true
+      "charm": 0,
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_028",
-      "name": "心眼",
+      "name": "涂佛",
       "type": "yokai",
-      "cost": 5,
-      "hp": 4,
-      "armor": 0,
+      "hp": 5,
       "subtype": "御魂",
-      "effect": "伤害+3。",
+      "effect": "选择你弃牌区中三张阴阳术，将其置入手牌。",
       "image": "游荡28.png",
       "charm": 0,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_029",
-      "name": "涂佛",
+      "name": "地藏像",
       "type": "yokai",
-      "cost": 5,
-      "hp": 4,
-      "armor": 0,
+      "hp": 5,
       "subtype": "御魂",
-      "effect": "你可以于弃牌堆中取回3张[鬼火]卡和/或[令牌卡]。",
+      "effect": "超度此牌。获取1个式神（式神上限为3个）。",
       "image": "游荡29.png",
-      "charm": 0,
-      "multiPlayer": true
+      "charm": 2,
+      "count": 4,
+      "multiPlayer": 0
     },
     {
       "id": "yokai_030",
-      "name": "地藏像",
+      "name": "飞缘魔",
       "type": "yokai",
-      "cost": 5,
-      "hp": 4,
-      "armor": 0,
-      "subtype": "御魂/令牌",
-      "effect": "抓牌+1。游戏结束时，牌库里每有8张卡，则[令牌]+1。",
+      "hp": 6,
+      "subtype": "御魂",
+      "effect": "使用当前存在的鬼王御魂效果。",
       "image": "游荡30.png",
-      "charm": 2,
-      "multiPlayer": false
+      "charm": 1,
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_031",
-      "name": "飞缘魔",
+      "name": "破势",
       "type": "yokai",
-      "cost": 6,
-      "hp": 3,
-      "armor": 0,
+      "hp": 6,
       "subtype": "御魂",
-      "effect": "使用[鬼王]牌组的顶牌，然后将他放回原处。",
+      "effect": "伤害+3。若此牌为你本回合中使用的第一张牌，则上述效果改为伤害+5。",
       "image": "游荡31.png",
       "charm": 1,
-      "multiPlayer": true
+      "count": 3,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_032",
-      "name": "破势",
+      "name": "镜姬",
       "type": "yokai",
-      "cost": 6,
-      "hp": 4,
-      "armor": 0,
-      "subtype": "御魂",
-      "effect": "伤害+4，若为回合内首次攻击，投掷1枚骰子。1-3则伤害+1，4-5则伤害+2,6则伤害+3。",
+      "hp": 6,
+      "subtype": "御魂/鬼火",
+      "effect": "抓牌+2，伤害+1，鬼火+1。【妖】【永】此牌不会受到由阴阳术产生的伤害。",
       "image": "游荡32.png",
       "charm": 1,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 2
     },
     {
       "id": "yokai_033",
-      "name": "镜姬",
+      "name": "木魅",
       "type": "yokai",
-      "cost": 6,
-      "hp": 4,
-      "armor": 0,
+      "hp": 6,
       "subtype": "御魂",
-      "effect": "抓牌+2，伤害+1，鬼火+2，你无法使用普攻对它造成伤害。",
+      "effect": "从你的牌库顶开始展示卡牌，直到出现3张阴阳术，将它们置入手牌，弃置其余展示的卡牌。",
       "image": "游荡33.png",
       "charm": 1,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 2
     },
     {
       "id": "yokai_034",
-      "name": "木魅",
+      "name": "幽谷响",
       "type": "yokai",
-      "cost": 6,
-      "hp": 4,
-      "armor": 0,
-      "subtype": "鬼火",
-      "effect": "从你的牌库顶持续展示，直到展示出2张鬼火卡。将它们置入手牌，并将以此方式展示的其他牌弃置。",
+      "hp": 7,
+      "subtype": "御魂/妨害",
+      "effect": "每名对手展示牌库顶牌，你可以使用至多3张以此法展示的非鬼王的效果，然后，将它们置于拥有者的弃牌区。",
       "image": "游荡34.png",
       "charm": 1,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_035",
-      "name": "幽谷响",
+      "name": "伤魂鸟",
       "type": "yokai",
-      "cost": 7,
-      "hp": 3,
-      "armor": 0,
-      "subtype": "御魂/妨害",
-      "effect": "每位对手展示牌库顶牌，你可以使用所有以此法展示的非鬼王卡，然后将他们放到其拥有者的弃牌堆。",
+      "hp": 7,
+      "subtype": "御魂",
+      "effect": "超度X张手牌。然后伤害+2X。",
       "image": "游荡35.png",
       "charm": 1,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_036",
-      "name": "伤魂鸟",
+      "name": "阴摩罗",
       "type": "yokai",
-      "cost": 7,
-      "hp": 3,
-      "armor": 0,
+      "hp": 7,
       "subtype": "御魂",
-      "effect": "超度任意数量的手牌。退治目标生命等于超度牌总生命的单位。",
+      "effect": "选择弃牌区内2张生命低于6的牌，使用之。在回合结束时，将它们返回你的牌库底。",
       "image": "游荡36.png",
       "charm": 1,
-      "multiPlayer": true
+      "count": 2,
+      "multiPlayer": 1
     },
     {
       "id": "yokai_037",
-      "name": "阴摩罗",
+      "name": "青女房",
       "type": "yokai",
-      "cost": 7,
-      "hp": 4,
-      "armor": 0,
-      "subtype": "御魂",
-      "effect": "超度另1张手牌，退治目标生命不大于该牌生命+3的单位。",
+      "hp": 8,
+      "subtype": "御魂/鬼火",
+      "effect": "抓牌+2，鬼火+1。受到妨害和鬼王来袭时，你可以展示本卡而不受影响。",
       "image": "游荡37.png",
-      "charm": 1,
-      "multiPlayer": true
+      "charm": 2,
+      "count": 2,
+      "multiPlayer": 0
     },
     {
       "id": "yokai_038",
-      "name": "青女房",
-      "type": "yokai",
-      "cost": 8,
-      "hp": 2,
-      "armor": 0,
-      "subtype": "御魂",
-      "effect": "获得1张[火灵]并放置在你的牌库顶。受到妨害和鬼王来袭时，你可以展示本卡从而不受到影响。",
-      "image": "游荡38.png",
-      "charm": 2,
-      "multiPlayer": false
-    },
-    {
-      "id": "yokai_039",
       "name": "三味",
       "type": "yokai",
-      "cost": 8,
-      "hp": 2,
-      "armor": 0,
-      "subtype": "御魂/鬼火",
-      "effect": "每使用1张鬼火卡，则额外鬼火+2。若本牌被弃置，则抓牌+3。",
-      "image": "游荡39.png",
+      "hp": 8,
+      "subtype": "御魂",
+      "effect": "本回合中，你每使用了1张「鬼火」牌或阴阳术，则伤害+2。【触】当此牌被弃置时，获得抓牌+3。",
+      "image": "游荡38.png",
       "charm": 2,
-      "multiPlayer": false
+      "count": 2,
+      "multiPlayer": 0
     }
   ],
   "playerSetup": {

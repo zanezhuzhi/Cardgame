@@ -5,6 +5,11 @@
       "source": "api/git/@excel2html",
       "sourceType": "git",
       "computedHash": "dfdd1180d309ea5174f721165dc6479b1015fe6bc859c5c5a2539d47a1bcf452"
+    },
+    "uip": {
+      "source": "api/git/@uip",
+      "sourceType": "git",
+      "computedHash": "af5b11046f885455a5dc2248fb53cc6e3fee9975bfdd8e6ec52cefee1084aac0"
     }
   }
 }

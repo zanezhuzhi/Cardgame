@@ -71,11 +71,11 @@ describe('CardLoader 数据加载器', () => {
       ssr.forEach(s => expect(s.charm).toBe(3));
     });
 
-    it('有5个多人专属式神', () => {
-      // 百目鬼、铁鼠、丑时之女、巫蛊师、独眼小僧
+    it('有6个多人专属式神', () => {
+      // 百目鬼、铁鼠、丑时之女、巫蛊师、独眼小僧、食梦貘
       const shikigami = getAllShikigami();
       const multiPlayer = shikigami.filter(s => s.multiPlayer === true);
-      expect(multiPlayer.length).toBe(5);
+      expect(multiPlayer.length).toBe(6);
     });
   });
 
@@ -136,9 +136,9 @@ describe('CardLoader 数据加载器', () => {
   });
 
   describe('🟢 游荡妖怪', () => {
-    it('有39种妖怪', () => {
+    it('有38种妖怪（不含招福达摩）', () => {
       const yokai = getAllYokai();
-      expect(yokai.length).toBe(39);
+      expect(yokai.length).toBe(38);
     });
 
     it('4人以下游戏过滤多人妖怪', () => {

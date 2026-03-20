@@ -11,7 +11,10 @@ import type {
   DrawEffect, GhostFireEffect, DamageEffect, DiscardEffect,
   ExileHandEffect, GainSpellEffect, GainPenaltyEffect,
   MarkerAddEffect, MarkerRemoveEffect, KillYokaiEffect,
-  InterfereEffect,
+  InterfereEffect, TempBuffEffect, ReduceHpEffect,
+  RecoverFromDiscardEffect, GainShikigamiEffect,
+  PutTopEffect, PutBottomEffect, RevealTopEffect,
+  SkipCleanupEffect, HealYokaiEffect, TempBuffType,
 } from './types';
 
 import type { CardInstance } from '../../types/cards';
@@ -211,6 +214,150 @@ export class EffectEngine {
           const subCtx: EffectContext = { ...ctx, player: target };
           for (const sub of effect.subEffects) {
             await this.executeAtom(sub, subCtx);
+          }
+        }
+        break;
+      }
+
+      case 'TEMP_BUFF': {
+        const buff = effect as TempBuffEffect;
+        player.tempBuffs.push({
+          type: buff.buffType,
+          value: buff.value,
+          duration: buff.duration ?? 1,
+          condition: buff.condition,
+          remainingUses: buff.value, // 用于计数型buff
+        });
+        break;
+      }
+
+      case 'REDUCE_HP': {
+        const reduceEffect = effect as ReduceHpEffect;
+        if (reduceEffect.target === 'YOKAI' || reduceEffect.target === 'ALL') {
+          for (const slot of gameState.field.yokaiSlots) {
+            if (slot) {
+              slot.hp = Math.max(1, slot.hp - reduceEffect.value);
+            }
+          }
+        }
+        if (reduceEffect.target === 'BOSS' || reduceEffect.target === 'ALL') {
+          if (gameState.field.bossHp > 0) {
+            gameState.field.bossHp = Math.max(1, gameState.field.bossHp - reduceEffect.value);
+          }
+        }
+        break;
+      }
+
+      case 'RECOVER_FROM_DISCARD': {
+        const recoverEffect = effect as RecoverFromDiscardEffect;
+        const candidates = player.discard.filter(c => {
+          if (recoverEffect.cardType === 'spell') return c.cardType === 'spell';
+          if (recoverEffect.cardType === 'yokai') return c.cardType === 'yokai';
+          return true;
+        });
+        
+        if (candidates.length > 0 && ctx.onSelectCards) {
+          const ids = await ctx.onSelectCards(candidates, Math.min(recoverEffect.count, candidates.length));
+          for (const id of ids) {
+            const idx = player.discard.findIndex(c => c.instanceId === id);
+            if (idx !== -1) {
+              player.hand.push(player.discard.splice(idx, 1)[0]!);
+            }
+          }
+        } else {
+          // fallback: 取前N张符合条件的
+          const toRecover = candidates.slice(0, recoverEffect.count);
+          for (const card of toRecover) {
+            const idx = player.discard.findIndex(c => c.instanceId === card.instanceId);
+            if (idx !== -1) {
+              player.hand.push(player.discard.splice(idx, 1)[0]!);
+            }
+          }
+        }
+        break;
+      }
+
+      case 'PUT_TOP': {
+        const putTopEffect = effect as PutTopEffect;
+        const count = putTopEffect.count ?? 1;
+        if (ctx.onSelectCards && player.hand.length > 0) {
+          const ids = await ctx.onSelectCards(player.hand, Math.min(count, player.hand.length));
+          for (const id of ids) {
+            const idx = player.hand.findIndex(c => c.instanceId === id);
+            if (idx !== -1) {
+              player.deck.push(player.hand.splice(idx, 1)[0]!);
+            }
+          }
+        }
+        break;
+      }
+
+      case 'PUT_BOTTOM': {
+        const putBottomEffect = effect as PutBottomEffect;
+        const count = putBottomEffect.count ?? 1;
+        if (ctx.onSelectCards && player.hand.length > 0) {
+          const ids = await ctx.onSelectCards(player.hand, Math.min(count, player.hand.length));
+          for (const id of ids) {
+            const idx = player.hand.findIndex(c => c.instanceId === id);
+            if (idx !== -1) {
+              player.deck.unshift(player.hand.splice(idx, 1)[0]!);
+            }
+          }
+        }
+        break;
+      }
+
+      case 'REVEAL_TOP': {
+        const revealEffect = effect as RevealTopEffect;
+        // 展示效果通常需要UI层处理
+        // 这里只做数据准备，标记展示的牌
+        const revealed: any[] = [];
+        for (let i = 0; i < revealEffect.count && player.deck.length > 0; i++) {
+          const card = player.deck[player.deck.length - 1 - i];
+          if (card) revealed.push(card);
+        }
+        // 通过 ctx 传递展示信息
+        if (ctx.onSelectTarget && revealEffect.canExile && revealed.length > 0) {
+          const id = await ctx.onSelectTarget(revealed);
+          const idx = player.deck.findIndex(c => c.instanceId === id);
+          if (idx !== -1) {
+            player.exiled.push(player.deck.splice(idx, 1)[0]!);
+          }
+        }
+        break;
+      }
+
+      case 'SKIP_CLEANUP': {
+        // 标记跳过清理阶段
+        player.tempBuffs.push({
+          type: 'SKIP_CLEANUP' as any,
+          value: 1,
+          duration: 1,
+        });
+        break;
+      }
+
+      case 'HEAL_YOKAI': {
+        const healEffect = effect as HealYokaiEffect;
+        for (const slot of gameState.field.yokaiSlots) {
+          if (slot) {
+            const shouldHeal = !healEffect.maxHp || slot.maxHp <= healEffect.maxHp;
+            if (shouldHeal) {
+              slot.hp = Math.min(slot.maxHp, slot.hp + healEffect.value);
+            }
+          }
+        }
+        break;
+      }
+
+      case 'GAIN_SHIKIGAMI': {
+        // 获取式神逻辑，需要 GameManager 层面处理
+        // 这里只做标记
+        if (ctx.sourceCard) {
+          const gainEffect = effect as GainShikigamiEffect;
+          if (gainEffect.exileThis) {
+            // 将触发此效果的卡牌超度
+            player.exiled.push(ctx.sourceCard);
           }
         }
         break;

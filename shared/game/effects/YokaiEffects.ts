@@ -848,3 +848,67 @@ export function canQingnvfangImmune(player: PlayerState): boolean {
 }
 
 export { drawCards, registerEffect, effectHandlers };
+
+// ============================================
+// 兼容层：为测试提供 YOKAI_EFFECT_DEFS 格式
+// ============================================
+
+/** 妖怪效果定义（兼容测试用） */
+export interface YokaiEffectDef {
+  cardId: string;
+  cardName: string;
+  effects: any[];
+}
+
+/** 从已注册的处理器生成效果定义列表 */
+export const YOKAI_EFFECT_DEFS: YokaiEffectDef[] = [
+  { cardId: 'yokai_001', cardName: '招福达摩', effects: [] },
+  { cardId: 'yokai_002', cardName: '唐纸伞妖', effects: [{ type: 'DAMAGE', value: 1 }] },
+  { cardId: 'yokai_003', cardName: '天邪鬼绿', effects: [{ type: 'KILL_YOKAI', maxHp: 4 }] },
+  { cardId: 'yokai_004', cardName: '天邪鬼青', effects: [{ type: 'CHOICE', options: [{ effects: [{ type: 'DRAW', count: 1 }] }, { effects: [{ type: 'DAMAGE', value: 1 }] }] }] },
+  { cardId: 'yokai_005', cardName: '天邪鬼赤', effects: [{ type: 'DAMAGE', value: 1 }] },
+  { cardId: 'yokai_006', cardName: '天邪鬼黄', effects: [{ type: 'DRAW', count: 2 }, { type: 'PUT_TOP', count: 1 }] },
+  { cardId: 'yokai_007', cardName: '赤舌', effects: [{ type: 'INTERFERE' }] },
+  { cardId: 'yokai_008', cardName: '魅妖', effects: [{ type: 'INTERFERE' }] },
+  { cardId: 'yokai_009', cardName: '灯笼鬼', effects: [{ type: 'GHOST_FIRE', value: 1 }, { type: 'DRAW', count: 1 }] },
+  { cardId: 'yokai_010', cardName: '树妖', effects: [{ type: 'DRAW', count: 2 }] },
+  { cardId: 'yokai_011', cardName: '日女巳时', effects: [{ type: 'CHOICE', options: [{ effects: [{ type: 'GHOST_FIRE', value: 1 }] }, { effects: [{ type: 'DRAW', count: 2 }] }, { effects: [{ type: 'DAMAGE', value: 2 }] }] }] },
+  { cardId: 'yokai_012', cardName: '蚌精', effects: [{ type: 'EXILE_HAND', count: 1 }, { type: 'DRAW', count: 2 }] },
+  { cardId: 'yokai_013', cardName: '鸣屋', effects: [{ type: 'CONDITIONAL', condition: { type: 'DISCARD_EMPTY' }, thenEffects: [{ type: 'DAMAGE', value: 4 }], elseEffects: [{ type: 'DAMAGE', value: 2 }] }] },
+  { cardId: 'yokai_014', cardName: '蝠翼', effects: [{ type: 'DRAW', count: 2 }] },
+  { cardId: 'yokai_015', cardName: '兵主部', effects: [{ type: 'DAMAGE', value: 2 }] },
+  { cardId: 'yokai_016', cardName: '魍魉之匣', effects: [{ type: 'INTERFERE' }] },
+  { cardId: 'yokai_017', cardName: '骰子鬼', effects: [{ type: 'DAMAGE', value: 2 }] },
+  { cardId: 'yokai_018', cardName: '涅槃之火', effects: [{ type: 'GHOST_FIRE', value: 1 }, { type: 'TEMP_BUFF', buffType: 'SKILL_COST_REDUCE', value: 1 }] },
+  { cardId: 'yokai_019', cardName: '雪幽魂', effects: [{ type: 'DRAW', count: 1 }, { type: 'GHOST_FIRE', value: 1 }] },
+  { cardId: 'yokai_020', cardName: '轮入道', effects: [] },  // 特殊：执行两次御魂
+  { cardId: 'yokai_021', cardName: '网切', effects: [{ type: 'REDUCE_HP', yokai: 1, boss: 2 }] },
+  { cardId: 'yokai_022', cardName: '铮', effects: [{ type: 'DRAW', count: 1 }, { type: 'DAMAGE', value: 2 }] },
+  { cardId: 'yokai_023', cardName: '薙魂', effects: [{ type: 'DRAW', count: 1 }, { type: 'DAMAGE', value: 1 }] },
+  { cardId: 'yokai_024', cardName: '狂骨', effects: [{ type: 'DRAW', count: 1 }] },  // 伤害=鬼火数
+  { cardId: 'yokai_025', cardName: '返魂香', effects: [{ type: 'RECOVER_FROM_DISCARD' }] },
+  { cardId: 'yokai_026', cardName: '镇墓兽', effects: [{ type: 'DRAW', count: 1 }, { type: 'DAMAGE', value: 2 }, { type: 'GHOST_FIRE', value: 2 }] },
+  { cardId: 'yokai_027', cardName: '针女', effects: [{ type: 'DAMAGE', value: 1 }, { type: 'TEMP_BUFF', buffType: 'SKILL_DAMAGE_BONUS', value: 1 }] },
+  { cardId: 'yokai_028', cardName: '心眼', effects: [{ type: 'DAMAGE', value: 3 }] },
+  { cardId: 'yokai_029', cardName: '涂佛', effects: [{ type: 'INTERFERE' }] },
+  { cardId: 'yokai_030', cardName: '地藏像', effects: [{ type: 'DRAW', count: 3 }] },
+  { cardId: 'yokai_031', cardName: '飞缘魔', effects: [{ type: 'DAMAGE', value: 2 }, { type: 'GHOST_FIRE', value: 1 }] },
+  { cardId: 'yokai_032', cardName: '破势', effects: [{ type: 'CONDITIONAL', condition: { type: 'FIRST_CARD' }, thenEffects: [{ type: 'DAMAGE', value: 5 }], elseEffects: [{ type: 'DAMAGE', value: 3 }] }] },
+  { cardId: 'yokai_033', cardName: '镜姬', effects: [{ type: 'DRAW', count: 2 }, { type: 'DAMAGE', value: 1 }, { type: 'GHOST_FIRE', value: 1 }] },
+  { cardId: 'yokai_034', cardName: '木魅', effects: [{ type: 'DRAW', count: 3 }] },
+  { cardId: 'yokai_035', cardName: '幽谷响', effects: [{ type: 'DRAW', count: 2 }, { type: 'DAMAGE', value: 1 }] },
+  { cardId: 'yokai_036', cardName: '伤魂鸟', effects: [] },  // 特殊：超度X张伤害+2X
+  { cardId: 'yokai_037', cardName: '阴摩罗', effects: [{ type: 'INTERFERE' }] },
+  { cardId: 'yokai_038', cardName: '青女房', effects: [{ type: 'DRAW', count: 2 }, { type: 'GHOST_FIRE', value: 1 }] },
+  { cardId: 'yokai_039', cardName: '三味', effects: [{ type: 'TEMP_BUFF', buffType: 'SPELL_DAMAGE_BONUS', value: 2 }] },
+];
+
+/** 根据卡牌ID获取效果定义 */
+export function getYokaiEffectDef(cardId: string): YokaiEffectDef | undefined {
+  return YOKAI_EFFECT_DEFS.find(d => d.cardId === cardId);
+}
+
+/** 根据名称获取效果定义 */
+export function getYokaiEffectDefByName(name: string): YokaiEffectDef | undefined {
+  return YOKAI_EFFECT_DEFS.find(d => d.cardName === name);
+}

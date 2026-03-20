@@ -1,0 +1,39 @@
+# 式神卡牌插画目录
+# 
+# 尺寸建议: 60×60 或 80×80 PNG
+# 总计: 24种式神 (SSR×5 / SR×7 / R×12)
+#
+# ========== SSR 式神 (5种, 声誉+3) ==========
+# - yaodaoji.png - 妖刀姬「杀戮」
+# - datiangu.png - 大天狗「羽刃暴风」
+# - jiutuntongzi.png - 酒吞童子「酒葫芦」
+# - cimutongzi.png - 茨木童子「迁怒」
+# - huaniaojuan.png - 花鸟卷「画境」
+#
+# ========== SR 式神 (7种, 声誉+2) ==========
+# - shuweng.png - 书翁「万象之书」
+# - baimugui.png - 百目鬼「诅咒之眼」🔷多人
+# - guishibai.png - 鬼使白「魂狩」
+# - banruo.png - 般若「嫉恨之心」
+# - zhuiyueshen.png - 追月神「明月潮升」
+# - bailang.png - 白狼「冥想」
+# - shimengmo.png - 食梦貘「沉睡」🔷多人
+#
+# ========== R 式神 (12种, 声誉+1) ==========
+# - liyujing.png - 鲤鱼精「泡泡之盾」
+# - yingcao.png - 萤草「生花」
+# - duyxiaoseng.png - 独眼小僧「金刚经」🔷多人
+# - shifagui.png - 食发鬼「真实之颜」
+# - wugushi.png - 巫蛊师「迷魂蛊」🔷多人
+# - shantong.png - 山童「怪力」
+# - choushizhinv.png - 丑时之女「草人替身」🔷多人
+# - sanweihu.png - 三尾狐「诱惑」
+# - qingwaciqi.png - 青蛙瓷器「岭上开花」
+# - tieshu.png - 铁鼠「横财护身」🔷多人
+# - zuofutongzi.png - 座敷童子「魂之火」
+# - shantu.png - 山兔「兔子舞」
+#
+# AI 生成 Prompt 模板:
+# Japanese shikigami [名字], [SSR/SR/R] rarity,
+# mystical spirit creature, anime style,
+# card game familiar art, glowing aura

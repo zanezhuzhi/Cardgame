@@ -1,0 +1,13 @@
+# UI框架资源目录
+# 
+# 存放文件:
+# - frame_panel.9.png (64×64) - 九宫格面板边框
+# - frame_card.png (100×140) - 卡牌边框
+# - frame_boss.png (120×160) - 鬼王卡边框
+# - frame_shiki.png (80×100) - 式神槽边框
+# - btn_primary.png (160×48) - 主按钮
+# - btn_primary_hover.png (160×48) - 主按钮悬停
+# - btn_secondary.png (120×40) - 次级按钮
+# - divider_gold.png (200×8) - 金色分隔线
+# - logo_title.png (600×200) - 游戏LOGO
+# - logo_sub.png (300×60) - 副标题

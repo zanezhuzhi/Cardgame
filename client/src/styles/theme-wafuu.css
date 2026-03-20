@@ -1,0 +1,604 @@
+/* 御魂传说 - 日式和风主题样式 */
+
+:root {
+  /* 主色调 */
+  --bg-primary: #1a1a2e;
+  --bg-secondary: #2d1f3d;
+  --bg-tertiary: #1e3a5f;
+  
+  /* 金色系 */
+  --gold-border: #d4a574;
+  --gold-bright: #ffd700;
+  --gold-dark: #b8860b;
+  
+  /* 功能色 */
+  --sakura-pink: #ffb7c5;
+  --ghost-fire-blue: #4fc3f7;
+  --damage-red: #ff6b6b;
+  --life-green: #81c784;
+  --charm-gold: #ffc107;
+  
+  /* 面板色 */
+  --panel-bg: rgba(45, 31, 61, 0.85);
+  --panel-border: rgba(212, 165, 116, 0.5);
+  --panel-glass: rgba(255, 255, 255, 0.05);
+  
+  /* 卡牌边框 */
+  --card-border: linear-gradient(135deg, #d4a574, #8b6914, #d4a574);
+}
+
+/* 基础重置 */
+* {
+  box-sizing: border-box;
+}
+
+/* 游戏容器 - 和风背景 */
+.game-container {
+  min-height: 100vh;
+  background: 
+    /* 樱花装饰层 */
+    radial-gradient(circle at 85% 15%, rgba(255, 183, 197, 0.1) 0%, transparent 20%),
+    radial-gradient(circle at 10% 80%, rgba(255, 183, 197, 0.08) 0%, transparent 25%),
+    /* 光晕效果 */
+    radial-gradient(ellipse at 50% 0%, rgba(79, 195, 247, 0.15) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 100%, rgba(156, 39, 176, 0.1) 0%, transparent 40%),
+    /* 主渐变 */
+    linear-gradient(180deg, 
+      var(--bg-primary) 0%, 
+      var(--bg-secondary) 40%, 
+      var(--bg-tertiary) 100%);
+  color: #fff;
+  font-family: 'Microsoft YaHei', 'Hiragino Sans GB', sans-serif;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 背景装饰 - 鸟居剪影 */
+.game-container::before {
+  content: '';
+  position: fixed;
+  bottom: 0;
+  left: 5%;
+  width: 120px;
+  height: 180px;
+  background: linear-gradient(to top, rgba(139, 69, 69, 0.3), transparent);
+  clip-path: polygon(
+    10% 100%, 10% 70%, 0% 70%, 0% 65%, 10% 65%, 10% 30%, 
+    15% 30%, 15% 20%, 20% 20%, 20% 0%, 25% 0%, 25% 20%, 
+    75% 20%, 75% 0%, 80% 0%, 80% 20%, 85% 20%, 85% 30%, 
+    90% 30%, 90% 65%, 100% 65%, 100% 70%, 90% 70%, 90% 100%
+  );
+  opacity: 0.4;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ===== 大厅样式 ===== */
+.lobby {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+
+.lobby-card {
+  background: var(--panel-bg);
+  backdrop-filter: blur(10px);
+  border: 2px solid var(--gold-border);
+  border-radius: 16px;
+  padding: 50px 60px;
+  text-align: center;
+  box-shadow: 
+    0 0 40px rgba(212, 165, 116, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.lobby-card h1 {
+  font-size: 36px;
+  background: linear-gradient(135deg, var(--gold-bright), var(--gold-border));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 8px;
+  text-shadow: 0 2px 20px rgba(255, 215, 0, 0.3);
+}
+
+.lobby-card h2 {
+  color: var(--sakura-pink);
+  font-size: 16px;
+  font-weight: normal;
+  margin-bottom: 30px;
+}
+
+.name-input {
+  width: 100%;
+  padding: 14px 18px;
+  border-radius: 8px;
+  border: 2px solid var(--gold-border);
+  background: rgba(0, 0, 0, 0.3);
+  color: #fff;
+  font-size: 16px;
+  margin-bottom: 20px;
+  transition: all 0.3s;
+}
+
+.name-input:focus {
+  outline: none;
+  border-color: var(--gold-bright);
+  box-shadow: 0 0 15px rgba(255, 215, 0, 0.3);
+}
+
+.name-input::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.btn {
+  padding: 14px 36px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: bold;
+  transition: all 0.3s;
+}
+
+.btn.primary {
+  background: linear-gradient(135deg, var(--gold-border), var(--gold-dark));
+  color: #1a1a2e;
+  border: 2px solid var(--gold-bright);
+  box-shadow: 0 4px 15px rgba(212, 165, 116, 0.4);
+}
+
+.btn.primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 25px rgba(212, 165, 116, 0.6);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.tips {
+  margin-top: 25px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 13px;
+}
+
+/* ===== 游戏面板通用样式 ===== */
+.panel {
+  background: var(--panel-bg);
+  backdrop-filter: blur(8px);
+  border: 2px solid var(--panel-border);
+  border-radius: 8px;
+  box-shadow: 
+    0 4px 20px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.panel-title {
+  font-size: 11px;
+  color: var(--gold-border);
+  font-weight: bold;
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(212, 165, 116, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ===== 卡牌基础样式 ===== */
+.card {
+  position: relative;
+  border-radius: 6px;
+  border: 2px solid var(--gold-border);
+  background: linear-gradient(145deg, rgba(45, 31, 61, 0.9), rgba(26, 26, 46, 0.95));
+  box-shadow: 
+    0 3px 10px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  right: 2px;
+  bottom: 2px;
+  border: 1px solid rgba(212, 165, 116, 0.3);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.card:hover {
+  transform: translateY(-3px);
+  box-shadow: 
+    0 8px 25px rgba(212, 165, 116, 0.3),
+    0 0 15px rgba(255, 215, 0, 0.2);
+}
+
+/* ===== 妖怪卡牌状态 ===== */
+.yokai-card.wounded {
+  border-color: var(--damage-red);
+  background: linear-gradient(145deg, rgba(255, 107, 107, 0.15), rgba(45, 31, 61, 0.9));
+}
+
+.yokai-card.canKill {
+  border-color: var(--life-green);
+  box-shadow: 0 0 15px rgba(129, 199, 132, 0.5);
+  animation: canKillGlow 1.5s ease-in-out infinite;
+}
+
+@keyframes canKillGlow {
+  0%, 100% { box-shadow: 0 0 10px rgba(129, 199, 132, 0.4); }
+  50% { box-shadow: 0 0 20px rgba(129, 199, 132, 0.7); }
+}
+
+.yokai-card.killed {
+  border-color: #e91e63;
+  background: linear-gradient(145deg, rgba(233, 30, 99, 0.2), rgba(45, 31, 61, 0.9));
+}
+
+.killed-badge {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.9);
+  border: 1px solid #e91e63;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 10px;
+  color: #e91e63;
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+/* ===== 鬼王卡牌 ===== */
+.boss-card {
+  background: linear-gradient(145deg, #4a1a2e, #2d0f1a);
+  border: 3px solid var(--gold-border);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+  cursor: pointer;
+  position: relative;
+  box-shadow: 
+    0 0 30px rgba(180, 50, 50, 0.3),
+    inset 0 0 20px rgba(255, 0, 0, 0.1);
+}
+
+.boss-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  background: radial-gradient(circle at 50% 30%, rgba(255, 100, 100, 0.1), transparent 60%);
+  pointer-events: none;
+}
+
+.boss-stage {
+  font-size: 10px;
+  color: var(--gold-bright);
+  font-weight: bold;
+}
+
+.boss-name {
+  font-size: 14px;
+  font-weight: bold;
+  margin: 6px 0;
+  color: #fff;
+}
+
+.boss-hp {
+  font-size: 12px;
+  color: var(--damage-red);
+}
+
+.boss-charm {
+  font-size: 11px;
+  color: var(--charm-gold);
+  margin-top: 4px;
+}
+
+/* ===== 手牌卡牌类型 ===== */
+.hand-card.spell {
+  background: linear-gradient(145deg, #1565c0, #0d47a1);
+  border-color: #42a5f5;
+}
+
+.hand-card.yokai {
+  background: linear-gradient(145deg, #2e7d32, #1b5e20);
+  border-color: #66bb6a;
+}
+
+.hand-card.token {
+  background: linear-gradient(145deg, #ef6c00, #e65100);
+  border-color: #ffb74d;
+}
+
+.hand-card.penalty {
+  background: linear-gradient(145deg, #455a64, #37474f);
+  border-color: #78909c;
+}
+
+.hand-card.boss {
+  background: linear-gradient(145deg, #6a1b9a, #4a148c);
+  border-color: #ab47bc;
+}
+
+.hand-card.unplayable {
+  opacity: 0.45;
+  filter: grayscale(40%);
+  cursor: not-allowed;
+}
+
+.hand-card.unplayable:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+/* ===== 式神卡牌 ===== */
+.shiki-card {
+  background: linear-gradient(145deg, rgba(150, 100, 50, 0.4), rgba(100, 60, 30, 0.5));
+  border: 2px solid var(--gold-border);
+  border-radius: 6px;
+  padding: 8px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.shiki-card:hover:not(.tired) {
+  border-color: var(--gold-bright);
+  box-shadow: 0 0 15px rgba(255, 215, 0, 0.3);
+}
+
+.shiki-card.tired {
+  opacity: 0.4;
+  filter: grayscale(0.8);
+  cursor: not-allowed;
+}
+
+.s-name {
+  font-size: 11px;
+  font-weight: bold;
+  color: var(--gold-border);
+}
+
+.s-skill {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-top: 4px;
+}
+
+/* ===== 动作按钮 ===== */
+.act-btn {
+  padding: 6px 12px;
+  background: linear-gradient(135deg, rgba(212, 165, 116, 0.3), rgba(139, 105, 20, 0.4));
+  border: 1px solid var(--gold-border);
+  border-radius: 4px;
+  color: var(--gold-border);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.act-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(212, 165, 116, 0.5), rgba(139, 105, 20, 0.6));
+  color: var(--gold-bright);
+  box-shadow: 0 0 10px rgba(212, 165, 116, 0.3);
+}
+
+.act-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ===== 结束回合按钮 ===== */
+.end-btn {
+  width: 100%;
+  padding: 10px 8px;
+  background: linear-gradient(135deg, #c62828, #b71c1c);
+  border: 2px solid var(--gold-border);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 3px 10px rgba(198, 40, 40, 0.3);
+}
+
+.end-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(198, 40, 40, 0.5);
+}
+
+.end-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ===== 弹窗样式 ===== */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-box {
+  background: linear-gradient(145deg, var(--bg-secondary), var(--bg-primary));
+  border: 2px solid var(--gold-border);
+  border-radius: 12px;
+  padding: 24px;
+  min-width: 280px;
+  max-width: 450px;
+  box-shadow: 
+    0 10px 50px rgba(0, 0, 0, 0.5),
+    0 0 30px rgba(212, 165, 116, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: bold;
+  color: var(--gold-border);
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.modal-hint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+/* ===== 选择按钮 ===== */
+.choice-btn {
+  width: 100%;
+  padding: 12px 16px;
+  margin: 6px 0;
+  background: linear-gradient(135deg, rgba(212, 165, 116, 0.2), rgba(139, 105, 20, 0.3));
+  border: 1px solid var(--gold-border);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.choice-btn:hover {
+  background: linear-gradient(135deg, rgba(212, 165, 116, 0.4), rgba(139, 105, 20, 0.5));
+  border-color: var(--gold-bright);
+  box-shadow: 0 0 15px rgba(212, 165, 116, 0.3);
+}
+
+/* ===== 悬浮提示框 ===== */
+.card-tooltip {
+  position: fixed;
+  z-index: 9999;
+  background: linear-gradient(145deg, var(--bg-secondary), var(--bg-primary));
+  border: 2px solid var(--gold-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  min-width: 200px;
+  max-width: 260px;
+  box-shadow: 
+    0 8px 30px rgba(0, 0, 0, 0.6),
+    0 0 20px rgba(212, 165, 116, 0.2);
+  pointer-events: none;
+  animation: tooltipFadeIn 0.15s ease-out;
+}
+
+@keyframes tooltipFadeIn {
+  from { opacity: 0; transform: translateY(5px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.tooltip-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(212, 165, 116, 0.3);
+  margin-bottom: 8px;
+}
+
+.tooltip-name {
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--gold-border);
+}
+
+.tooltip-type {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.tooltip-stats {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.stat-item {
+  font-size: 12px;
+}
+
+.tooltip-effect {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.8);
+  line-height: 1.5;
+}
+
+/* ===== 数值显示 ===== */
+.hp-damaged {
+  color: var(--damage-red) !important;
+  font-weight: bold;
+}
+
+.buff-tag {
+  background: linear-gradient(135deg, var(--gold-border), var(--gold-dark));
+  color: var(--bg-primary);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: bold;
+}
+
+/* ===== 牌堆显示 ===== */
+.pile {
+  background: var(--panel-bg);
+  border: 2px solid var(--panel-border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+}
+
+.pile span {
+  font-size: 9px;
+  color: var(--gold-border);
+}
+
+.pile b {
+  font-size: 16px;
+  color: #fff;
+  margin-top: 2px;
+}
+
+/* ===== 阶段显示 ===== */
+.phase {
+  font-size: 11px;
+  color: var(--sakura-pink);
+  margin-top: 6px;
+}
+
+/* ===== 动画 ===== */
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.4); }
+  50% { box-shadow: 0 0 0 10px rgba(255, 152, 0, 0); }
+}
+
+.selecting {
+  animation: pulse 1.5s infinite;
+  border-color: #ff9800 !important;
+}

@@ -1,0 +1,25 @@
+# 鬼王卡牌插画目录
+# 
+# 尺寸建议: 100×100 或 150×150 PNG
+# 总计: 10种鬼王，分3个阶段
+#
+# ========== 阶段 Ⅰ (4种) ==========
+# - qilin.png - 麒麟 (HP:8, 声誉+3)
+# - shiju.png - 石距 (HP:9, 声誉+3)
+# - guilingeji.png - 鬼灵歌伎 (HP:9, 声誉+3) 🔷多人
+# - tuzhizhu.png - 土蜘蛛 (HP:10, 声誉+4)
+#
+# ========== 阶段 Ⅱ (3种) ==========
+# - longche.png - 胧车 (HP:10, 声誉+4)
+# - shenqilou.png - 蜃气楼 (HP:11, 声誉+4)
+# - huangkulou.png - 荒骷髅 (HP:12, 声誉+4) 🔷多人
+#
+# ========== 阶段 Ⅲ (3种) ==========
+# - dizhenxian.png - 地震鲶 (HP:13, 声誉+5)
+# - baqidashe.png - 八岐大蛇 (HP:14, 声誉+5)
+# - tanchengchi.png - 贪嗔痴 (HP:15, 声誉+5) 🔷多人
+#
+# AI 生成 Prompt 模板:
+# [鬼王名] Japanese demon lord, menacing portrait,
+# red and gold color scheme, dark atmosphere,
+# card game boss art, detailed, anime style

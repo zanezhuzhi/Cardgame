@@ -1,0 +1,13 @@
+# 图标资源目录
+# 
+# 存放文件 (24×24 或 32×32 PNG):
+# - icon_hp.png - 生命值图标
+# - icon_damage.png - 伤害值图标
+# - icon_charm.png - 声誉图标
+# - icon_deck.png - 牌堆图标
+# - icon_discard.png - 弃牌堆图标
+# - icon_ghost_fire.png - 鬼火图标
+# - icon_turn.png - 回合图标
+#
+# 提示: 可以用 Lucide/Heroicons 等图标库替代
+# npm install lucide-vue-next

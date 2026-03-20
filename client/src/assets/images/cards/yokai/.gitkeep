@@ -1,0 +1,63 @@
+# 妖怪卡牌插画目录
+# 
+# 尺寸建议: 80×80 或 120×120 PNG (透明背景)
+# 总计: 32种妖怪（96张牌）
+#
+# ========== 生命 1 ==========
+# - zhaofu_damo.png - 招福达摩 (初始卡, 每人3张)
+#
+# ========== 生命 2 (6种) ==========
+# - chishe.png - 赤舌
+# - tangzhisanyao.png - 唐纸伞妖 🔷
+# - tianyeeguilv.png - 天邪鬼绿
+# - tianyeeguiqing.png - 天邪鬼青 🔷
+# - tianyeeguichi.png - 天邪鬼赤 🔷
+# - tianyeeguihuang.png - 天邪鬼黄 🔷
+#
+# ========== 生命 3 (8种) ==========
+# - meiyao.png - 魅妖
+# - denglonggui.png - 灯笼鬼 🔷
+# - shuyao.png - 树妖 🔷
+# - rinvsishi.png - 日女巳时 🔷
+# - bangjing.png - 蚌精 🔷
+# - mingwu.png - 鸣屋 🔷
+# - fuyi.png - 蝠翼 🔷
+# - bingzhubu.png - 兵主部 🔷
+#
+# ========== 生命 4 (8种) ==========
+# - wangliangzhixia.png - 魍魉之匣 🔷
+# - touzigui.png - 骰子鬼
+# - niepanzhihuo.png - 涅槃之火 🔷
+# - xueyouhun.png - 雪幽魂 🔷
+# - lunrudao.png - 轮入道 🔷
+# - wangqie.png - 网切 🔷
+# - zheng.png - 铮 🔷
+# - tihun.png - 薙魂 🔷
+#
+# ========== 生命 5 (7种) ==========
+# - kuanggu.png - 狂骨
+# - fanhuanxiang.png - 返魂香 🔷
+# - zhenmoshou.png - 镇墓兽 🔷
+# - zhennv.png - 针女 🔷
+# - xinyan.png - 心眼 🔷
+# - tufo.png - 涂佛 🔷
+# - dizangxiang.png - 地藏像
+#
+# ========== 生命 6 (4种) ==========
+# - feiyuanmo.png - 飞缘魔 🔷
+# - poshi.png - 破势 🔷
+# - jingji.png - 镜姬 🔷🔷
+# - mumei.png - 木魅 🔷🔷
+#
+# ========== 生命 7 (3种) ==========
+# - youguxiang.png - 幽谷响 🔷
+# - shanghunniao.png - 伤魂鸟 🔷
+# - yinmoluo.png - 阴摩罗 🔷
+#
+# ========== 生命 8 (2种) ==========
+# - qingnvfang.png - 青女房
+# - sanwei.png - 三味
+#
+# AI 生成 Prompt 模板:
+# Japanese yokai [名字], card game portrait, 
+# dark purple background, anime style, golden frame

@@ -49,7 +49,7 @@
                @mouseleave="hideTooltip">
             <div class="boss-stage">Ⅰ</div>
             <div class="boss-name">{{boss.name}}</div>
-            <div class="boss-hp">❤️{{state?.field.bossHp}}/{{boss.hp}}</div>
+            <div class="boss-hp">❤️{{state?.field.bossCurrentHp}}/{{boss.hp}}</div>
             <div class="boss-charm">👑+{{boss.charm||0}}</div>
           </div>
           <div v-else class="boss-empty">全部击败</div>
@@ -60,13 +60,25 @@
           <div class="yokai-grid">
             <div v-for="(y,i) in yokai" :key="i" 
                  class="yokai-card" 
-                 :class="{empty:!y, can:y&&canKill(y), selecting: selectingTarget && y}"
-                 @click="y&&handleYokaiClick(i, y)"
-                 @mouseenter="y&&showTooltip($event, y)"
+                 :class="{
+                   empty: !y, 
+                   wounded: y && isWounded(y) && !isKilled(y),
+                   canKill: y && canKillYokai(y),
+                   killed: y && isKilled(y),
+                   selecting: selectingTarget && y
+                 }"
+                 @click="y && handleYokaiClick(i, y)"
+                 @mouseenter="y && showTooltip($event, y)"
                  @mouseleave="hideTooltip">
               <template v-if="y">
                 <div class="y-name">{{y.name}}</div>
-                <div class="y-stat">❤️{{y.hp}} 👑{{y.charm||0}}</div>
+                <div class="y-stat">
+                  <span :class="{'hp-damaged': getYokaiCurrentHp(y) < y.hp}">
+                    ❤️{{getYokaiCurrentHp(y)}}/{{y.hp}}
+                  </span>
+                  👑{{y.charm||0}}
+                </div>
+                <div v-if="isKilled(y)" class="killed-badge">💀 已击杀</div>
               </template>
             </div>
           </div>
@@ -111,12 +123,16 @@
           <div class="panel-title">🎯 手牌 *{{player?.hand?.length||0}}</div>
           <div class="hand-cards">
             <div v-for="c in player?.hand" :key="c.instanceId" 
-                 class="hand-card" :class="[cardType(c), {selecting: selectingCards}]"
+                 class="hand-card" 
+                 :class="[cardType(c), {selecting: selectingCards, unplayable: !canPlay(c)}]"
                  @click="handleCardClick(c)"
                  @mouseenter="showTooltip($event, c)"
                  @mouseleave="hideTooltip">
               <div class="c-name">{{c.name}}</div>
-              <div class="c-stat">⚔️{{c.damage||c.hp||1}}</div>
+              <div class="c-stat" v-if="c.cardType === 'spell' || c.cardType === 'yokai'">⚔️{{c.damage||c.hp||1}}</div>
+              <div class="c-stat" v-else-if="c.cardType === 'token'">🎁</div>
+              <div class="c-stat" v-else-if="c.cardType === 'penalty'">💔{{c.charm||0}}</div>
+              <div class="c-stat" v-else>—</div>
             </div>
           </div>
         </div>
@@ -600,7 +616,7 @@ function showBossTooltip(event: MouseEvent, boss: any) {
   tooltip.typeLabel = '鬼王'
   tooltip.typeClass = 'type-boss'
   tooltip.stats = {
-    hp: { icon: '❤️', value: `${state.value?.field.bossHp || boss.hp}/${boss.hp}` },
+    hp: { icon: '❤️', value: `${state.value?.field.bossCurrentHp || boss.hp}/${boss.hp}` },
     charm: { icon: '👑', value: boss.charm || 0 }
   }
   tooltip.effect = boss.arrivalEffect || boss.effect || '击败后获得声誉'
@@ -693,21 +709,74 @@ function handleCardClick(c: CardInstance) {
   game?.playCard(c.instanceId)
 }
 
-function handleYokaiClick(i: number, y: CardInstance) {
+async function handleYokaiClick(i: number, y: CardInstance) {
   if (selectingTarget.value || targetModal.show) return // 选择模式下走弹窗
-  game?.allocateDamage(i)
+  
+  // 检查妖怪是否已被击杀
+  if (isKilled(y)) {
+    // 已击杀：弹出退治/超度选择
+    const choice = await new Promise<number>(resolve => {
+      choiceModal.show = true
+      choiceModal.options = [`退治【${y.name}】（放入弃牌堆）`, `超度【${y.name}】（移出游戏）`]
+      choiceModal.resolve = resolve
+    })
+    
+    if (choice === 0) {
+      await game?.retireYokai(i)
+    } else {
+      game?.banishYokai(i)
+    }
+  } else {
+    // 未击杀：分配伤害
+    await game?.allocateDamage(i)
+  }
 }
 
 function play(id: string) { game?.playCard(id) }
-function kill(i: number) { game?.allocateDamage(i) }
-function canKill(y: CardInstance) { return (player.value?.damage||0) >= (y.hp+(y.armor||0)) }
+async function kill(i: number) { await game?.allocateDamage(i) }
+
+// 妖怪状态辅助函数
+function getYokaiCurrentHp(y: CardInstance): number {
+  return y.currentHp !== undefined ? y.currentHp : y.hp
+}
+function isKilled(y: CardInstance): boolean {
+  return y.currentHp !== undefined && y.currentHp <= 0
+}
+function isWounded(y: CardInstance): boolean {
+  // 已受伤：当前HP < 最大HP
+  const currentHp = getYokaiCurrentHp(y)
+  return currentHp < y.hp && currentHp > 0
+}
+function canKillYokai(y: CardInstance): boolean {
+  // 玩家伤害足以击杀该妖怪（伤害 >= 剩余HP）
+  const currentHp = getYokaiCurrentHp(y)
+  return (player.value?.damage || 0) >= currentHp && currentHp > 0
+}
+function canDamage(y: CardInstance): boolean {
+  // 玩家有伤害且妖怪未被击杀
+  return (player.value?.damage || 0) > 0 && !isKilled(y)
+}
 function hitBoss() { const d = player.value?.damage||0; if(d>0) game?.attackBoss(d) }
 function useSkill(id: string) { game?.useShikigamiSkill(id) }
 function getSpell() { game?.gainBasicSpell() }
 function endTurn() { game?.endTurn() }
 function refresh(b: boolean) { game?.decideYokaiRefresh(b) }
 function confirmShiki() { game?.confirmShikigamiPhase() }
-function cardType(c: CardInstance) { return { spell: c.cardType==='spell', yokai: c.cardType==='yokai' } }
+function cardType(c: CardInstance) { 
+  return { 
+    spell: c.cardType === 'spell', 
+    yokai: c.cardType === 'yokai',
+    token: c.cardType === 'token',
+    penalty: c.cardType === 'penalty',
+    boss: c.cardType === 'boss'
+  } 
+}
+
+// 检查卡牌是否可以打出
+function canPlay(c: CardInstance): boolean {
+  if (!game) return false
+  return game.canPlayCard(c).canPlay
+}
 
 // ========== 式神获取/置换相关函数 ==========
 
@@ -824,11 +893,16 @@ async function selectNewShikigami(shikigami: any) {
 .boss-remain{margin-top:auto;color:#888;font-size:8px}
 .yokai-panel{flex:1;background:rgba(50,100,150,.2);border:2px solid rgba(50,100,150,.5);border-radius:6px;padding:6px;display:flex;flex-direction:column;overflow:hidden}
 .yokai-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;flex:1;align-content:center}
-.yokai-card{background:rgba(100,150,200,.3);border-radius:4px;padding:6px 4px;text-align:center;cursor:pointer;display:flex;flex-direction:column;justify-content:center}
+.yokai-card{background:rgba(100,150,200,.3);border-radius:4px;padding:6px 4px;text-align:center;cursor:pointer;display:flex;flex-direction:column;justify-content:center;position:relative;border:2px solid transparent;transition:all .15s}
 .yokai-card:hover:not(.empty){background:rgba(100,150,200,.5)}
 .yokai-card.empty{background:rgba(100,150,200,.1);cursor:default}
-.yokai-card.can{border:2px solid #4CAF50;box-shadow:0 0 6px rgba(76,175,80,.5)}
-.yokai-card.selecting{border:2px solid #ff9800;animation:pulse 1s infinite}
+.yokai-card.wounded{border-color:#ff6b6b;background:rgba(255,107,107,.15)}
+.yokai-card.canKill{border-color:#4CAF50;box-shadow:0 0 8px rgba(76,175,80,.6);animation:canKillPulse 1.2s infinite}
+.yokai-card.killed{border-color:#e91e63;background:rgba(233,30,99,.2);box-shadow:0 0 8px rgba(233,30,99,.5)}
+.yokai-card.selecting{border-color:#ff9800;animation:pulse 1s infinite}
+.hp-damaged{color:#ff6b6b;font-weight:bold}
+.killed-badge{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.85);padding:3px 8px;border-radius:4px;font-size:9px;color:#e91e63;white-space:nowrap;font-weight:bold}
+@keyframes canKillPulse{0%,100%{box-shadow:0 0 6px rgba(76,175,80,.4)}50%{box-shadow:0 0 12px rgba(76,175,80,.8)}}
 .y-name{font-size:10px;font-weight:bold;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .y-stat{font-size:9px;color:#ccc;margin-top:2px}
 .action-bar{display:flex;gap:4px;align-items:center;padding-top:4px;border-top:1px solid rgba(255,255,255,.1);margin-top:auto;flex-shrink:0}
@@ -853,9 +927,14 @@ async function selectNewShikigami(shikigami: any) {
 .hand-panel{flex:1;background:rgba(50,150,100,.2);border:2px solid rgba(50,150,100,.5);border-radius:6px;padding:4px;overflow:hidden}
 .hand-cards{display:flex;gap:4px;overflow-x:auto;height:100%;align-items:center}
 .hand-card{min-width:52px;max-width:60px;background:rgba(100,200,150,.3);border-radius:4px;padding:4px;text-align:center;cursor:pointer;flex-shrink:0;transition:all .15s;display:flex;flex-direction:column;justify-content:center;height:calc(100% - 4px)}
-.hand-card:hover{transform:translateY(-5px)}
+.hand-card:hover:not(.unplayable){transform:translateY(-5px)}
 .hand-card.spell{background:linear-gradient(135deg,#2196F3,#1976D2)}
 .hand-card.yokai{background:linear-gradient(135deg,#4CAF50,#388E3C)}
+.hand-card.token{background:linear-gradient(135deg,#FFB74D,#FF9800)}
+.hand-card.penalty{background:linear-gradient(135deg,#78909C,#546E7A)}
+.hand-card.boss{background:linear-gradient(135deg,#9C27B0,#7B1FA2)}
+.hand-card.unplayable{opacity:0.5;cursor:not-allowed;filter:grayscale(30%)}
+.hand-card.unplayable:hover{transform:none}
 .hand-card.selecting{border:2px solid #ff9800}
 .c-name{font-size:9px;font-weight:bold;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .c-stat{font-size:10px;margin-top:2px}

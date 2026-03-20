@@ -142,8 +142,9 @@ export interface CardInstance {
   cardId: string;          // 原型卡牌ID
   cardType: CardType;      // 卡牌类型
   name: string;            // 卡牌名称
-  hp: number;              // 当前生命值
-  maxHp: number;           // 最大生命值
+  hp: number;              // 最大生命值（妖怪/鬼王）
+  maxHp: number;           // 最大生命值（兼容）
+  currentHp?: number;      // 当前生命值（战场上的妖怪受伤后会减少，回合结束恢复）
   damage?: number;         // 伤害值（阴阳术）
   charm?: number;          // 声誉值
   effect?: string;         // 效果描述

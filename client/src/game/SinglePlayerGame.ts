@@ -15,17 +15,18 @@ import type {
   CardInstance,
   OnmyojiCard,
   ShikigamiCard,
-  BossCard
+  BossCard,
+  CardType
 } from '../../../shared/types/cards';
 
 // 导入卡牌数据（直接从JSON）
 import cardsData from '../../../shared/data/cards.json';
 
-// 导入效果引擎和效果定义
-import { effectEngine } from '../../../shared/game/effects/EffectEngine';
-import { YOKAI_EFFECT_DEFS, getYokaiEffectDef } from '../../../shared/game/effects/YokaiEffects';
-import { SHIKIGAMI_EFFECT_DEFS, getShikigamiEffectDefs } from '../../../shared/game/effects/ShikigamiEffects';
-import type { EffectContext, CardEffect, TempBuffType } from '../../../shared/game/effects/types';
+// 暂时禁用效果引擎导入（类型系统重构中）
+// import { effectEngine } from '../../../shared/game/effects/EffectEngine';
+// import { executeYokaiEffect as executeYokaiEffectDirect } from '../../../shared/game/effects/YokaiEffects';
+// import { SHIKIGAMI_EFFECT_DEFS, getShikigamiEffectDefs } from '../../../shared/game/effects/ShikigamiEffects';
+// import type { EffectContext, CardEffect, TempBuffType } from '../../../shared/game/effects/types';
 
 // ============ 常量 ============
 
@@ -123,6 +124,7 @@ export class SinglePlayerGame {
       name,
       onmyoji: cardsData.onmyoji[0] as OnmyojiCard,
       shikigami: selectedShikigami,
+      maxShikigami: GAME_CONSTANTS.MAX_SHIKIGAMI,
       ghostFire: 0,
       maxGhostFire: GAME_CONSTANTS.MAX_GHOST_FIRE,
       damage: 0,  // 本回合累积伤害
@@ -204,11 +206,22 @@ export class SinglePlayerGame {
     return {
       yokaiSlots: [null, null, null, null, null, null],
       currentBoss: null,
-      bossHp: 0,
+      bossCurrentHp: 0,
       bossDeck,
       penaltyPile: shuffle(penaltyPile),
       yokaiDeck: shuffle(yokaiDeck),
-      spellSupply,  // 阴阳术供应堆
+      spellSupply: {
+        basic: spellSupply.basic[0] || null,
+        medium: spellSupply.middle[0] || null,
+        advanced: spellSupply.advanced[0] || null
+      },
+      spellCounts: {
+        basic: spellSupply.basic.length,
+        medium: spellSupply.middle.length,
+        advanced: spellSupply.advanced.length
+      },
+      tokenShop: 10,  // 招福达摩
+      exileZone: [],
       shikigamiSupply: allShikigami  // 式神供应堆（商店）
     } as FieldState;
   }
@@ -217,15 +230,14 @@ export class SinglePlayerGame {
     return {
       instanceId: generateId(),
       cardId: card.id,
-      cardType: type as any,
+      cardType: type as CardType,
       name: card.name,
       hp: card.hp || card.damage || 1,  // hp也可表示伤害值
       maxHp: card.hp || card.damage || 1,
-      armor: card.armor || 0,
       charm: card.charm || 0,
       damage: card.damage || 0,  // 阴阳术的伤害值
       effect: card.effect,
-      image: card.image
+      image: card.image || ''
     };
   }
 
@@ -361,6 +373,152 @@ export class SinglePlayerGame {
 
   // ============ 玩家操作 ============
 
+  /** 
+   * 检查卡牌是否可以打出
+   * @returns { canPlay: boolean, reason?: string }
+   */
+  canPlayCard(card: CardInstance): { canPlay: boolean; reason?: string } {
+    // 令牌（招福达摩）不能打出
+    if (card.cardType === 'token') {
+      return { canPlay: false, reason: '令牌不能打出' };
+    }
+    
+    // 恶评卡不能打出
+    if (card.cardType === 'penalty') {
+      return { canPlay: false, reason: '恶评卡不能打出' };
+    }
+    
+    // 式神卡不能从手牌打出（需要通过召唤）
+    if (card.cardType === 'shikigami') {
+      return { canPlay: false, reason: '式神卡不能直接打出' };
+    }
+    
+    // 御魂卡：检查是否有合法目标
+    if (card.cardType === 'yokai') {
+      const targetCheck = this.checkYokaiEffectTargets(card);
+      if (!targetCheck.hasValidTarget) {
+        return { canPlay: false, reason: targetCheck.reason };
+      }
+      return { canPlay: true };
+    }
+    
+    // 阴阳术可以打出
+    if (card.cardType === 'spell') {
+      return { canPlay: true };
+    }
+    
+    // 鬼王御魂也可以打出（暂不检查目标）
+    if (card.cardType === 'boss') {
+      return { canPlay: true };
+    }
+    
+    return { canPlay: false, reason: '该卡牌无法打出' };
+  }
+
+  /**
+   * 检查御魂效果是否有合法目标
+   * 规则：
+   * - 如果卡牌只有一个效果且需要目标，无目标时不能打出
+   * - 如果卡牌有多个效果，只要有一个效果能执行就可以打出
+   * - 无法选择目标的效果在执行时自动跳过
+   */
+  private checkYokaiEffectTargets(card: CardInstance): { hasValidTarget: boolean; reason?: string } {
+    const yokaiSlots = this.state.field.yokaiSlots;
+    const player = this.getPlayer();
+    
+    // 辅助函数
+    const hasLowHpYokai = (maxHp: number) => yokaiSlots.some(y => y && (y.currentHp ?? y.hp) <= maxHp);
+    const hasAnyYokai = () => yokaiSlots.some(y => y !== null);
+    const hasOtherHandCards = () => player.hand.length > 1;
+    const hasDiscard = () => player.discard.length > 0;
+    const hasDeck = () => player.deck.length > 0;
+    
+    // 根据卡牌名称检查效果
+    // 【单效果卡】：唯一效果需要目标才能打出
+    // 【多效果卡】：任一效果可执行即可打出
+    
+    switch (card.name) {
+      // ============ 单效果卡（唯一效果需要目标）============
+      
+      // 退治生命≤4的游荡妖怪
+      case '天邪鬼绿':
+        if (!hasLowHpYokai(4)) {
+          return { hasValidTarget: false, reason: '没有生命≤4的游荡妖怪' };
+        }
+        break;
+      
+      // 需要生命≤6的游荡妖怪
+      case '海坊主':
+        if (!hasLowHpYokai(6)) {
+          return { hasValidTarget: false, reason: '没有生命≤6的游荡妖怪' };
+        }
+        break;
+      
+      // 需要有游荡妖怪作为唯一目标
+      case '提灯小僧':  // 对1个游荡妖怪造成2点伤害
+      case '古笼火':    // 退治1个游荡妖怪
+        if (!hasAnyYokai()) {
+          return { hasValidTarget: false, reason: '没有游荡妖怪' };
+        }
+        break;
+      
+      // 需要弃牌堆有牌（唯一效果）
+      case '一目连':    // 从弃牌堆选1张放回手牌
+        if (!hasDiscard()) {
+          return { hasValidTarget: false, reason: '弃牌堆为空' };
+        }
+        break;
+        
+      // ============ 多效果卡（有附带效果可执行）============
+      
+      // 唐纸伞妖：伤害+1（必定成功）+ 查看牌库顶（可选）
+      // → 即使牌库为空，伤害+1仍可执行，所以可以打出
+      case '唐纸伞妖':
+        // 伤害+1 是必定成功的效果
+        break;
+      
+      // 天邪鬼赤：伤害+1（必定成功）+ 换牌（可选）
+      case '天邪鬼赤':
+        // 伤害+1 是必定成功的效果
+        break;
+      
+      // 天邪鬼黄：抓牌+2（必定成功）+ 置顶1张（有手牌时）
+      case '天邪鬼黄':
+        // 抓牌+2 是必定成功的效果（除非牌库为空）
+        break;
+      
+      // 树妖：抓牌+2（必定成功）+ 弃置1张（需要手牌）
+      case '树妖':
+        // 抓牌+2 是必定成功的效果
+        break;
+      
+      // 河童：伤害+2（必定成功）+ 弃置手牌抓牌（需要手牌）
+      case '河童':
+        // 伤害+2 是必定成功的效果
+        break;
+      
+      // 雪女：伤害+1（必定成功）+ 弃置抓牌（可选）
+      case '雪女':
+        // 伤害+1 是必定成功的效果
+        break;
+      
+      // 座敷童子：选择效果（抓牌 或 从弃牌堆取回）
+      // 如果弃牌堆为空，则只能选抓牌，仍可打出
+      case '座敷童子':
+        // 抓牌选项始终可用
+        break;
+      
+      // 独眼小僧：查看牌库顶+判定
+      case '独眼小僧':
+        if (!hasDeck()) {
+          return { hasValidTarget: false, reason: '牌库为空' };
+        }
+        break;
+    }
+    
+    return { hasValidTarget: true };
+  }
+
   /** 打出手牌 */
   async playCard(cardInstanceId: string): Promise<boolean> {
     if (this.state.turnPhase !== 'action') return false;
@@ -369,7 +527,18 @@ export class SinglePlayerGame {
     const index = player.hand.findIndex(c => c.instanceId === cardInstanceId);
     if (index === -1) return false;
 
-    const card = player.hand.splice(index, 1)[0]!;
+    const card = player.hand[index];
+    
+    // 检查卡牌是否可以打出
+    const { canPlay, reason } = this.canPlayCard(card);
+    if (!canPlay) {
+      this.addLog(`❌ 无法打出【${card.name}】：${reason}`);
+      this.notifyChange();
+      return false;
+    }
+
+    // 从手牌移除并放入已打出区
+    player.hand.splice(index, 1);
     player.played.push(card);
     player.cardsPlayed++;
 
@@ -415,23 +584,8 @@ export class SinglePlayerGame {
 
   /** 执行妖怪御魂效果 */
   private async executeYokaiEffect(card: CardInstance): Promise<void> {
-    const player = this.getPlayer();
-    
-    // 查找效果定义
-    const effectDef = YOKAI_EFFECT_DEFS.find(d => d.cardId === card.cardId);
-    
-    if (effectDef && effectDef.effects.length > 0) {
-      // 创建效果上下文
-      const ctx = this.createEffectContext(card);
-      
-      // 执行效果
-      await effectEngine.execute(effectDef.effects, ctx);
-      
-      this.addLog(`✨ 执行【${card.name}】的${effectDef.skillName || '御魂'}效果`);
-    } else {
-      // 没有定义的效果，使用默认逻辑（基于卡牌数据）
-      this.executeDefaultYokaiEffect(card);
-    }
+    // 暂时使用简化的默认逻辑（效果引擎重构中）
+    this.executeDefaultYokaiEffect(card);
   }
 
   /** 默认御魂效果（用于未定义的卡牌） */
@@ -445,17 +599,7 @@ export class SinglePlayerGame {
     }
   }
 
-  /** 创建效果执行上下文 */
-  private createEffectContext(sourceCard?: CardInstance): EffectContext {
-    return {
-      gameState: this.state,
-      player: this.getPlayer(),
-      sourceCard,
-      onChoice: this.onChoiceRequired,
-      onSelectTarget: this.onSelectTargetRequired,
-      onSelectCards: this.onSelectCardsRequired,
-    };
-  }
+  // createEffectContext 方法暂时移除（效果引擎重构中）
 
   // ============ TempBuff 管理 ============
 
@@ -522,8 +666,8 @@ export class SinglePlayerGame {
     return player.tempBuffs.find(b => b.type === buffType);
   }
 
-  /** 使用式神技能 */
-  async useShikigamiSkill(shikigamiId: string, skillName?: string): Promise<boolean> {
+  /** 使用式神技能（简化版，效果引擎重构中） */
+  async useShikigamiSkill(shikigamiId: string, _skillName?: string): Promise<boolean> {
     if (this.state.turnPhase !== 'action') return false;
     
     const player = this.getPlayer();
@@ -532,68 +676,8 @@ export class SinglePlayerGame {
     
     if (!shikigami || !shikigamiState) return false;
     
-    // 获取技能定义
-    const effectDefs = SHIKIGAMI_EFFECT_DEFS.filter(d => d.cardId === shikigamiId);
-    const skillDef = skillName 
-      ? effectDefs.find(d => d.skillName === skillName)
-      : effectDefs.find(d => d.effectType === '启');  // 默认使用主动技
-    
-    if (!skillDef) {
-      // 没有效果定义，使用旧逻辑
-      return this.useShikigamiSkillLegacy(shikigamiId, shikigamiState);
-    }
-    
-    // 检查疲劳状态
-    if (shikigamiState.isExhausted && skillDef.effectType === '启') {
-      this.addLog(`❌ ${shikigami.name} 已疲劳，本回合无法再次使用`);
-      this.notifyChange();
-      return false;
-    }
-    
-    // 检查鬼火消耗
-    const cost = skillDef.cost?.ghostFire || 0;
-    
-    // 检查是否有技能费用减少buff（如涅槃之火）
-    const costReduction = this.getTempBuffValue('SKILL_COST_REDUCE');
-    const actualCost = Math.max(0, cost - costReduction);
-    
-    if (player.ghostFire < actualCost) {
-      this.addLog(`❌ 鬼火不足！需要 ${actualCost}，当前 ${player.ghostFire}`);
-      this.notifyChange();
-      return false;
-    }
-    
-    // 消耗鬼火
-    player.ghostFire -= actualCost;
-    
-    // 如果是主动技，标记疲劳
-    if (skillDef.effectType === '启') {
-      shikigamiState.isExhausted = true;
-    }
-    
-    this.addLog(`🦊 ${shikigami.name} 发动【${skillDef.skillName}】`);
-    
-    // 创建效果上下文
-    const ctx = this.createEffectContext();
-    
-    // 执行技能效果
-    if (skillDef.effects.length > 0) {
-      await effectEngine.execute(skillDef.effects, ctx);
-    }
-    
-    // 检查是否有式神技能伤害加成（如针女御魂）
-    const skillDamageBonus = this.getTempBuffValue('SKILL_DAMAGE_BONUS');
-    if (skillDamageBonus > 0) {
-      player.damage += skillDamageBonus;
-      this.addLog(`💥 针女加成：伤害+${skillDamageBonus}`);
-    }
-    
-    // 特殊技能处理（需要额外逻辑的）
-    await this.handleSpecialShikigamiSkill(shikigamiId, skillDef.skillName || '');
-    
-    this.addLog(`💥 当前伤害:${player.damage}`);
-    this.notifyChange();
-    return true;
+    // 直接使用旧版兼容逻辑
+    return this.useShikigamiSkillLegacy(shikigamiId, shikigamiState);
   }
 
   /** 旧版式神技能（兼容） */
@@ -692,8 +776,11 @@ export class SinglePlayerGame {
     return true;
   }
 
-  /** 分配伤害退治妖怪（一次性分配） */
-  allocateDamage(targetSlotIndex: number): boolean {
+  /** 
+   * 分配伤害给妖怪（伤势累积模式）
+   * 根据规则：伤害实时分配，伤势保留，可多次分配
+   */
+  async allocateDamage(targetSlotIndex: number): Promise<boolean> {
     if (this.state.turnPhase !== 'action') return false;
     
     const player = this.getPlayer();
@@ -704,17 +791,76 @@ export class SinglePlayerGame {
       this.notifyChange();
       return false;
     }
-    
-    const required = yokai.hp + (yokai.armor || 0);
-    if (player.damage < required) {
-      this.addLog(`❌ 伤害不足！需要 ${required}，当前 ${player.damage}`);
+
+    // 已击杀的妖怪不能再分配伤害
+    if (yokai.currentHp !== undefined && yokai.currentHp <= 0) {
+      this.addLog(`⚠️ 【${yokai.name}】已被击杀，请选择退治或超度`);
       this.notifyChange();
       return false;
     }
     
-    // 扣除伤害，退治妖怪
-    player.damage -= required;
-    this.killYokai(targetSlotIndex);
+    if (player.damage <= 0) {
+      this.addLog(`❌ 没有可分配的伤害`);
+      this.notifyChange();
+      return false;
+    }
+
+    // 初始化当前HP（如果还没有）
+    if (yokai.currentHp === undefined) {
+      yokai.currentHp = yokai.hp;
+    }
+
+    // 计算可以造成的伤害（取玩家伤害和妖怪剩余HP的较小值）
+    const damageToApply = Math.min(player.damage, yokai.currentHp);
+    
+    // 扣除伤害
+    player.damage -= damageToApply;
+    yokai.currentHp -= damageToApply;
+    
+    this.addLog(`⚔️ 对【${yokai.name}】造成 ${damageToApply} 点伤害（${yokai.currentHp}/${yokai.hp}）`);
+    
+    // 检查是否击杀
+    if (yokai.currentHp <= 0) {
+      this.addLog(`💀 【${yokai.name}】已被击杀！点击选择「退治」或「超度」`);
+    }
+    
+    this.notifyChange();
+    return true;
+  }
+
+  /**
+   * 退治已击杀的妖怪（放入弃牌堆）
+   */
+  async retireYokai(slotIndex: number): Promise<boolean> {
+    const yokai = this.state.field.yokaiSlots[slotIndex];
+    if (!yokai || (yokai.currentHp !== undefined && yokai.currentHp > 0)) {
+      this.addLog(`❌ 该妖怪尚未被击杀`);
+      return false;
+    }
+    
+    await this.killYokai(slotIndex);
+    this.notifyChange();
+    return true;
+  }
+
+  /**
+   * 超度已击杀的妖怪（移出游戏）
+   */
+  banishYokai(slotIndex: number): boolean {
+    const yokai = this.state.field.yokaiSlots[slotIndex];
+    if (!yokai || (yokai.currentHp !== undefined && yokai.currentHp > 0)) {
+      this.addLog(`❌ 该妖怪尚未被击杀`);
+      return false;
+    }
+    
+    // 从战场移除
+    this.state.field.yokaiSlots[slotIndex] = null;
+    
+    // 移入公共超度区（移出游戏）
+    this.state.field.exileZone.push(yokai);
+    
+    this.addLog(`📿 超度了【${yokai.name}】，移出游戏`);
+    this.killedYokaiThisTurn = true;
     
     this.notifyChange();
     return true;
@@ -741,12 +887,12 @@ export class SinglePlayerGame {
     
     // 扣除伤害
     player.damage -= damage;
-    this.state.field.bossHp -= damage;
+    this.state.field.bossCurrentHp -= damage;
     
-    this.addLog(`⚔️ 对鬼王【${boss.name}】造成 ${damage} 点伤害（剩余:${this.state.field.bossHp}）`);
+    this.addLog(`⚔️ 对鬼王【${boss.name}】造成 ${damage} 点伤害（剩余:${this.state.field.bossCurrentHp}）`);
     
     // 检查鬼王是否被击败
-    if (this.state.field.bossHp <= 0) {
+    if (this.state.field.bossCurrentHp <= 0) {
       this.defeatBoss();
     }
     
@@ -754,7 +900,7 @@ export class SinglePlayerGame {
     return true;
   }
 
-  private killYokai(slotIndex: number): void {
+  private async killYokai(slotIndex: number): Promise<void> {
     const player = this.getPlayer();
     const yokai = this.state.field.yokaiSlots[slotIndex];
     if (!yokai) return;
@@ -762,6 +908,9 @@ export class SinglePlayerGame {
     // 标记本回合击杀了妖怪
     this.killedYokaiThisTurn = true;
     this.yokaiKilledCount++;
+
+    // 从战场移除妖怪
+    this.state.field.yokaiSlots[slotIndex] = null;
 
     // 检查「魂狩」效果：首次退治生命≤6妖怪可进入手牌
     const firstKillToHandBuff = player.tempBuffs.find(b => b.type === 'FIRST_KILL_TO_HAND');
@@ -771,11 +920,39 @@ export class SinglePlayerGame {
       this.consumeTempBuff('FIRST_KILL_TO_HAND');
       this.addLog(`👻 魂狩效果：【${yokai.name}】进入手牌！`);
     } else {
-      // 妖怪进入弃牌堆（成为御魂）
-      player.discard.push(yokai);
+      // 检查「鲤鱼精」被动效果：首次退治可放牌库顶
+      const hasKoifish = player.shikigami.some(s => s.name === '鲤鱼精');
+      const bubbleShieldUsed = player.tempBuffs.some(b => (b as any).source === '泡泡之盾');
+      
+      let placeOnTop = false;
+      if (hasKoifish && !bubbleShieldUsed) {
+        // 询问玩家是否要使用泡泡之盾
+        const choice = await this.onChoiceRequired([
+          `将【${yokai.name}】放到牌库顶（泡泡之盾）`,
+          `将【${yokai.name}】放入弃牌堆`
+        ]);
+        
+        if (choice === 0) {
+          placeOnTop = true;
+          // 标记本回合已使用泡泡之盾
+          player.tempBuffs.push({
+            type: 'BUBBLE_SHIELD_USED' as any,
+            value: 0,
+            duration: 1,
+            source: '泡泡之盾'
+          } as any);
+          this.addLog(`🛡️ 泡泡之盾：【${yokai.name}】放入牌库顶`);
+        }
+      }
+      
+      if (placeOnTop) {
+        // 放到牌库顶
+        player.deck.push(yokai);
+      } else {
+        // 妖怪进入弃牌堆（成为御魂）
+        player.discard.push(yokai);
+      }
     }
-    
-    this.state.field.yokaiSlots[slotIndex] = null;
 
     // 检查「迁怒」效果：每退治妖怪+伤害
     const yokaiKillBonus = this.getTempBuffValue('YOKAI_KILL_BONUS');
@@ -790,9 +967,6 @@ export class SinglePlayerGame {
     }
 
     this.addLog(`✨ 退治了【${yokai.name}】！声誉+${yokai.charm || 0}`);
-    
-    // 检查「鲤鱼精」被动效果：首次退治可放牌库顶
-    // 这需要UI确认，暂时跳过
   }
 
   private defeatBoss(): void {
@@ -809,17 +983,32 @@ export class SinglePlayerGame {
     this.addLog(`� 击败鬼王【${boss.name}】！声誉+${boss.charm || 0}`);
     
     this.state.field.currentBoss = null;
-    this.state.field.bossHp = 0;
+    this.state.field.bossCurrentHp = 0;
   }
 
   /** 结束回合 */
-  endTurn(): void {
+  async endTurn(): Promise<void> {
     if (this.state.turnPhase !== 'action') return;
     
     const player = this.getPlayer();
     
     // 进入清理阶段
     this.state.turnPhase = 'cleanup';
+    
+    // 处理战场上的妖怪：已击杀的自动退治，存活的恢复HP
+    for (let i = 0; i < this.state.field.yokaiSlots.length; i++) {
+      const yokai = this.state.field.yokaiSlots[i];
+      if (!yokai) continue;
+      
+      if (yokai.currentHp !== undefined && yokai.currentHp <= 0) {
+        // 已击杀的自动退治（放入弃牌堆）
+        await this.killYokai(i);
+        this.addLog(`🔄 清理阶段：【${yokai.name}】自动退治`);
+      } else {
+        // 存活的恢复HP
+        yokai.currentHp = yokai.hp;
+      }
+    }
     
     // 清理阶段：手牌 + 已打出 → 弃牌堆
     player.discard.push(...player.hand, ...player.played);
@@ -890,7 +1079,7 @@ export class SinglePlayerGame {
     if (this.state.field.bossDeck.length > 0) {
       const boss = this.state.field.bossDeck.pop()!;
       this.state.field.currentBoss = boss;
-      this.state.field.bossHp = boss.hp;
+      this.state.field.bossCurrentHp = boss.hp;
       
       // 执行来袭效果（除麒麟外）
       if (boss.name !== '麒麟' && boss.arrivalEffect) {
@@ -1054,7 +1243,8 @@ export class SinglePlayerGame {
         player.exiled.push(spell);
       }
     }
-    this.addLog(`📿 超度 ${selectedSpells.map(s => s.name).join('、')}（共${totalDamage}点伤害）`);
+    const spellDamage = selectedSpells.reduce((sum, c) => sum + (c.damage || c.hp || 1), 0);
+    this.addLog(`📿 超度 ${selectedSpells.map(s => s.name).join('、')}（共${spellDamage}点伤害）`);
 
     // 从式神供应堆抽取2张
     const supply = this.state.field.shikigamiSupply!;
@@ -1135,7 +1325,8 @@ export class SinglePlayerGame {
         player.exiled.push(spell);
       }
     }
-    this.addLog(`📿 超度 ${selectedSpells.map(s => s.name).join('、')}（共${totalDamage}点伤害）`);
+    const replaceDamage = selectedSpells.reduce((sum, c) => sum + (c.damage || c.hp || 1), 0);
+    this.addLog(`📿 超度 ${selectedSpells.map(s => s.name).join('、')}（共${replaceDamage}点伤害）`);
 
     // 将旧式神放回供应堆底部
     const supply = this.state.field.shikigamiSupply!;

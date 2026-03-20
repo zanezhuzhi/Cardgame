@@ -105,7 +105,7 @@ export interface GameState {
   // 基础信息
   roomId: string;
   phase: GamePhase;
-  playerCount: number;
+  playerCount?: number;
   
   // 玩家
   players: PlayerState[];
@@ -113,19 +113,25 @@ export interface GameState {
   turnNumber: number;
   
   // 回合内状态
-  turnPhase: TurnPhase;
+  turnPhase: TurnPhase | 'start';  // 支持 start 作为初始值
   
   // 战场
   field: FieldState;
   
   // 式神牌库（用于选择/置换）
-  shikigamiDeck: ShikigamiCard[];
+  shikigamiDeck?: ShikigamiCard[];
   
   // 游戏日志
   log: GameLogEntry[];
   
   // 时间戳
   lastUpdate: number;
+
+  // ====== 妖怪刷新规则 ======
+  /** 上一玩家是否击杀了妖怪（首回合默认true，不触发刷新选项） */
+  lastPlayerKilledYokai?: boolean;
+  /** 是否等待当前玩家决定刷新妖怪 */
+  pendingYokaiRefresh?: boolean;
 }
 
 // ============ 游戏日志 ============
@@ -144,6 +150,7 @@ export type GameLogType =
   | 'discard'
   | 'exile'
   | 'boss_arrival'
+  | 'penalty'
   | 'game_end';
 
 export interface GameLogEntry {
@@ -168,6 +175,10 @@ export type GameAction =
   // 式神调整阶段
   | { type: 'CONFIRM_SHIKIGAMI' }
   | { type: 'REPLACE_SHIKIGAMI'; oldId: string; newId: string }
+  // 鬼火阶段（妖怪刷新规则）
+  | { type: 'DECIDE_YOKAI_REFRESH'; refresh: boolean }
+  // 式神选择阶段（游戏开始前）
+  | { type: 'SELECT_SHIKIGAMI'; selectedIds: string[] }
   // 回合控制
   | { type: 'END_TURN' };
 

@@ -483,14 +483,43 @@ describe('GameManager 游戏管理器', () => {
       const state = player.shikigamiState.find(s => s.cardId === 'shikigami_shantong');
       expect(state?.isExhausted).toBe(true);
 
-      // 结束回合 → 下一玩家 → 再结束 → 回到p1
+      const gameState = game.getState();
+      
+      // p1 击杀一只妖怪（设置足够伤害，实际击杀）
+      player.damage = 10;
+      const yokai = gameState.field.yokaiSlots[0];
+      if (yokai) {
+        game.attackTarget(player, yokai.instanceId, yokai.hp);
+      }
+
+      // 结束回合 → 下一玩家
       game.handleAction('p1', { type: 'END_TURN' });
+      
+      // 检查是否进入妖怪刷新等待状态
+      if (gameState.pendingYokaiRefresh) {
+        game.decideYokaiRefresh(false); // 不刷新，继续游戏
+      }
+      
       const p2 = game.getCurrentPlayer();
       game.handleAction('p2', { type: 'CONFIRM_SHIKIGAMI' });
+      
+      // p2 击杀一只妖怪（设置足够伤害，实际击杀）
+      p2.damage = 10;
+      const yokai2 = gameState.field.yokaiSlots[0];
+      if (yokai2) {
+        game.attackTarget(p2, yokai2.instanceId, yokai2.hp);
+      }
+      
       game.handleAction('p2', { type: 'END_TURN' });
 
-      // 回到p1的回合，式神应该重置
-      const refreshedState = player.shikigamiState.find(s => s.cardId === 'shikigami_shantong');
+      // 检查是否进入妖怪刷新等待状态
+      if (gameState.pendingYokaiRefresh) {
+        game.decideYokaiRefresh(false); // 不刷新，继续游戏
+      }
+
+      // 回到p1的回合，找到玩家1
+      const p1 = gameState.players.find(p => p.id === 'p1')!;
+      const refreshedState = p1.shikigamiState.find(s => s.cardId === 'shikigami_shantong');
       expect(refreshedState?.isExhausted).toBe(false);
     });
   });

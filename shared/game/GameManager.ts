@@ -36,6 +36,7 @@ import {
   shuffle,
   getAllBosses,
   getAllSpells,
+  getAllShikigami,
   getYokaiForPlayerCount,
   getAllTokens,
   getAllPenalties,
@@ -75,7 +76,9 @@ export class GameManager {
       turnPhase: 'ghostFire', // 新的4阶段系统
       field: this.createInitialField(),
       log: [],
-      lastUpdate: Date.now()
+      lastUpdate: Date.now(),
+      lastPlayerKilledYokai: true, // 上一玩家是否击杀了妖怪（首回合默认true，不触发刷新）
+      pendingYokaiRefresh: false,  // 是否等待当前玩家决定刷新妖怪
     };
   }
 
@@ -257,6 +260,9 @@ export class GameManager {
   // 阶段3: action      - 行动阶段（主要游戏区）
   // 阶段4: cleanup     - 清理阶段（重置并抓5张）
 
+  /** 本回合是否击杀了妖怪（用于妖怪刷新规则） */
+  private currentTurnKilledYokai: boolean = false;
+
   startTurn(): void {
     const player = this.getCurrentPlayer();
     
@@ -266,6 +272,7 @@ export class GameManager {
     player.damage = 0;
     player.cardsPlayed = 0;
     player.played = [];
+    this.currentTurnKilledYokai = false; // 重置本回合击杀标记
     
     // 重置式神状态
     for (const state of player.shikigamiState) {
@@ -279,7 +286,7 @@ export class GameManager {
     this.enterGhostFirePhase();
   }
 
-  /** 阶段1: 鬼火阶段 - 鬼火+1 */
+  /** 阶段1: 鬼火阶段 - 鬼火+1，检查妖怪刷新 */
   private enterGhostFirePhase(): void {
     const player = this.getCurrentPlayer();
     this.state.turnPhase = 'ghostFire';
@@ -291,9 +298,53 @@ export class GameManager {
     );
     
     this.addLog('ghost_fire', `${player.name} 获得1点鬼火（当前:${player.ghostFire}）`, player.id);
+
+    // ====== 妖怪刷新规则 ======
+    // 如果上一玩家未击杀任何妖怪，当前玩家可以选择刷新场上所有妖怪
+    if (this.state.lastPlayerKilledYokai === false) {
+      this.state.pendingYokaiRefresh = true;
+      this.addLog('phase_change', `上一玩家未击败妖怪，${player.name} 可选择刷新场上妖怪`, player.id);
+      this.updateState();
+      // 等待玩家决定，不自动进入下一阶段
+      return;
+    }
+
     this.updateState();
     
     // 自动进入下一阶段
+    this.enterShikigamiPhase();
+  }
+
+  /**
+   * 妖怪刷新决定（妖怪刷新规则）
+   * @param refresh true=刷新所有场上妖怪，false=保持不变
+   */
+  decideYokaiRefresh(refresh: boolean): void {
+    if (!this.state.pendingYokaiRefresh) return;
+
+    const player = this.getCurrentPlayer();
+
+    if (refresh) {
+      // 将场上所有妖怪放入妖怪牌库底部
+      for (let i = 0; i < 6; i++) {
+        const yokai = this.state.field.yokaiSlots[i];
+        if (yokai) {
+          // 放入牌库底部（unshift = 队首 = 抽取时的底部）
+          this.state.field.yokaiDeck.unshift(yokai);
+          this.state.field.yokaiSlots[i] = null;
+        }
+      }
+      // 重新填充场上妖怪
+      this.fillYokaiSlots();
+      this.addLog('phase_change', `${player.name} 选择刷新场上妖怪`, player.id);
+    } else {
+      this.addLog('phase_change', `${player.name} 选择保持场上妖怪`, player.id);
+    }
+
+    this.state.pendingYokaiRefresh = false;
+    this.updateState();
+
+    // 继续进入式神阶段
     this.enterShikigamiPhase();
   }
 
@@ -339,6 +390,9 @@ export class GameManager {
     this.fillYokaiSlots();
     
     this.addLog('turn_end', `${player.name} 的回合结束`, player.id);
+
+    // ====== 记录本回合击杀状态（用于下一玩家的妖怪刷新规则） ======
+    this.state.lastPlayerKilledYokai = this.currentTurnKilledYokai;
     
     // 切换到下一个玩家
     this.state.currentPlayerIndex = (this.state.currentPlayerIndex + 1) % this.state.players.length;
@@ -551,6 +605,9 @@ export class GameManager {
   private killYokai(player: PlayerState, slotIndex: number): void {
     const yokai = this.state.field.yokaiSlots[slotIndex];
     if (!yokai) return;
+
+    // 标记本回合击杀了妖怪（用于妖怪刷新规则）
+    this.currentTurnKilledYokai = true;
 
     // 妖怪进入玩家弃牌堆（结算时统一计算声誉）
     player.discard.push(yokai);
@@ -898,6 +955,16 @@ export class GameManager {
         if (this.state.turnPhase !== 'shikigami') return false;
         this.confirmShikigamiPhase();
         return true;
+
+      case 'DECIDE_YOKAI_REFRESH':
+        if (!this.state.pendingYokaiRefresh) return false;
+        this.decideYokaiRefresh(action.refresh);
+        return true;
+
+      case 'SELECT_SHIKIGAMI':
+        // 式神选择阶段（setup phase）
+        if (this.state.phase !== 'setup') return false;
+        return this.selectShikigami(player, action.selectedIds);
         
       case 'END_TURN':
         if (this.state.turnPhase !== 'action') return false;
@@ -907,6 +974,91 @@ export class GameManager {
       default:
         return false;
     }
+  }
+
+  // ============ 式神选择流程 ============
+
+  /**
+   * 为玩家发放4张式神供选择
+   * @returns 分配给该玩家的4张式神
+   */
+  dealShikigamiChoices(player: PlayerState): ShikigamiCard[] {
+    if (!this.state.shikigamiDeck || this.state.shikigamiDeck.length < 4) {
+      return [];
+    }
+
+    // 从式神牌库顶抽4张
+    const choices = this.state.shikigamiDeck.splice(0, 4);
+    return choices;
+  }
+
+  /**
+   * 玩家选择2张式神
+   * @param selectedIds 选中的式神ID数组（必须为2张）
+   * @returns 选择是否成功
+   */
+  selectShikigami(player: PlayerState, selectedIds: string[]): boolean {
+    if (selectedIds.length !== 2) return false;
+
+    // 获取该玩家的待选式神（需要在dealShikigamiChoices时存储）
+    // 这里假设choices已经分配给玩家
+    const allShikigami = getAllShikigami();
+    
+    const selected: ShikigamiCard[] = [];
+    const returned: ShikigamiCard[] = [];
+
+    for (const id of selectedIds) {
+      const shikigami = allShikigami.find(s => s.id === id);
+      if (shikigami) {
+        selected.push(shikigami);
+      }
+    }
+
+    if (selected.length !== 2) return false;
+
+    // 设置玩家的初始式神
+    player.shikigami = selected;
+    player.shikigamiState = selected.map(s => ({
+      cardId: s.id,
+      isExhausted: false,
+      markers: {}
+    }));
+
+    this.addLog('phase_change', `${player.name} 选择了式神：${selected.map(s => s.name).join('、')}`, player.id);
+    this.updateState();
+
+    return true;
+  }
+
+  // ============ 恶评系统 ============
+
+  /**
+   * 玩家获得恶评卡
+   * 规则：从恶评牌库顶抽取，若牌库为空则默认获得农夫（无限供应）
+   */
+  givePenalty(player: PlayerState): CardInstance {
+    let penaltyCard: CardInstance;
+
+    if (this.state.field.penaltyPile.length > 0) {
+      // 从恶评牌库顶抽取
+      penaltyCard = this.state.field.penaltyPile.pop()!;
+    } else {
+      // 牌库耗尽，默认获得农夫（无限供应）
+      const farmer = getAllPenalties().find(p => p.name === '农夫');
+      if (!farmer) {
+        throw new Error('找不到农夫恶评卡');
+      }
+      penaltyCard = createPenaltyInstance(farmer);
+      this.addLog('phase_change', '恶评牌库已耗尽，默认获得农夫', player.id);
+    }
+
+    // 恶评卡进入玩家弃牌堆
+    player.discard.push(penaltyCard);
+    
+    this.addLog('penalty', `${player.name} 获得了恶评【${penaltyCard.name}】`, player.id);
+    this.updateState();
+
+    return penaltyCard;
   }
 }
 

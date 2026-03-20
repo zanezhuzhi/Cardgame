@@ -22,32 +22,42 @@
 #### 模式A：快速匹配
 - 系统自动分配房间
 - 按**段位/积分**相近匹配
-- 默认2人对战，可选3-6人
+- **两种人数模式**：
+  - 🎯 **小局模式**：3-4人（推荐新手）
+  - 🎯 **大局模式**：5-6人（完整体验）
 
 ```typescript
 interface QuickMatchRequest {
   type: 'QUICK_MATCH';
-  playerCount: 2 | 3 | 4 | 5 | 6;  // 期望玩家数
+  mode: 'SMALL' | 'LARGE';         // 小局(3-4人) / 大局(5-6人)
   rankTolerance?: number;          // 段位容差（默认±200分）
 }
+
+// 匹配规则：
+// - 小局模式：3人即可开始，最多4人
+// - 大局模式：5人即可开始，最多6人
 ```
 
 #### 模式B：创建房间
 - 玩家手动创建
 - 可设置密码（好友房）
 - 房主控制开始时机
+- **必须选择人数模式**
 
 ```typescript
 interface CreateRoomRequest {
   type: 'CREATE_ROOM';
   config: {
-    minPlayers: number;       // 最少人数（2-6）
-    maxPlayers: number;       // 最多人数（2-6）
+    mode: 'SMALL' | 'LARGE';  // 小局(3-4人) / 大局(5-6人)
     isPrivate: boolean;       // 是否私有房
     password?: string;        // 房间密码
     isRanked: boolean;        // 是否计入排位
   };
 }
+
+// 人数限制：
+// - SMALL 模式：minPlayers=3, maxPlayers=4
+// - LARGE 模式：minPlayers=5, maxPlayers=6
 ```
 
 ### 1.3 匹配队列实现
@@ -60,17 +70,27 @@ interface QueuedPlayer {
   playerName: string;
   rating: number;              // 玩家积分
   queueTime: number;           // 入队时间
-  targetPlayerCount: number;   // 期望人数
+  mode: MatchMode;             // 匹配模式：SMALL(3-4人) / LARGE(5-6人)
   connection: PlayerConnection;
 }
 
+type MatchMode = 'SMALL' | 'LARGE';
+
+const MODE_CONFIG = {
+  SMALL: { minPlayers: 3, maxPlayers: 4 },
+  LARGE: { minPlayers: 5, maxPlayers: 6 },
+};
+
 class MatchQueue {
-  private queues: Map<number, QueuedPlayer[]> = new Map();  // 按人数分队列
+  private queues: Map<MatchMode, QueuedPlayer[]> = new Map([
+    ['SMALL', []],
+    ['LARGE', []],
+  ]);
   private matchInterval: number = 2000;  // 每2秒匹配一次
   
   // 加入匹配队列
   enqueue(player: QueuedPlayer): void {
-    const queue = this.getQueue(player.targetPlayerCount);
+    const queue = this.queues.get(player.mode)!;
     queue.push(player);
     
     // 通知玩家排队状态
@@ -94,16 +114,23 @@ class MatchQueue {
   
   // 定时匹配逻辑
   private processMatch(): void {
-    for (const [playerCount, queue] of this.queues) {
-      if (queue.length < playerCount) continue;
+    for (const [mode, queue] of this.queues) {
+      const { minPlayers, maxPlayers } = MODE_CONFIG[mode];
+      
+      // 人数不足最小要求，跳过
+      if (queue.length < minPlayers) continue;
       
       // 按积分排序
       queue.sort((a, b) => a.rating - b.rating);
       
+      // 确定本次匹配人数（优先凑满，但至少满足最小人数）
+      const matchSize = Math.min(queue.length, maxPlayers);
+      if (matchSize < minPlayers) continue;
+      
       // 滑动窗口寻找积分相近的玩家
-      for (let i = 0; i <= queue.length - playerCount; i++) {
-        const candidates = queue.slice(i, i + playerCount);
-        const ratingDiff = candidates[playerCount - 1].rating - candidates[0].rating;
+      for (let i = 0; i <= queue.length - matchSize; i++) {
+        const candidates = queue.slice(i, i + matchSize);
+        const ratingDiff = candidates[matchSize - 1].rating - candidates[0].rating;
         
         // 随时间增加容差
         const maxWaitTime = Math.max(...candidates.map(p => Date.now() - p.queueTime));
@@ -111,7 +138,7 @@ class MatchQueue {
         
         if (ratingDiff <= tolerance) {
           // 匹配成功！
-          this.createMatch(candidates);
+          this.createMatch(candidates, mode);
           // 从队列移除
           candidates.forEach(p => {
             const idx = queue.indexOf(p);
@@ -164,11 +191,10 @@ class MatchQueue {
 │    ┌─────────────────┐    ┌─────────────────┐             │
 │    │   ⚔️ 快速匹配    │    │   🏠 创建房间    │             │
 │    │                 │    │                 │             │
-│    │  [2人] [3人]    │    │  房间号: ____   │             │
-│    │  [4人] [5人]    │    │  密码: ______   │             │
-│    │  [6人]          │    │                 │             │
-│    │                 │    │  [创建]         │             │
-│    │  [开始匹配]     │    │                 │             │
+│    │  ○ 小局 (3-4人) │    │  ○ 小局 (3-4人) │             │
+│    │  ○ 大局 (5-6人) │    │  ○ 大局 (5-6人) │             │
+│    │                 │    │  密码: ______   │             │
+│    │  [开始匹配]     │    │  [创建房间]     │             │
 │    └─────────────────┘    └─────────────────┘             │
 │                                                            │
 │    ┌─────────────────┐                                     │
@@ -217,23 +243,24 @@ class MatchQueue {
 │ 🎯 视角规则                                                 │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│ 1. 轮到谁行动，所有人都能看到「谁在行动」                    │
+│ 1. 所有玩家共享同一视角                                     │
+│    - 中央操作区：所有行动都在这里展示                        │
+│    - 周围信息区：各玩家的状态信息                           │
 │                                                             │
-│ 2. 行动玩家的操作过程对其他人**隐藏**：                      │
-│    - 不显示行动玩家的手牌                                   │
-│    - 不显示行动玩家正在做的选择                              │
+│ 2. 顶部显示【当前行动玩家】指示器                           │
+│    - 回合切换时，指示器变更到新玩家                          │
+│    - 中央操作区展示当前玩家的操作界面                        │
 │                                                             │
-│ 3. 操作结果**同步广播**给所有人：                           │
-│    - 打出的牌（从手牌区飞到场上）                           │
-│    - 发动的技能效果                                         │
-│    - 造成的伤害数值                                         │
-│    - 获得的御魂/声望                                        │
+│ 3. 观战模式（非行动玩家）：                                 │
+│    - 视角与行动玩家完全相同                                 │
+│    - 可以看到行动玩家的手牌和操作                           │
+│    - 只是无法实际点击/操作                                  │
+│    - 可以自由查看场上信息                                   │
 │                                                             │
 │ 4. 公开信息所有人可见：                                     │
 │    - 鬼王血量、场上妖怪                                     │
-│    - 弃牌堆、阴阳术牌堆数量                                 │
-│    - 各玩家的声望、鬼火数量                                 │
-│    - 各玩家出战的式神                                       │
+│    - 各玩家的声望、鬼火、出战式神                           │
+│    - 弃牌堆、牌库剩余数量                                   │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -251,64 +278,80 @@ interface ClientViewState {
     remainingTime: number;        // 剩余行动时间
   };
   
-  // 我的私有信息
-  myState: {
-    hand: CardInstance[];         // 我的手牌（完整信息）
-    pendingInteract?: InteractRequest;  // 等待我响应的交互
-  };
+  // 我的玩家ID
+  myPlayerId: string;
   
-  // 各玩家公开信息
-  players: PlayerPublicView[];
+  // 所有玩家完整信息（共享视角）
+  players: PlayerFullView[];
   
   // 战场公开信息
-  field: FieldPublicView;
+  field: FieldView;
   
   // 事件日志
   eventLog: GameEventLog[];
 }
 
-interface PlayerPublicView {
+interface PlayerFullView {
   id: string;
   name: string;
   
-  // 公开数值
+  // 数值
   ghostFire: number;              // 鬼火数量
   charm: number;                  // 声望
-  handCount: number;              // 手牌数量（不显示内容）
   
-  // 公开卡牌
-  shikigami: ShikigamiCard[];     // 出战式神
-  discardPile: CardInstance[];    // 弃牌堆
-  played: CardInstance[];         // 本回合打出的牌
+  // 完整手牌（所有人都能看到当前行动者的手牌）
+  hand: CardInstance[];
+  
+  // 式神
+  shikigami: ShikigamiCard[];
+  
+  // 弃牌堆
+  discardPile: CardInstance[];
   
   // 状态
   isActive: boolean;              // 是否正在行动
   isConnected: boolean;           // 是否在线
 }
+
+// 操作权限判断
+function canOperate(state: ClientViewState): boolean {
+  return state.currentTurn.activePlayerId === state.myPlayerId;
+}
 ```
 
-### 2.3 视角切换动画
+### 2.3 回合切换动画
 
 ```typescript
 // 当行动玩家切换时的UI表现
 
-interface TurnChangeAnimation {
-  // 1. 淡出当前玩家区域的高亮
-  fadeOutCurrentPlayer();
+class TurnChangeHandler {
   
-  // 2. 相机/视角平移到新玩家区域
-  panToPlayer(newPlayerId: string, duration: 500);
+  onTurnChange(newPlayerId: string): void {
+    // 1. 更新顶部指示器
+    this.updateActivePlayerIndicator(newPlayerId);
+    
+    // 2. 更新玩家信息栏高亮
+    this.highlightPlayerCard(newPlayerId);
+    
+    // 3. 切换中央操作区内容
+    this.switchOperationArea(newPlayerId);
+    
+    // 4. 根据是否是自己的回合，设置操作权限
+    if (newPlayerId === myPlayerId) {
+      this.showMyTurnPrompt('你的回合！');
+      this.enableOperationButtons();
+    } else {
+      this.showWatchingPrompt(`等待 ${playerName} 行动...`);
+      this.disableOperationButtons();  // 按钮变灰，不可点击
+    }
+  }
   
-  // 3. 高亮新行动玩家的区域
-  highlightActivePlayer(newPlayerId: string);
-  
-  // 4. 如果是自己的回合，显示操作提示
-  if (newPlayerId === myPlayerId) {
-    showActionHint('你的回合！');
-    enableMyControls();
-  } else {
-    showWatchingHint(`${playerName} 正在行动...`);
-    disableMyControls();
+  // 切换操作区：显示当前行动玩家的手牌和式神
+  switchOperationArea(playerId: string): void {
+    const playerState = gameState.players.find(p => p.id === playerId);
+    this.renderHandCards(playerState.hand);       // 显示该玩家手牌
+    this.renderShikigami(playerState.shikigami);  // 显示该玩家式神
+    this.renderGhostFire(playerState.ghostFire);  // 显示该玩家鬼火
   }
 }
 ```
@@ -317,37 +360,58 @@ interface TurnChangeAnimation {
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                          对手3 [声望:12] 🔥×3                            │
-│                    ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐             │
-│                    │ ▓▓▓ │ │ ▓▓▓ │ │ ▓▓▓ │ │ ▓▓▓ │ │ ▓▓▓ │ ← 手牌背面  │
-│                    └─────┘ └─────┘ └─────┘ └─────┘ └─────┘             │
-│                          [山兔] [青行灯]  ← 式神                        │
-├───────────────────┬─────────────────────────────┬───────────────────────┤
-│    对手2          │                             │        对手4         │
-│   [声望:8] 🔥×2   │      ┌───────────────┐      │     [声望:15] 🔥×4   │
-│   ┌───┐ ┌───┐    │      │  🎃 酒吞童子   │      │    ┌───┐ ┌───┐      │
-│   │▓▓▓│ │▓▓▓│    │      │   HP: 35/50    │      │    │▓▓▓│ │▓▓▓│      │
-│   │▓▓▓│ │▓▓▓│    │      │   ⚔️ ████████░░ │      │    │▓▓▓│ │▓▓▓│      │
-│   └───┘ └───┘    │      └───────────────┘      │    └───┘ └───┘      │
-│  [座敷童子][小白] │                             │   [茨木][萤草]       │
-│                   │   ┌─────┐┌─────┐┌─────┐    │                      │
-│   ⬅ 当前行动中    │   │ 🎃  ││ 🎃  ││ 🎃  │    │                      │
-│                   │   │河童 ││狸猫 ││骨女 │    │                      │
-│                   │   └─────┘└─────┘└─────┘    │                      │
-│                   │         场上妖怪            │                      │
-├───────────────────┴─────────────────────────────┴───────────────────────┤
-│                              我 [声望:10] 🔥×5                          │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  ▶ 当前行动: 玩家B [声望:8] 🔥×2                   ⏱️ 01:45     │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌────────┐   ┌────────┐   ┌────────┐   ┌────────┐                    │
+│   │ 玩家A  │   │ 玩家B  │   │ 玩家C  │   │ 玩家D  │  ← 玩家信息栏     │
+│   │ 🏆 12  │   │ 🏆 8   │   │ 🏆 15  │   │ 🏆 10  │                    │
+│   │ 🔥 3   │   │ 🔥 2   │   │ 🔥 4   │   │ 🔥 5   │                    │
+│   │ 🃏 5   │   │ 🃏 4   │   │ 🃏 6   │   │ 🃏 5   │  ← 手牌数量       │
+│   │[山兔]  │   │[座敷]  │   │[茨木]  │   │[桃花]  │  ← 式神           │
+│   │[青灯]  │   │[小白]  │   │[萤草]  │   │[姑获]  │                    │
+│   └────────┘   └──🔷───┘   └────────┘   └────────┘                    │
+│                   ↑ 当前行动高亮                                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│         ┌────────────────────────────────────────────┐                  │
+│         │              🎃 酒吞童子                   │                  │
+│         │              HP: 35/50                     │                  │
+│         │         ⚔️ ████████████░░░░░░░             │                  │
+│         └────────────────────────────────────────────┘                  │
+│                                                                         │
+│      ┌─────────┐   ┌─────────┐   ┌─────────┐                           │
+│      │   🎃    │   │   🎃    │   │   🎃    │   ← 场上妖怪              │
+│      │  河童   │   │  狸猫   │   │  骨女   │                           │
+│      │  HP:3   │   │  HP:4   │   │  HP:5   │                           │
+│      └─────────┘   └─────────┘   └─────────┘                           │
+│                                                                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                    ═══ 当前行动玩家的操作区 ═══                         │
 │  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐   [桃花妖] [姑获鸟]       │ │
-│  │ │阴阳术│ │阴阳术│ │御魂牌│ │御魂牌│ │御魂牌│   我的式神              │ │
-│  │ │ 初级 │ │ 中级 │ │骸骨 │ │三尾狐│ │天狗 │                          │ │
-│  │ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘                            │ │
-│  │                  ↑ 我的手牌（完整可见）                             │ │
+│  │  手牌:                                                              │ │
+│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐     式神: [座敷童子] [小白]      │ │
+│  │  │阴阳术│ │阴阳术│ │御魂牌│ │御魂牌│                                 │ │
+│  │  │ 初级 │ │ 中级 │ │骸骨  │ │三尾狐│     🔥 鬼火: 2               │ │
+│  │  └─────┘ └─────┘ └─────┘ └─────┘                                   │ │
+│  │                                                                     │ │
+│  │     [打出卡牌]    [使用技能]    [结束回合]   ← 只有行动者可点击     │ │
 │  └────────────────────────────────────────────────────────────────────┘ │
 ├─────────────────────────────────────────────────────────────────────────┤
-│  📜 日志: 对手2 打出「中级阴阳术」→ 河童 造成 3 点伤害                   │
+│  📜 玩家B 打出「中级阴阳术」→ 河童 造成 3 点伤害                        │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+**布局说明**：
+- **顶部**：当前行动玩家指示器 + 倒计时
+- **上方**：所有玩家信息栏（声望🏆、鬼火🔥、手牌数🃏、式神）
+- **中央**：鬼王 + 场上妖怪
+- **下方**：当前行动玩家的操作区（手牌、技能、操作按钮）
+- **底部**：事件日志
+
+**观战时**：操作按钮变灰，显示「等待 玩家B 行动...」
 
 ### 2.5 操作结果同步
 
@@ -394,38 +458,62 @@ type GameBroadcastEvent =
     };
 ```
 
-### 2.6 观战模式
+### 2.6 状态同步策略
 
-非行动玩家观看时的信息过滤：
+由于所有玩家共享视角，服务端广播完整的游戏状态：
 
 ```typescript
-// server/src/game/ViewFilter.ts
+// server/src/game/StateBroadcaster.ts
 
-function filterStateForSpectator(
-  fullState: GameState,
-  viewerId: string
-): SpectatorViewState {
-  return {
-    ...fullState,
-    players: fullState.players.map(player => {
-      const isMe = player.id === viewerId;
+class StateBroadcaster {
+  
+  // 广播游戏状态给所有玩家（共享视角）
+  broadcastState(gameState: GameState): void {
+    const sharedView = this.createSharedView(gameState);
+    
+    for (const player of this.room.players) {
+      player.connection.send({
+        type: 'STATE_SYNC',
+        state: sharedView,
+        myPlayerId: player.id,  // 告知客户端自己是谁
+      });
+    }
+  }
+  
+  // 创建共享视图（所有人看到相同内容）
+  private createSharedView(state: GameState): SharedGameView {
+    return {
+      currentTurn: {
+        activePlayerId: state.currentPlayerId,
+        phase: state.turnPhase,
+        remainingTime: state.turnTimer,
+      },
       
-      return {
-        ...player,
-        // 只有自己能看手牌
-        hand: isMe ? player.hand : player.hand.map(() => HIDDEN_CARD),
-        // 牌库对所有人隐藏
-        deck: [],
-        // 其他公开信息保留
+      // 所有玩家的完整信息
+      players: state.players.map(player => ({
+        id: player.id,
+        name: player.name,
         ghostFire: player.ghostFire,
         charm: player.charm,
+        hand: player.hand,           // 完整手牌（共享视角）
         shikigami: player.shikigami,
-        discard: player.discard,
-      };
-    }),
-  };
+        discardPile: player.discard,
+        isActive: player.id === state.currentPlayerId,
+        isConnected: player.isConnected,
+      })),
+      
+      // 战场信息
+      field: {
+        boss: state.currentBoss,
+        yokaiSlots: state.yokaiSlots,
+        spellDecks: state.spellDecks,
+      },
+    };
+  }
 }
 ```
+
+**注意**：牌库顺序仍然隐藏，玩家无法知道下一张会抽到什么牌。
 
 ---
 
@@ -666,7 +754,7 @@ interface PlayerGameHistory {
 
 ```typescript
 // 匹配相关 C2S
-| { type: 'QUICK_MATCH'; playerCount: number }
+| { type: 'QUICK_MATCH'; mode: 'SMALL' | 'LARGE' }  // 小局3-4人 / 大局5-6人
 | { type: 'CANCEL_MATCH' }
 
 // 匹配相关 S2C

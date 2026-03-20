@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "excel2html": {
+      "source": "api/git/@excel2html",
+      "sourceType": "git",
+      "computedHash": "dfdd1180d309ea5174f721165dc6479b1015fe6bc859c5c5a2539d47a1bcf452"
+    }
+  }
+}

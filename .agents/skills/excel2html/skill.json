@@ -1,0 +1,42 @@
+{
+  "name": "Excel转HTML智能转换器",
+  "version": "3.1",
+  "description": "专业的游戏设计文档转换工具，支持Excel到OnePage HTML的全自动转换，内置5步验证流程、智能文件选择和设计建议生成系统",
+  "author": "GameSpec AI Assistant",
+  "category": "文档工具",
+  "tags": ["Excel", "HTML", "游戏设计", "SDD", "文档转换", "自动化", "交互式"],
+  "main": "convert_excel_to_html.py",
+  "dependencies": {
+    "openpyxl": ">=3.0.0",
+    "Pillow": ">=9.0.0"
+  },
+  "features": [
+    "🔄 5步标准验证流程（提取→生成→验证→建议→输出）",
+    "📂 智能文件选择（多文件支持+自动打开文件夹）",
+    "📊 内容完整性自动验证（零删除保证）",
+    "🖼️ 图片坐标精准映射（XML解析）",
+    "📋 智能设计建议生成（物品栏/技能/通用）",
+    "🎨 统一OnePage格式输出（10pt字体+极简风格）",
+    "📁 文档信息卡片式布局",
+    "⚡ 命令行参数支持",
+    "🌐 响应式HTML设计",
+    "🔒 安全防护（XXE/XSS/路径遍历）",
+    "🤝 友好的用户交互体验"
+  ],
+  "workflow": {
+    "step1": "分析Excel结构并提取图片",
+    "step2": "生成HTML内容",
+    "step3": "验证内容完整性",
+    "step4": "生成文档设计建议",
+    "step5": "输出HTML文件"
+  },
+  "usage": {
+    "interactive_mode": "python convert_excel_to_html.py (自动打开文件夹并选择文件)",
+    "command_line": "python convert_excel_to_html.py [Excel文件路径]"
+  },
+  "input_folder": "待转换excel文件",
+  "output_folder": "完成html转换文件",
+  "requirements": "Python 3.7+, openpyxl, Pillow",
+  "documentation": "SKILL.md",
+  "readme": "README.md"
+}

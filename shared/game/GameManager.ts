@@ -744,15 +744,17 @@ export class GameManager {
     const playerScores: PlayerScore[] = [];
     
     for (const player of this.state.players) {
-      // 结算所有区域的牌（不含超度区 exiled）
+      // 结算声誉：玩家牌库（全部分区）+ 式神区，超度区不计入
+      // 「牌库」= 抽牌堆(deck) + 手牌(hand) + 弃牌堆(discard) + 已打出(played)
+      // 包含：阴阳术、御魂（妖怪/鬼王退治后）、恶评、招福达摩
       const allCards = [
         ...player.deck,
         ...player.hand,
         ...player.discard,
         ...player.played,
       ];
-      // 声誉 = 牌堆声誉 + 式神区声誉（式神在场也计分）
       const deckCharm = allCards.reduce((sum, card) => sum + (card.charm || 0), 0);
+      // 式神在式神区，不在牌库中，需要单独计算
       const shikigamiCharm = player.shikigami.reduce((sum, s) => sum + (s.charm || 0), 0);
       const totalCharm = deckCharm + shikigamiCharm;
 

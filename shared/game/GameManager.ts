@@ -446,14 +446,20 @@ export class GameManager {
   }
 
   private revealNextBoss(): void {
-    if (this.state.field.bossDeck.length > 0) {
-      const boss = this.state.field.bossDeck.pop()!;
-      this.state.field.currentBoss = boss;
-      this.state.field.bossHp = boss.hp;
-      
-      this.addLog('boss_arrival', `鬼王 ${boss.name} 来袭！`);
-      
-      // TODO: 执行鬼王来袭效果
+    if (this.state.field.bossDeck.length === 0) {
+      // 无鬼王，游戏即将结束（由 checkGameEnd 处理）
+      return;
+    }
+
+    const boss = this.state.field.bossDeck.pop()!;
+    this.state.field.currentBoss = boss;
+    this.state.field.bossCurrentHp = boss.hp;
+
+    this.addLog('boss_arrival', `【鬼王来袭】${boss.name}（阶段${boss.stage}，HP:${boss.hp}）来袭！`);
+
+    // 触发来袭效果（记录日志，具体效果由 EffectEngine 处理）
+    if (boss.arrivalEffect && boss.arrivalEffect !== '无') {
+      this.addLog('boss_arrival', `来袭效果：${boss.arrivalEffect}`);
     }
   }
 
@@ -485,14 +491,19 @@ export class GameManager {
     
     // 检查是否是鬼王
     if (this.state.field.currentBoss && targetId === 'boss') {
-      this.state.field.bossHp -= damage;
-      
-      this.addLog('attack', `${player.name} 对 ${this.state.field.currentBoss.name} 造成 ${damage} 点伤害`, player.id);
-      
-      if (this.state.field.bossHp <= 0) {
+      // 从累积伤害中扣除
+      player.damage -= damage;
+      this.state.field.bossCurrentHp -= damage;
+
+      this.addLog('attack',
+        `${player.name} 对鬼王 ${this.state.field.currentBoss.name} 造成 ${damage} 点伤害（剩余HP:${this.state.field.bossCurrentHp}）`,
+        player.id
+      );
+
+      if (this.state.field.bossCurrentHp <= 0) {
         this.killBoss(player);
       }
-      
+
       this.updateState();
       return true;
     }
@@ -519,14 +530,25 @@ export class GameManager {
   private killBoss(player: PlayerState): void {
     const boss = this.state.field.currentBoss;
     if (!boss) return;
-    
-    this.addLog('boss_defeated', `${player.name} 击败了鬼王 ${boss.name}！`, player.id);
-    
-    // 鬼王可能有特殊处理（如进入牌库底）
-    // 暂时简化处理
-    
-    // 翻出下一个鬼王
+
+    // 玩家获得鬼王声誉（实时累加）
+    if (boss.charm) {
+      player.totalCharm += boss.charm;
+    }
+
+    this.addLog('defeat_boss', `${player.name} 击败了鬼王 ${boss.name}！获得声誉+${boss.charm}`, player.id);
+
+    // 清除当前鬼王
+    this.state.field.currentBoss = null;
+    this.state.field.bossCurrentHp = 0;
+
+    // 翻出下一个鬼王（若有）
     this.revealNextBoss();
+
+    // 击败最后一个鬼王时立即结束游戏
+    if (this.checkGameEnd()) {
+      this.endGame();
+    }
   }
 
   /**

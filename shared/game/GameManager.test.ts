@@ -496,11 +496,80 @@ describe('GameManager 游戏管理器', () => {
   });
 
   describe('🔴 鬼王系统', () => {
-    it.todo('鬼王被击败后翻出下一个');
+    let player: ReturnType<GameManager['getCurrentPlayer']>;
 
-    it.todo('所有鬼王被击败时游戏结束');
+    beforeEach(() => {
+      game.addPlayer('p1', '玩家1');
+      game.addPlayer('p2', '玩家2');
+      const state = game.getState();
+      state.phase = 'playing';
 
-    it.todo('鬼王来袭效果触发');
+      // 手动配置鬼王牌库：当前鬼王(HP=8) + 牌库里还有1个
+      state.field.currentBoss = {
+        id: 'boss_kirin', name: '麒麟', type: 'boss',
+        stage: 'Ⅰ', hp: 8, charm: 3,
+        effect: '伤害+3', arrivalEffect: '无',
+        keywords: ['御魂'], multiPlayer: false, image: '', count: 1,
+      };
+      state.field.bossCurrentHp = 8;
+      state.field.bossDeck = [{
+        id: 'boss_sekigu', name: '石距', type: 'boss',
+        stage: 'Ⅰ', hp: 9, charm: 3,
+        effect: '鬼火+1，抓牌+1，伤害+2', arrivalEffect: '每位玩家展示手牌，并弃掉所有的阴阳术',
+        keywords: ['御魂', '鬼火'], multiPlayer: false, image: '', count: 1,
+      }];
+
+      game.startTurn();
+      game.confirmShikigamiPhase();
+      player = game.getCurrentPlayer();
+      player.damage = 20; // 足够击败鬼王
+    });
+
+    it('攻击鬼王时HP减少', () => {
+      const state = game.getState();
+
+      game.handleAction('p1', { type: 'ATTACK', targetId: 'boss', damage: 3 });
+
+      expect(state.field.bossCurrentHp).toBe(5);
+    });
+
+    it('鬼王HP降至0后被击败，翻出下一个', () => {
+      const state = game.getState();
+
+      game.handleAction('p1', { type: 'ATTACK', targetId: 'boss', damage: 8 });
+
+      // 当前鬼王应该变成石距
+      expect(state.field.currentBoss?.name).toBe('石距');
+      expect(state.field.bossCurrentHp).toBe(9);
+    });
+
+    it('击败鬼王后玩家获得鬼王声誉', () => {
+      const charmBefore = player.totalCharm;
+
+      game.handleAction('p1', { type: 'ATTACK', targetId: 'boss', damage: 8 });
+
+      expect(player.totalCharm).toBe(charmBefore + 3); // 麒麟声誉+3
+    });
+
+    it('击败最后一个鬼王后游戏结束', () => {
+      const state = game.getState();
+      // 清空鬼王牌库，只剩当前这一个
+      state.field.bossDeck = [];
+
+      game.handleAction('p1', { type: 'ATTACK', targetId: 'boss', damage: 8 });
+
+      expect(state.phase).toBe('ended');
+    });
+
+    it('新鬼王来袭时记录到游戏日志', () => {
+      const state = game.getState();
+
+      game.handleAction('p1', { type: 'ATTACK', targetId: 'boss', damage: 8 });
+
+      // 日志中应该有"石距来袭"相关记录
+      const bossLog = state.log.find(l => l.message.includes('石距') && l.message.includes('来袭'));
+      expect(bossLog).toBeDefined();
+    });
   });
 
   describe('🔴 游戏结束', () => {

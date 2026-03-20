@@ -47,10 +47,13 @@
           <div v-if="boss" class="boss-card" @click="hitBoss"
                @mouseenter="showBossTooltip($event, boss)"
                @mouseleave="hideTooltip">
-            <div class="boss-stage">Ⅰ</div>
-            <div class="boss-name">{{boss.name}}</div>
-            <div class="boss-hp">❤️{{state?.field.bossCurrentHp}}/{{boss.hp}}</div>
-            <div class="boss-charm">👑+{{boss.charm||0}}</div>
+            <img v-if="getCardImage(boss)" :src="getCardImage(boss)" class="card-art boss-art" />
+            <div class="boss-card-info">
+              <div class="boss-stage">Ⅰ</div>
+              <div class="boss-name">{{boss.name}}</div>
+              <div class="boss-hp">❤️{{state?.field.bossCurrentHp}}/{{boss.hp}}</div>
+              <div class="boss-charm">👑+{{boss.charm||0}}</div>
+            </div>
           </div>
           <div v-else class="boss-empty">全部击败</div>
           <div class="boss-remain">剩余:{{state?.field.bossDeck.length||0}}</div>
@@ -71,12 +74,13 @@
                  @mouseenter="y && showTooltip($event, y)"
                  @mouseleave="hideTooltip">
               <template v-if="y">
-                <div class="y-name">{{y.name}}</div>
-                <div class="y-stat">
-                  <span :class="{'hp-damaged': getYokaiCurrentHp(y) < y.hp}">
-                    ❤️{{getYokaiCurrentHp(y)}}/{{y.hp}}
-                  </span>
-                  👑{{y.charm||0}}
+                <img v-if="getCardImage(y)" :src="getCardImage(y)" class="card-art yokai-art" />
+                <div class="yokai-info">
+                  <div class="y-name">{{y.name}}</div>
+                  <div class="y-stat">
+                    <span :class="{'hp-damaged': getYokaiCurrentHp(y) < y.hp}">❤️{{getYokaiCurrentHp(y)}}/{{y.hp}}</span>
+                    <span>👑{{y.charm||0}}</span>
+                  </div>
                 </div>
                 <div v-if="isKilled(y)" class="killed-badge">💀 已击杀</div>
               </template>
@@ -109,9 +113,12 @@
                  @click="shikigamiModal.selectingOld ? selectOldShikigami(s.id) : useSkill(s.id)"
                  @mouseenter="showShikigamiTooltip($event, s)"
                  @mouseleave="hideTooltip">
-              <div class="s-name">{{s.name}}</div>
-              <div class="s-skill" v-if="s.skill">【启】{{s.skill.name}}(🔥{{s.skill.cost||0}})</div>
-              <div class="s-skill" v-else-if="s.passive">【被动】{{s.passive.name}}</div>
+              <img v-if="getCardImage(s)" :src="getCardImage(s)" class="card-art shiki-art" />
+              <div class="shiki-info">
+                <div class="s-name">{{s.name}}</div>
+                <div class="s-skill" v-if="s.skill">【启】{{s.skill.name}}(🔥{{s.skill.cost||0}})</div>
+                <div class="s-skill" v-else-if="s.passive">【被动】{{s.passive.name}}</div>
+              </div>
             </div>
           </div>
         </div>
@@ -128,11 +135,14 @@
                  @click="handleCardClick(c)"
                  @mouseenter="showTooltip($event, c)"
                  @mouseleave="hideTooltip">
-              <div class="c-name">{{c.name}}</div>
-              <div class="c-stat" v-if="c.cardType === 'spell' || c.cardType === 'yokai'">⚔️{{c.damage||c.hp||1}}</div>
-              <div class="c-stat" v-else-if="c.cardType === 'token'">🎁</div>
-              <div class="c-stat" v-else-if="c.cardType === 'penalty'">💔{{c.charm||0}}</div>
-              <div class="c-stat" v-else>—</div>
+              <img v-if="getCardImage(c)" :src="getCardImage(c)" class="card-art hand-art" />
+              <div class="card-info">
+                <div class="c-name">{{c.name}}</div>
+                <div class="c-stat" v-if="c.cardType === 'spell' || c.cardType === 'yokai'">⚔️{{c.damage||c.hp||1}}</div>
+                <div class="c-stat" v-else-if="c.cardType === 'token'">🎁</div>
+                <div class="c-stat" v-else-if="c.cardType === 'penalty'">💔{{c.charm||0}}</div>
+                <div class="c-stat" v-else>—</div>
+              </div>
             </div>
           </div>
         </div>
@@ -329,10 +339,39 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, reactive } from 'vue'
+import { ref, computed, nextTick, reactive, onMounted } from 'vue'
 import { SinglePlayerGame } from './game/SinglePlayerGame'
 import type { GameState } from '../../shared/types/game'
 import type { CardInstance } from '../../shared/types/cards'
+
+// ── 卡牌图片路径映射 ──────────────────────────────────────
+// id格式：boss_001 → 101.webp, yokai_001 → 201.webp, shikigami_001 → 401.webp
+// spell_001 → 601.webp, penalty_001 → 701.webp
+const ID_OFFSET: Record<string, number> = {
+  boss: 100, yokai: 200, shikigami: 400, spell: 600, penalty: 700
+}
+function getCardImage(card: CardInstance | any): string {
+  // CardInstance 用 cardId，原始卡牌数据用 id
+  const rawId = card?.cardId || card?.id
+  if (!rawId) return ''
+  const m = String(rawId).match(/^(\w+)_(\d+)$/)
+  if (!m) return ''
+  const [, type, num] = m
+  const offset = ID_OFFSET[type]
+  if (offset === undefined) return ''
+  const numId = offset + parseInt(num)
+  const dir: Record<string, string> = {
+    boss: 'bosses', yokai: 'yokai', shikigami: 'shikigami', spell: 'spells', penalty: 'curses'
+  }
+  return `/src/assets/images/${dir[type]}/${numId}.webp`
+}
+
+// 禁用全局拖拽默认行为，防止长按出现多选框/图片拖走
+onMounted(() => {
+  document.addEventListener('dragstart', e => e.preventDefault())
+  document.addEventListener('selectstart', e => e.preventDefault())
+  document.addEventListener('contextmenu', e => e.preventDefault())
+})
 
 const playerName = ref('阴阳师')
 const inGame = ref(false)
@@ -862,87 +901,329 @@ async function selectNewShikigami(shikigami: any) {
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .tips{margin-top:20px;color:#666;font-size:13px}
 
-/* 游戏 - 适配1024x768 */
-.game-board{display:flex;flex-direction:column;height:100vh;padding:4px;gap:4px;overflow:hidden}
+/* ══════════════════════════════════════════════
+   游戏主布局
+══════════════════════════════════════════════ */
+.game-board{
+  display:flex;flex-direction:column;height:100vh;
+  padding:6px;gap:5px;overflow:hidden;
+  background:linear-gradient(160deg,#0d1117 0%,#111827 50%,#0f172a 100%);
+  font-family:'Segoe UI',sans-serif;
+}
 
-/* 顶部 */
-.top-row{display:flex;gap:4px;height:70px;flex-shrink:0}
-.info-panel{width:150px;background:rgba(0,0,0,.3);border-radius:5px;padding:4px;display:flex;flex-direction:column}
-.panel-title{font-size:9px;color:#888;margin-bottom:2px}
-.log-area{flex:1;overflow-y:auto;font-size:8px}
-.log-line{padding:1px 0;border-bottom:1px solid rgba(255,255,255,.1)}
-.player-panel{flex:1;background:rgba(0,0,0,.3);border-radius:5px;padding:4px;display:flex;gap:3px}
-.player-slot{flex:1;background:rgba(100,150,255,.2);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:9px}
-.player-slot.active{background:rgba(100,150,255,.5);border:2px solid #667eea}
-.logo-panel{width:110px;background:rgba(0,0,0,.3);border-radius:5px;padding:4px;text-align:center}
-.logo{font-size:12px;font-weight:bold}
-.stats{margin-top:3px;display:flex;flex-wrap:wrap;gap:3px;justify-content:center;font-size:9px}
-.buffs{margin-top:3px;display:flex;flex-wrap:wrap;gap:2px;justify-content:center}
-.buff-tag{background:linear-gradient(135deg,#ff9800,#f57c00);padding:1px 4px;border-radius:2px;font-size:7px}
+/* ── 顶部栏 ── */
+.top-row{display:flex;gap:5px;height:84px;flex-shrink:0}
 
-/* 中间 - 适配1024x768 */
-.mid-row{display:flex;gap:4px;flex:1;min-height:0;overflow:hidden}
-.boss-panel{width:100px;background:rgba(180,50,50,.2);border:2px solid rgba(180,50,50,.5);border-radius:6px;padding:4px;display:flex;flex-direction:column;align-items:center}
-.boss-card{background:linear-gradient(135deg,#b71c1c,#880e4f);padding:6px;border-radius:5px;text-align:center;cursor:pointer;width:100%}
-.boss-card:hover{transform:scale(1.02)}
-.boss-stage{font-size:8px;color:#ffc107}
-.boss-name{font-size:11px;font-weight:bold;margin:2px 0}
-.boss-hp{font-size:10px}
-.boss-charm{font-size:9px;color:#ffd700;margin-top:2px}
-.boss-empty{color:#666;padding:8px;font-size:10px}
-.boss-remain{margin-top:auto;color:#888;font-size:8px}
-.yokai-panel{flex:1;background:rgba(50,100,150,.2);border:2px solid rgba(50,100,150,.5);border-radius:6px;padding:6px;display:flex;flex-direction:column;overflow:hidden}
-.yokai-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;flex:1;align-content:center}
-.yokai-card{background:rgba(100,150,200,.3);border-radius:4px;padding:6px 4px;text-align:center;cursor:pointer;display:flex;flex-direction:column;justify-content:center;position:relative;border:2px solid transparent;transition:all .15s}
-.yokai-card:hover:not(.empty){background:rgba(100,150,200,.5)}
-.yokai-card.empty{background:rgba(100,150,200,.1);cursor:default}
-.yokai-card.wounded{border-color:#ff6b6b;background:rgba(255,107,107,.15)}
-.yokai-card.canKill{border-color:#4CAF50;box-shadow:0 0 8px rgba(76,175,80,.6);animation:canKillPulse 1.2s infinite}
-.yokai-card.killed{border-color:#e91e63;background:rgba(233,30,99,.2);box-shadow:0 0 8px rgba(233,30,99,.5)}
+.info-panel{
+  width:190px;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:8px;padding:6px;
+  display:flex;flex-direction:column;
+  backdrop-filter:blur(4px);
+}
+.panel-title{
+  font-size:10px;color:rgba(255,200,100,.7);
+  letter-spacing:.05em;margin-bottom:4px;
+  text-transform:uppercase;font-weight:600;
+}
+.log-area{flex:1;overflow-y:auto;font-size:9px;line-height:1.5}
+.log-line{padding:2px 0;border-bottom:1px solid rgba(255,255,255,.05);color:#bbb}
+
+.player-panel{
+  flex:1;
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:8px;padding:5px;
+  display:flex;gap:4px;
+}
+.player-slot{
+  flex:1;
+  background:rgba(100,120,180,.15);
+  border:1px solid rgba(100,120,180,.2);
+  border-radius:5px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:10px;color:#aaa;
+}
+.player-slot.active{
+  background:rgba(102,126,234,.25);
+  border-color:rgba(102,126,234,.6);
+  color:#fff;font-weight:bold;
+  box-shadow:0 0 10px rgba(102,126,234,.3);
+}
+
+.logo-panel{
+  width:130px;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,180,50,.2);
+  border-radius:8px;padding:6px;text-align:center;
+}
+.logo{font-size:13px;font-weight:bold;color:#f5c842;letter-spacing:.05em}
+.stats{
+  margin-top:5px;display:flex;flex-wrap:wrap;
+  gap:4px;justify-content:center;font-size:10px;
+}
+.stats span{
+  background:rgba(0,0,0,.3);
+  padding:2px 5px;border-radius:4px;
+  border:1px solid rgba(255,255,255,.1);
+}
+.buffs{margin-top:4px;display:flex;flex-wrap:wrap;gap:3px;justify-content:center}
+.buff-tag{
+  background:linear-gradient(135deg,#ff9800,#e65100);
+  padding:2px 5px;border-radius:3px;font-size:8px;
+  box-shadow:0 1px 4px rgba(255,152,0,.4);
+}
+
+/* ── 中间：鬼王 + 妖怪区 ── */
+.mid-row{display:flex;gap:5px;flex:1;min-height:0;overflow:hidden}
+
+.boss-panel{
+  width:112px;
+  background:rgba(120,20,20,.2);
+  border:1px solid rgba(200,50,50,.35);
+  border-radius:10px;padding:6px;
+  display:flex;flex-direction:column;align-items:center;
+  gap:4px;
+}
+.boss-card{
+  background:linear-gradient(160deg,#3a0a0a,#1a0520);
+  border:1px solid rgba(220,50,80,.5);
+  border-radius:8px;padding:0;
+  text-align:center;cursor:pointer;
+  width:100%;aspect-ratio:2/3;
+  position:relative;overflow:hidden;
+  transition:all .2s;
+  box-shadow:0 4px 16px rgba(180,0,50,.3);
+}
+.boss-card:hover{
+  transform:scale(1.03);
+  box-shadow:0 6px 24px rgba(220,50,80,.5);
+  border-color:rgba(220,50,80,.8);
+}
+.boss-card-info{
+  position:absolute;bottom:0;left:0;right:0;
+  background:linear-gradient(0deg,rgba(0,0,0,.9) 0%,transparent 100%);
+  padding:10px 5px 5px;
+}
+.boss-stage{font-size:8px;color:#ffc107;letter-spacing:.1em}
+.boss-name{font-size:11px;font-weight:bold;color:#fff;margin:2px 0}
+.boss-hp{font-size:10px;color:#ff6b6b}
+.boss-charm{font-size:9px;color:#ffd700}
+.boss-empty{color:#555;padding:12px;font-size:10px;text-align:center}
+.boss-remain{
+  color:#777;font-size:9px;
+  background:rgba(0,0,0,.3);
+  padding:2px 8px;border-radius:10px;
+  border:1px solid rgba(255,255,255,.08);
+}
+
+.yokai-panel{
+  flex:1;
+  background:rgba(20,30,60,.3);
+  border:1px solid rgba(80,120,200,.25);
+  border-radius:10px;padding:6px;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.yokai-grid{
+  display:grid;grid-template-columns:repeat(6,1fr);
+  grid-template-rows:1fr;gap:5px;
+  flex:1;min-height:0;
+}
+.yokai-card{
+  background:rgba(30,50,90,.5);
+  border:1px solid rgba(80,120,200,.2);
+  border-radius:8px;
+  cursor:pointer;
+  display:flex;flex-direction:column;justify-content:flex-end;
+  position:relative;overflow:hidden;align-self:stretch;
+  transition:all .18s;
+}
+.yokai-card:hover:not(.empty){
+  border-color:rgba(120,160,255,.6);
+  box-shadow:0 4px 16px rgba(80,120,255,.3);
+  transform:translateY(-2px);
+}
+.yokai-card.empty{
+  background:rgba(30,50,90,.15);
+  border-color:rgba(80,120,200,.08);
+  cursor:default;
+}
+.yokai-card.wounded{border-color:#ff6b6b;box-shadow:0 0 8px rgba(255,80,80,.3)}
+.yokai-card.canKill{border-color:#4CAF50;box-shadow:0 0 12px rgba(76,175,80,.7);animation:canKillPulse 1.2s infinite}
+.yokai-card.killed{border-color:#e91e63;box-shadow:0 0 10px rgba(233,30,99,.5)}
 .yokai-card.selecting{border-color:#ff9800;animation:pulse 1s infinite}
-.hp-damaged{color:#ff6b6b;font-weight:bold}
-.killed-badge{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.85);padding:3px 8px;border-radius:4px;font-size:9px;color:#e91e63;white-space:nowrap;font-weight:bold}
-@keyframes canKillPulse{0%,100%{box-shadow:0 0 6px rgba(76,175,80,.4)}50%{box-shadow:0 0 12px rgba(76,175,80,.8)}}
-.y-name{font-size:10px;font-weight:bold;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.y-stat{font-size:9px;color:#ccc;margin-top:2px}
-.action-bar{display:flex;gap:4px;align-items:center;padding-top:4px;border-top:1px solid rgba(255,255,255,.1);margin-top:auto;flex-shrink:0}
-.deck-num,.exile-num{background:rgba(0,0,0,.3);padding:3px 6px;border-radius:3px;font-size:9px}
-.act-btn{flex:1;padding:4px;background:rgba(100,150,200,.3);border:1px solid rgba(100,150,200,.5);border-radius:3px;color:#fff;cursor:pointer;font-size:9px}
-.act-btn:hover:not(:disabled){background:rgba(100,150,200,.5)}
-.act-btn:disabled{opacity:.5;cursor:not-allowed}
 
-/* 底部 - 适配1024x768 */
-.bot-row{display:flex;gap:4px;height:90px;flex-shrink:0}
-.shiki-panel{width:160px;background:rgba(150,100,50,.2);border:2px solid rgba(150,100,50,.5);border-radius:6px;padding:4px;overflow:hidden}
-.shiki-cards{display:flex;gap:3px;height:100%}
-.shiki-card{flex:1;background:rgba(200,150,100,.3);border-radius:4px;padding:4px;text-align:center;cursor:pointer;display:flex;flex-direction:column;justify-content:center}
-.shiki-card:hover:not(.tired){background:rgba(200,150,100,.5)}
-.shiki-card.tired{opacity:.4;filter:grayscale(1)}
-.s-name{font-size:10px;font-weight:bold}
-.s-skill{font-size:8px;color:#ccc;margin-top:2px}
-.pile-panel{width:45px;display:flex;flex-direction:column;gap:2px}
-.pile{flex:1;background:rgba(0,0,0,.3);border-radius:3px;display:flex;flex-direction:column;align-items:center;justify-content:center}
-.pile span{font-size:7px;color:#888}
-.pile b{font-size:12px}
-.hand-panel{flex:1;background:rgba(50,150,100,.2);border:2px solid rgba(50,150,100,.5);border-radius:6px;padding:4px;overflow:hidden}
-.hand-cards{display:flex;gap:4px;overflow-x:auto;height:100%;align-items:center}
-.hand-card{min-width:52px;max-width:60px;background:rgba(100,200,150,.3);border-radius:4px;padding:4px;text-align:center;cursor:pointer;flex-shrink:0;transition:all .15s;display:flex;flex-direction:column;justify-content:center;height:calc(100% - 4px)}
-.hand-card:hover:not(.unplayable){transform:translateY(-5px)}
-.hand-card.spell{background:linear-gradient(135deg,#2196F3,#1976D2)}
-.hand-card.yokai{background:linear-gradient(135deg,#4CAF50,#388E3C)}
-.hand-card.token{background:linear-gradient(135deg,#FFB74D,#FF9800)}
-.hand-card.penalty{background:linear-gradient(135deg,#78909C,#546E7A)}
-.hand-card.boss{background:linear-gradient(135deg,#9C27B0,#7B1FA2)}
-.hand-card.unplayable{opacity:0.5;cursor:not-allowed;filter:grayscale(30%)}
-.hand-card.unplayable:hover{transform:none}
-.hand-card.selecting{border:2px solid #ff9800}
-.c-name{font-size:9px;font-weight:bold;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.c-stat{font-size:10px;margin-top:2px}
-.end-panel{width:65px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}
-.end-btn{width:100%;padding:8px 4px;background:linear-gradient(135deg,#e91e63,#c2185b);border:none;border-radius:4px;color:#fff;font-size:10px;cursor:pointer}
-.end-btn:hover:not(:disabled){transform:scale(1.03)}
-.end-btn:disabled{opacity:.5;cursor:not-allowed}
-.phase{font-size:10px;color:#888}
+/* 妖怪卡片底部信息条 */
+.yokai-info{
+  position:relative;z-index:1;
+  background:linear-gradient(0deg,rgba(0,0,0,.88) 0%,rgba(0,0,0,.4) 70%,transparent 100%);
+  padding:14px 5px 5px;
+}
+.y-name{
+  font-size:10px;font-weight:700;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:#f0e6d3;text-shadow:0 1px 4px rgba(0,0,0,.8);
+}
+.y-stat{
+  font-size:9px;color:#ccc;margin-top:2px;
+  display:flex;gap:4px;justify-content:center;
+}
+.hp-damaged{color:#ff6b6b;font-weight:bold}
+.killed-badge{
+  position:absolute;top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  background:rgba(0,0,0,.9);
+  padding:4px 10px;border-radius:5px;
+  font-size:10px;color:#e91e63;
+  white-space:nowrap;font-weight:bold;
+  border:1px solid rgba(233,30,99,.5);
+  z-index:2;
+}
+@keyframes canKillPulse{
+  0%,100%{box-shadow:0 0 6px rgba(76,175,80,.4)}
+  50%{box-shadow:0 0 16px rgba(76,175,80,.9)}
+}
+
+.action-bar{
+  display:flex;gap:5px;align-items:center;
+  padding-top:5px;
+  border-top:1px solid rgba(255,255,255,.08);
+  margin-top:auto;flex-shrink:0;
+}
+.deck-num,.exile-num{
+  background:rgba(0,0,0,.4);
+  border:1px solid rgba(255,255,255,.1);
+  padding:4px 8px;border-radius:4px;font-size:10px;
+  color:#aaa;min-width:28px;text-align:center;
+}
+.act-btn{
+  flex:1;padding:5px;
+  background:rgba(80,120,200,.2);
+  border:1px solid rgba(80,120,200,.4);
+  border-radius:5px;color:#b0c4de;
+  cursor:pointer;font-size:10px;
+  transition:all .15s;
+}
+.act-btn:hover:not(:disabled){
+  background:rgba(80,120,200,.4);
+  color:#fff;border-color:rgba(100,160,255,.6);
+}
+.act-btn:disabled{opacity:.35;cursor:not-allowed}
+
+/* ── 底部：式神 + 牌库 + 手牌 + 结束 ── */
+.bot-row{display:flex;gap:5px;height:148px;flex-shrink:0}
+
+.shiki-panel{
+  width:165px;
+  background:rgba(60,30,10,.3);
+  border:1px solid rgba(180,120,50,.3);
+  border-radius:10px;padding:5px;overflow:hidden;
+  display:flex;flex-direction:column;
+}
+.shiki-cards{display:flex;gap:4px;flex:1;min-height:0}
+.shiki-card{
+  flex:1;
+  background:rgba(80,50,20,.4);
+  border:1px solid rgba(180,130,60,.2);
+  border-radius:7px;
+  cursor:pointer;
+  display:flex;flex-direction:column;justify-content:flex-end;
+  position:relative;overflow:hidden;
+  transition:all .18s;
+}
+.shiki-card:hover:not(.tired){
+  border-color:rgba(255,180,80,.5);
+  box-shadow:0 3px 12px rgba(200,140,50,.3);
+  transform:translateY(-2px);
+}
+.shiki-card.tired{opacity:.35;filter:grayscale(.8)}
+
+/* 式神卡底部信息 */
+.shiki-info{
+  position:relative;z-index:1;
+  background:linear-gradient(0deg,rgba(0,0,0,.9) 0%,rgba(0,0,0,.4) 70%,transparent 100%);
+  padding:12px 4px 4px;
+}
+.s-name{font-size:9px;font-weight:700;color:#f5e0c0;text-shadow:0 1px 3px rgba(0,0,0,.8)}
+.s-skill{font-size:8px;color:#c8a96e;margin-top:2px;line-height:1.3}
+
+.pile-panel{width:48px;display:flex;flex-direction:column;gap:3px}
+.pile{
+  flex:1;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:6px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+}
+.pile span{font-size:8px;color:#777;text-transform:uppercase;letter-spacing:.05em}
+.pile b{font-size:16px;color:#ccc;font-weight:600}
+
+.hand-panel{
+  flex:1;
+  background:rgba(10,40,20,.3);
+  border:1px solid rgba(50,150,80,.25);
+  border-radius:10px;padding:5px;overflow:hidden;
+}
+.hand-cards{display:flex;gap:5px;overflow-x:auto;height:100%;align-items:stretch;padding-bottom:2px}
+.hand-cards::-webkit-scrollbar{height:3px}
+.hand-cards::-webkit-scrollbar-track{background:transparent}
+.hand-cards::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:2px}
+
+.hand-card{
+  min-width:70px;max-width:80px;
+  border-radius:8px;padding:0;
+  text-align:center;cursor:pointer;flex-shrink:0;
+  transition:all .18s;
+  display:flex;flex-direction:column;justify-content:flex-end;
+  height:100%;position:relative;overflow:hidden;
+  border:1px solid rgba(255,255,255,.15);
+  box-shadow:0 2px 8px rgba(0,0,0,.4);
+}
+.hand-card:hover:not(.unplayable){
+  transform:translateY(-6px);
+  box-shadow:0 8px 20px rgba(0,0,0,.5);
+  border-color:rgba(255,255,255,.4);
+  z-index:2;
+}
+.hand-card.spell{background:linear-gradient(160deg,#0d2b5e,#1565C0)}
+.hand-card.yokai{background:linear-gradient(160deg,#0a2a14,#1b5e20)}
+.hand-card.token{background:linear-gradient(160deg,#3e2000,#e65100)}
+.hand-card.penalty{background:linear-gradient(160deg,#1a1a2e,#37474f)}
+.hand-card.boss{background:linear-gradient(160deg,#2a0030,#6a1b9a)}
+.hand-card.unplayable{opacity:.45;cursor:not-allowed;filter:grayscale(.4)}
+.hand-card.unplayable:hover{transform:none;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.hand-card.selecting{border:2px solid #ff9800;box-shadow:0 0 10px rgba(255,152,0,.5)}
+
+/* 手牌底部信息条 */
+.card-info{
+  position:relative;z-index:1;
+  background:linear-gradient(0deg,rgba(0,0,0,.92) 0%,rgba(0,0,0,.5) 70%,transparent 100%);
+  padding:14px 5px 5px;
+}
+.c-name{font-size:9px;font-weight:700;color:#f0e6d3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.c-stat{font-size:10px;color:#ddd;margin-top:2px}
+
+.end-panel{
+  width:72px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
+}
+.end-btn{
+  width:100%;padding:10px 4px;
+  background:linear-gradient(135deg,#c2185b,#880e4f);
+  border:1px solid rgba(220,50,100,.5);
+  border-radius:7px;color:#fff;font-size:10px;
+  cursor:pointer;font-weight:bold;letter-spacing:.05em;
+  box-shadow:0 3px 12px rgba(180,0,60,.4);
+  transition:all .18s;
+}
+.end-btn:hover:not(:disabled){
+  background:linear-gradient(135deg,#e91e63,#ad1457);
+  box-shadow:0 5px 20px rgba(220,50,100,.6);
+  transform:translateY(-1px);
+}
+.end-btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.phase{font-size:10px;color:#777;text-align:center;letter-spacing:.03em}
 
 /* 弹窗 - 适配1024x768 */
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:100}
@@ -1016,6 +1297,20 @@ async function selectNewShikigami(shikigami: any) {
   0%,100%{box-shadow:0 0 0 0 rgba(255,152,0,.4)}
   50%{box-shadow:0 0 0 8px rgba(255,152,0,0)}
 }
+
+/* ── 卡牌图片通用样式 ── */
+.card-art{
+  position:absolute;inset:0;width:100%;height:100%;
+  object-fit:cover;object-position:top center;
+  opacity:.55;border-radius:inherit;pointer-events:none;
+  z-index:0;
+}
+.boss-art{object-position:center center;opacity:.6}
+/* 文字层在图片上方 */
+.boss-card > *:not(.card-art),
+.yokai-card > *:not(.card-art),
+.shiki-card > *:not(.card-art),
+.hand-card > *:not(.card-art){position:relative;z-index:1}
 </style>
 
 <style>

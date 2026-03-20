@@ -27,6 +27,24 @@
   --card-border: linear-gradient(135deg, #d4a574, #8b6914, #d4a574);
 }
 
+/* ── 禁用浏览器默认拖拽/多选行为 ── */
+*, *::before, *::after {
+  /* 禁止文字多选 */
+  user-select: none;
+  -webkit-user-select: none;
+}
+input, textarea {
+  /* 输入框保留可选中 */
+  user-select: text;
+  -webkit-user-select: text;
+}
+img, a {
+  /* 禁止图片/链接被拖走 */
+  -webkit-user-drag: none;
+  user-drag: none;
+  draggable: false;
+}
+
 /* 基础重置 */
 * {
   box-sizing: border-box;

@@ -102,7 +102,45 @@ describe('DeckManager 牌库管理器', () => {
     });
   });
 
-  describe('回合清理', () => {
+  describe('🟢 牌库循环机制', () => {
+    it('【要点1】本回合退治的牌进入discard，deck耗尽时可被抓到', () => {
+      // 模拟 deck 已空，discard 里只有退治的妖怪
+      const dm = new DeckManager([]);
+      const yokaiCard: CardInstance = {
+        instanceId: 'yokai_01', cardId: 'yokai_001', cardType: 'yokai',
+        name: '退治的妖怪', hp: 2, maxHp: 2, charm: 1, image: ''
+      };
+      // 妖怪退治后进入弃牌堆
+      dm.gainCard(yokaiCard);
+      expect(dm.getDiscardSize()).toBe(1);
+      expect(dm.getDeckSize()).toBe(0);
+
+      // 触发抓牌 → deck 空 → 自动洗入 discard → 抓到
+      const drawn = dm.draw(1);
+      expect(drawn.length).toBe(1);
+      expect(drawn[0]!.instanceId).toBe('yokai_01');
+    });
+
+    it('【要点2】本回合已打出的牌不参与洗牌循环', () => {
+      const dm = new DeckManager(createStartingDeck());
+      dm.draw(5);
+
+      // 打出第一张牌（进入 played 区）
+      const hand = dm.getHand();
+      const playedCard = dm.playFromHand(hand[0]!.instanceId);
+      expect(playedCard).not.toBeNull();
+      expect(dm.getPlayed().length).toBe(1);
+
+      // 把剩余 deck 全部抓完，触发洗牌（只洗 discard，不含 played）
+      dm.draw(10); // 抓超量，耗尽 deck
+
+      // played 里的牌不应该出现在手牌中
+      const handIds = dm.getHand().map(c => c.instanceId);
+      expect(handIds).not.toContain(playedCard!.instanceId);
+    });
+  });
+
+  describe('🟢 回合清理', () => {
     it('清理回合后弃置已打出和手牌，抓5张新牌', () => {
       const dm = new DeckManager(createStartingDeck());
       dm.draw(5);

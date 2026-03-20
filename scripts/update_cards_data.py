@@ -12,7 +12,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
 cards_path = os.path.join(project_root, 'shared', 'data', 'cards.json')
 
-# 读取当前 cards.json
+
 with open(cards_path, 'r', encoding='utf-8') as f:
     data = json.load(f)
 

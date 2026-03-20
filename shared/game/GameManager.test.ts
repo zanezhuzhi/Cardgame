@@ -543,12 +543,12 @@ describe('GameManager 游戏管理器', () => {
       expect(state.field.bossCurrentHp).toBe(9);
     });
 
-    it('击败鬼王后玩家获得鬼王声誉', () => {
-      const charmBefore = player.totalCharm;
-
+    it('击败鬼王后鬼王卡进入玩家弃牌堆', () => {
       game.handleAction('p1', { type: 'ATTACK', targetId: 'boss', damage: 8 });
 
-      expect(player.totalCharm).toBe(charmBefore + 3); // 麒麟声誉+3
+      // 鬼王卡（麒麟）应该在玩家弃牌堆中，以便结算时计入声誉
+      const bossInDiscard = player.discard.some(c => c.name === '麒麟');
+      expect(bossInDiscard).toBe(true);
     });
 
     it('击败最后一个鬼王后游戏结束', () => {

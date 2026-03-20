@@ -514,15 +514,16 @@ export class GameManager {
   private killYokai(player: PlayerState, slotIndex: number): void {
     const yokai = this.state.field.yokaiSlots[slotIndex];
     if (!yokai) return;
-    
-    // 妖怪进入玩家弃牌堆
+
+    // 妖怪进入玩家弃牌堆（结算时统一计算声誉）
     player.discard.push(yokai);
     this.state.field.yokaiSlots[slotIndex] = null;
-    
-    // 计算符咒
-    if (yokai.charm) {
-      player.totalCharm += yokai.charm;
-    }
+
+    // 实时更新 totalCharm 用于过程展示
+    player.totalCharm = [
+      ...player.deck, ...player.hand,
+      ...player.discard, ...player.played,
+    ].reduce((sum, c) => sum + (c.charm || 0), 0);
     
     this.addLog('kill', `${player.name} 退治了 ${yokai.name}！`, player.id);
   }
@@ -531,12 +532,26 @@ export class GameManager {
     const boss = this.state.field.currentBoss;
     if (!boss) return;
 
-    // 玩家获得鬼王声誉（实时累加）
-    if (boss.charm) {
-      player.totalCharm += boss.charm;
-    }
+    // 鬼王卡进入玩家弃牌堆（与妖怪一致，结算时统一计算声誉）
+    const bossCard: CardInstance = {
+      instanceId: `boss_${boss.id}_${Date.now()}`,
+      cardId: boss.id,
+      cardType: 'boss',
+      name: boss.name,
+      hp: boss.hp,
+      maxHp: boss.hp,
+      charm: boss.charm,
+      image: boss.image,
+    };
+    player.discard.push(bossCard);
 
-    this.addLog('defeat_boss', `${player.name} 击败了鬼王 ${boss.name}！获得声誉+${boss.charm}`, player.id);
+    // 实时更新 totalCharm 用于过程展示
+    player.totalCharm = [
+      ...player.deck, ...player.hand,
+      ...player.discard, ...player.played,
+    ].reduce((sum, c) => sum + (c.charm || 0), 0);
+
+    this.addLog('defeat_boss', `${player.name} 击败了鬼王 ${boss.name}！`, player.id);
 
     // 清除当前鬼王
     this.state.field.currentBoss = null;

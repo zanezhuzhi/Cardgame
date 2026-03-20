@@ -70,11 +70,16 @@ export interface FieldState {
   bossCurrentHp: number;         // 鬼王当前生命
   bossDeck: BossCard[];          // 鬼王牌库（阶段Ⅲ→Ⅱ→Ⅰ→麒麟）
   
-  // 阴阳术商店区
-  spellShop: {
-    basic: number;     // 基础术式剩余
-    medium: number;    // 中级符咒剩余
-    advanced: number;  // 高级灵符剩余
+  // 阴阳术供应区（存储实体卡牌，用于超度兑换）
+  spellSupply: {
+    basic:    CardInstance | null;   // 基础术式（代表牌堆，HP=1）
+    medium:   CardInstance | null;   // 中级符咒（代表牌堆，HP=2）
+    advanced: CardInstance | null;   // 高级符咒（代表牌堆，HP=3）
+  };
+  spellCounts: {
+    basic: number;     // 基础术式剩余数量
+    medium: number;    // 中级符咒剩余数量
+    advanced: number;  // 高级符咒剩余数量
   };
   
   // 令牌商店

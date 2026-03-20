@@ -281,11 +281,109 @@ describe('GameManager 游戏管理器', () => {
   });
 
   describe('🔴 超度系统', () => {
-    it.todo('超度基础术式+生命>=2妖怪 获得中级符咒');
+    let player: ReturnType<GameManager['getCurrentPlayer']>;
 
-    it.todo('超度中级符咒+生命>=4妖怪 获得高级符咒');
+    beforeEach(() => {
+      game.addPlayer('p1', '玩家1');
+      game.addPlayer('p2', '玩家2');
+      const state = game.getState();
+      state.phase = 'playing';
+      game.startTurn();
+      game.confirmShikigamiPhase();
 
-    it.todo('超度的卡牌移出游戏');
+      player = game.getCurrentPlayer();
+
+      // 在阴阳术供应区放入中级/高级符咒
+      state.field.spellSupply = {
+        basic:    { instanceId: 'supply_basic',    cardId: 'spell_basic',    cardType: 'spell', name: '基础术式', hp: 1, maxHp: 1, damage: 1, charm: 0, image: '' },
+        medium:   { instanceId: 'supply_medium',   cardId: 'spell_medium',   cardType: 'spell', name: '中级符咒', hp: 2, maxHp: 2, damage: 2, charm: 0, image: '' },
+        advanced: { instanceId: 'supply_advanced', cardId: 'spell_advanced', cardType: 'spell', name: '高级符咒', hp: 3, maxHp: 3, damage: 3, charm: 1, image: '' },
+      };
+
+      // 玩家弃牌堆里有2张基础术式（HP各1）
+      player.discard = [
+        { instanceId: 'basic_01', cardId: 'spell_basic', cardType: 'spell', name: '基础术式', hp: 1, maxHp: 1, damage: 1, charm: 0, image: '' },
+        { instanceId: 'basic_02', cardId: 'spell_basic', cardType: 'spell', name: '基础术式', hp: 1, maxHp: 1, damage: 1, charm: 0, image: '' },
+      ];
+    });
+
+    it('超度2张基础术式(HP总和>=2)可获得中级符咒', () => {
+      const result = game.handleAction('p1', {
+        type: 'BUY_SPELL',
+        spellId: 'spell_medium',
+        exileCardIds: ['basic_01', 'basic_02'],
+      });
+
+      expect(result).toBe(true);
+      // 弃牌堆里应该有中级符咒
+      const hasMedium = player.discard.some(c => c.name === '中级符咒');
+      expect(hasMedium).toBe(true);
+    });
+
+    it('超度HP总和不足时失败', () => {
+      // 只超度1张基础术式（HP=1，不足2）
+      const result = game.handleAction('p1', {
+        type: 'BUY_SPELL',
+        spellId: 'spell_medium',
+        exileCardIds: ['basic_01'],
+      });
+
+      expect(result).toBe(false);
+      // 弃牌堆原样不变
+      expect(player.discard.length).toBe(2);
+    });
+
+    it('超度的卡牌移入超度区（移出游戏）', () => {
+      game.handleAction('p1', {
+        type: 'BUY_SPELL',
+        spellId: 'spell_medium',
+        exileCardIds: ['basic_01', 'basic_02'],
+      });
+
+      // 弃牌堆中不再有被超度的牌
+      const hasBasic01 = player.discard.some(c => c.instanceId === 'basic_01');
+      const hasBasic02 = player.discard.some(c => c.instanceId === 'basic_02');
+      expect(hasBasic01).toBe(false);
+      expect(hasBasic02).toBe(false);
+
+      // 超度区应该有这2张牌
+      expect(player.exiled.length).toBe(2);
+    });
+
+    it('从手牌和弃牌堆都可以超度', () => {
+      // 把一张放在手牌
+      player.hand = [
+        { instanceId: 'basic_03', cardId: 'spell_basic', cardType: 'spell', name: '基础术式', hp: 1, maxHp: 1, damage: 1, charm: 0, image: '' },
+      ];
+
+      const result = game.handleAction('p1', {
+        type: 'BUY_SPELL',
+        spellId: 'spell_medium',
+        exileCardIds: ['basic_03', 'basic_01'], // 1张手牌 + 1张弃牌
+      });
+
+      expect(result).toBe(true);
+      expect(player.exiled.length).toBe(2);
+    });
+
+    it('超度4张基础术式(HP总和>=4)可获得高级符咒', () => {
+      // 再准备2张基础术式
+      player.discard.push(
+        { instanceId: 'basic_03', cardId: 'spell_basic', cardType: 'spell', name: '基础术式', hp: 1, maxHp: 1, damage: 1, charm: 0, image: '' },
+        { instanceId: 'basic_04', cardId: 'spell_basic', cardType: 'spell', name: '基础术式', hp: 1, maxHp: 1, damage: 1, charm: 0, image: '' },
+      );
+
+      const result = game.handleAction('p1', {
+        type: 'BUY_SPELL',
+        spellId: 'spell_advanced',
+        exileCardIds: ['basic_01', 'basic_02', 'basic_03', 'basic_04'],
+      });
+
+      expect(result).toBe(true);
+      const hasAdvanced = player.discard.some(c => c.name === '高级符咒');
+      expect(hasAdvanced).toBe(true);
+      expect(player.exiled.length).toBe(4);
+    });
   });
 
   describe('🔴 式神技能', () => {

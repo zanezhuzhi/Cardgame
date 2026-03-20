@@ -79,29 +79,55 @@ export class GameManager {
   }
 
   private createInitialField(): FieldState {
-    const db = getCardDatabase();
-    
     // 创建鬼王牌库（洗牌）
     const bossDeck = shuffle([...getAllBosses()]);
-    
+
     // 创建游荡妖怪牌库
     const yokaiDeck = this.createYokaiDeck();
-    
+
     // 创建恶评堆
     const penaltyPile = this.createPenaltyPile();
+
+    // 创建阴阳术供应区模板卡
+    const spells = getAllSpells();
+    const basicSpell  = spells.find(s => s.name === '基础术式');
+    const mediumSpell = spells.find(s => s.name === '中级符咒');
+    const advSpell    = spells.find(s => s.name === '高级符咒');
+
+    const makeSupplyCard = (spell: typeof basicSpell): CardInstance | null => {
+      if (!spell) return null;
+      return {
+        instanceId: `supply_${spell.id}`,
+        cardId: spell.id,
+        cardType: 'spell',
+        name: spell.name,
+        hp: spell.hp,
+        maxHp: spell.hp,
+        damage: spell.damage,
+        charm: spell.charm ?? 0,
+        image: spell.image,
+      };
+    };
 
     return {
       yokaiSlots: [null, null, null, null, null, null],
       currentBoss: null,
-      bossHp: 0,
+      bossCurrentHp: 0,
       bossDeck,
-      tokenShop: {
-        token1: this.config.tokenCounts.token1,
-        token3: this.config.tokenCounts.token3,
-        token6: this.config.tokenCounts.token6
+      spellSupply: {
+        basic:    makeSupplyCard(basicSpell),
+        medium:   makeSupplyCard(mediumSpell),
+        advanced: makeSupplyCard(advSpell),
       },
+      spellCounts: {
+        basic:    basicSpell?.count  ?? 50,
+        medium:   mediumSpell?.count ?? 20,
+        advanced: advSpell?.count    ?? 10,
+      },
+      tokenShop: this.config.tokenCounts?.fortuneDaruma ?? 18,
       penaltyPile,
-      yokaiDeck
+      yokaiDeck,
+      exileZone: [],
     };
   }
 
@@ -151,8 +177,9 @@ export class GameManager {
       name,
       onmyoji: null,
       shikigami: [],
+      maxShikigami: GAME_CONSTANTS.maxShikigami,  // 式神上限3
       ghostFire: 0,
-      maxGhostFire: GAME_CONSTANTS.maxGhostFire, // 鬼火上限5
+      maxGhostFire: GAME_CONSTANTS.maxGhostFire,  // 鬼火上限5
       damage: 0, // 本回合累积伤害（回合结束清零）
       hand: [],
       deck: [],
@@ -503,48 +530,72 @@ export class GameManager {
   }
 
   /**
-   * 购买阴阳术（超度升级）
-   * 使用已打出卡牌的HP值来"超度"购买更高级的阴阳术
+   * 超度升级阴阳术
+   * 将手牌/弃牌堆中的卡牌超度，换取供应区的更高级阴阳术
+   * 
+   * 规则：超度卡牌HP总和 >= 目标阴阳术HP值
    */
   buySpell(player: PlayerState, spellId: string, exileCardIds: string[]): boolean {
-    const spells = getAllSpells();
-    const targetSpell = spells.find(s => s.id === spellId);
-    if (!targetSpell) return false;
-    
-    // 计算要超度的卡牌HP总和
+    // 1. 从供应区找目标阴阳术（按cardId匹配）
+    const supply = this.state.field.spellSupply;
+    let targetCard: CardInstance | null = null;
+    let supplyKey: 'basic' | 'medium' | 'advanced' | null = null;
+
+    for (const key of ['basic', 'medium', 'advanced'] as const) {
+      if (supply[key] && supply[key]!.cardId === spellId) {
+        targetCard = supply[key];
+        supplyKey = key;
+        break;
+      }
+    }
+    if (!targetCard || !supplyKey) return false;
+
+    const requiredHp = targetCard.hp;
+
+    // 2. 收集要超度的卡牌（手牌 + 弃牌堆 + 已打出区）
     let totalHp = 0;
     const cardsToExile: CardInstance[] = [];
-    
+
     for (const cardId of exileCardIds) {
-      const card = player.played.find(c => c.instanceId === cardId) 
-                || player.discard.find(c => c.instanceId === cardId);
+      const card = player.hand.find(c => c.instanceId === cardId)
+                || player.discard.find(c => c.instanceId === cardId)
+                || player.played.find(c => c.instanceId === cardId);
       if (card) {
         totalHp += card.hp;
         cardsToExile.push(card);
       }
     }
-    
-    // 检查HP是否足够
-    if (totalHp < targetSpell.hp) return false;
-    
-    // 执行超度：从played/discard中移除，加入exiled
+
+    // 3. 检查HP总和是否足够
+    if (totalHp < requiredHp) return false;
+
+    // 4. 执行超度：从各区域移除，加入超度区
     for (const card of cardsToExile) {
-      let idx = player.played.findIndex(c => c.instanceId === card.instanceId);
-      if (idx !== -1) {
-        player.played.splice(idx, 1);
-      } else {
-        idx = player.discard.findIndex(c => c.instanceId === card.instanceId);
+      for (const zone of [player.hand, player.discard, player.played]) {
+        const idx = zone.findIndex(c => c.instanceId === card.instanceId);
         if (idx !== -1) {
-          player.discard.splice(idx, 1);
+          zone.splice(idx, 1);
+          break;
         }
       }
       player.exiled.push(card);
     }
-    
-    // 获得新阴阳术
-    player.discard.push(createSpellInstance(targetSpell));
-    
-    this.addLog('buy_spell', `${player.name} 超度获得了 ${targetSpell.name}`, player.id);
+
+    // 5. 创建新阴阳术实例放入弃牌堆（从供应区模板克隆）
+    const newSpell: CardInstance = {
+      instanceId: `spell_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      cardId: targetCard.cardId,
+      cardType: 'spell',
+      name: targetCard.name,
+      hp: targetCard.hp,
+      maxHp: targetCard.maxHp,
+      damage: targetCard.damage,
+      charm: targetCard.charm ?? 0,
+      image: targetCard.image,
+    };
+    player.discard.push(newSpell);
+
+    this.addLog('exile', `${player.name} 超度获得了 ${targetCard.name}（超度${cardsToExile.length}张）`, player.id);
     this.updateState();
     return true;
   }

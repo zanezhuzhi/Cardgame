@@ -14,44 +14,44 @@ import type { CardInstance } from '../types/cards';
 describe('DeckManager 牌库管理器', () => {
   
   describe('初始化', () => {
-    it('创建初始牌库应有10张牌（6基础+4达摩）', () => {
+    it('创建初始牌库应有9张牌（6基础+3达摩）', () => {
       const deck = createStartingDeck();
-      expect(deck.length).toBe(10);
+      expect(deck.length).toBe(9);
     });
 
-    it('DeckManager初始化后牌库有10张，手牌0张', () => {
+    it('DeckManager初始化后牌库有9张，手牌0张', () => {
       const dm = new DeckManager(createStartingDeck());
-      expect(dm.getDeckSize()).toBe(10);
+      expect(dm.getDeckSize()).toBe(9);
       expect(dm.getHandSize()).toBe(0);
     });
   });
 
   describe('抓牌', () => {
-    it('抓5张后手牌=5，牌库=5', () => {
+    it('抓5张后手牌=5，牌库=4', () => {
       const dm = new DeckManager(createStartingDeck());
       const drawn = dm.draw(5);
       
       expect(drawn.length).toBe(5);
       expect(dm.getHandSize()).toBe(5);
-      expect(dm.getDeckSize()).toBe(5);
+      expect(dm.getDeckSize()).toBe(4);
     });
 
     it('牌库不足时自动洗入弃牌堆', () => {
       const dm = new DeckManager(createStartingDeck());
       
-      // 抓10张牌（全部抓完）
-      dm.draw(10);
+      // 抓9张牌（全部抓完）
+      dm.draw(9);
       expect(dm.getDeckSize()).toBe(0);
-      expect(dm.getHandSize()).toBe(10);
+      expect(dm.getHandSize()).toBe(9);
       
       // 弃置所有手牌
       dm.discardAllHand();
-      expect(dm.getDiscardSize()).toBe(10);
+      expect(dm.getDiscardSize()).toBe(9);
       
       // 再抓5张 - 应该自动洗入
       const drawn = dm.draw(5);
       expect(drawn.length).toBe(5);
-      expect(dm.getDeckSize()).toBe(5);
+      expect(dm.getDeckSize()).toBe(4);
       expect(dm.getDiscardSize()).toBe(0);
     });
   });
@@ -98,7 +98,7 @@ describe('DeckManager 牌库管理器', () => {
       expect(exiled).not.toBeNull();
       expect(dm.getHandSize()).toBe(4);
       expect(dm.getExiled().length).toBe(1);
-      expect(dm.getTotalCards()).toBe(9);
+      expect(dm.getTotalCards()).toBe(8); // 9-1=8
     });
   });
 
@@ -176,7 +176,7 @@ describe('DeckManager 牌库管理器', () => {
       dm.gainCard(newCard);
       
       expect(dm.getDiscardSize()).toBe(1);
-      expect(dm.getTotalCards()).toBe(11);
+      expect(dm.getTotalCards()).toBe(10); // 9+1=10
     });
   });
 });

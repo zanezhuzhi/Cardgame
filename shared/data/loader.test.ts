@@ -180,9 +180,9 @@ describe('CardLoader 数据加载器', () => {
   });
 
   describe('🟢 初始牌库', () => {
-    it('初始牌库有10张牌', () => {
+    it('初始牌库有9张牌（6基础+3达摩）', () => {
       const deck = createStartingDeck();
-      expect(deck.length).toBe(10);
+      expect(deck.length).toBe(9);
     });
 
     it('初始牌库有6张基础术式', () => {
@@ -191,10 +191,10 @@ describe('CardLoader 数据加载器', () => {
       expect(spells.length).toBe(6);
     });
 
-    it('初始牌库有4张招福达摩', () => {
+    it('初始牌库有3张招福达摩', () => {
       const deck = createStartingDeck();
       const daruma = deck.filter(c => c.name === '招福达摩');
-      expect(daruma.length).toBe(4);
+      expect(daruma.length).toBe(3);
     });
   });
 

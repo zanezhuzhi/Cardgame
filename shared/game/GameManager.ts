@@ -320,8 +320,9 @@ export class GameManager {
     
     // 伤害归零（回合结束清零）
     player.damage = 0;
-    
-    // 将所有手牌和已打出的牌放入弃牌堆
+
+    // 清理阶段：手牌 + 本回合已打出（played）→ 弃牌堆
+    // played 仅本回合有效，清理后清空
     player.discard.push(...player.hand, ...player.played);
     player.hand = [];
     player.played = [];
@@ -419,19 +420,23 @@ export class GameManager {
   playCard(player: PlayerState, cardInstanceId: string): boolean {
     const index = player.hand.findIndex(c => c.instanceId === cardInstanceId);
     if (index === -1) return false;
-    
+
     const card = player.hand.splice(index, 1)[0]!;
+
+    // 打出的牌暂存于 played 区（本回合效果检索用）
+    // 清理阶段统一移入 discard
+    // 例：山童【怪力】需要检索「本回合前2张阴阳术」
     player.played.push(card);
     player.cardsPlayed++;
-    
-    // 累加伤害（基于卡牌伤害值）
+
+    // 累加伤害
     if (card.damage) {
       player.damage += card.damage;
     }
-    
+
     this.addLog('play_card', `${player.name} 打出了 ${card.name}（伤害+${card.damage || 0}）`, player.id);
     this.updateState();
-    
+
     return true;
   }
 
@@ -519,10 +524,9 @@ export class GameManager {
     player.discard.push(yokai);
     this.state.field.yokaiSlots[slotIndex] = null;
 
-    // 实时更新 totalCharm 用于过程展示
+    // 实时更新 totalCharm 用于过程展示（牌库=deck+hand+discard+played）
     player.totalCharm = [
-      ...player.deck, ...player.hand,
-      ...player.discard, ...player.played,
+      ...player.deck, ...player.hand, ...player.discard, ...player.played,
     ].reduce((sum, c) => sum + (c.charm || 0), 0);
     
     this.addLog('kill', `${player.name} 退治了 ${yokai.name}！`, player.id);
@@ -744,9 +748,9 @@ export class GameManager {
     const playerScores: PlayerScore[] = [];
     
     for (const player of this.state.players) {
-      // 结算声誉：玩家牌库（全部分区）+ 式神区，超度区不计入
-      // 「牌库」= 抽牌堆(deck) + 手牌(hand) + 弃牌堆(discard) + 已打出(played)
-      // 包含：阴阳术、御魂（妖怪/鬼王退治后）、恶评、招福达摩
+      // 结算声誉：玩家牌库 + 式神区，超度区不计入
+      // 牌库 = deck（待抓取）+ hand（手牌）+ discard（弃牌堆）+ played（本回合暂存）
+      // 注：游戏可能在行动阶段中途结束，played 尚未移入 discard，需要一并计算
       const allCards = [
         ...player.deck,
         ...player.hand,

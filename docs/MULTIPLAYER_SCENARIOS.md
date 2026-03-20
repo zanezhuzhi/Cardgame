@@ -243,24 +243,23 @@ class MatchQueue {
 │ 🎯 视角规则                                                 │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│ 1. 所有玩家共享同一视角                                     │
-│    - 中央操作区：所有行动都在这里展示                        │
-│    - 周围信息区：各玩家的状态信息                           │
+│ 1. 每个玩家看到的是【自己的视角】                           │
+│    - 手牌区显示自己的手牌                                   │
+│    - 式神区显示自己的式神                                   │
 │                                                             │
-│ 2. 顶部显示【当前行动玩家】指示器                           │
-│    - 回合切换时，指示器变更到新玩家                          │
-│    - 中央操作区展示当前玩家的操作界面                        │
+│ 2. 顶部【玩家区】显示所有玩家状态                           │
+│    - 当前行动玩家高亮显示                                   │
+│    - 回合切换时，高亮移动到下一个玩家                       │
 │                                                             │
-│ 3. 观战模式（非行动玩家）：                                 │
-│    - 视角与行动玩家完全相同                                 │
-│    - 可以看到行动玩家的手牌和操作                           │
-│    - 只是无法实际点击/操作                                  │
-│    - 可以自由查看场上信息                                   │
+│ 3. 轮流行动机制：                                           │
+│    - 玩家A行动 → 结果同步 → 玩家B行动 → 结果同步 → ...     │
+│    - 非行动玩家只能等待，看到的是结果同步                   │
+│    - 必须等所有人行动完，才会再次轮到自己                   │
 │                                                             │
-│ 4. 公开信息所有人可见：                                     │
-│    - 鬼王血量、场上妖怪                                     │
-│    - 各玩家的声望、鬼火、出战式神                           │
-│    - 弃牌堆、牌库剩余数量                                   │
+│ 4. 观战时看到的内容：                                       │
+│    - 其他玩家的操作过程不可见                               │
+│    - 只同步操作结果（打出的牌、造成的伤害等）               │
+│    - 其他玩家的手牌不可见                                   │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -275,47 +274,53 @@ interface ClientViewState {
   currentTurn: {
     activePlayerId: string;       // 当前行动的玩家
     phase: TurnPhase;             // 当前阶段
-    remainingTime: number;        // 剩余行动时间
+    turnNumber: number;           // 第几轮
   };
   
   // 我的玩家ID
   myPlayerId: string;
   
-  // 所有玩家完整信息（共享视角）
-  players: PlayerFullView[];
+  // 是否轮到我行动
+  isMyTurn: boolean;
   
-  // 战场公开信息
-  field: FieldView;
+  // === 顶部玩家区（所有玩家可见） ===
+  playersInfo: PlayerSummary[];
+  
+  // === 我的私有区域 ===
+  myState: {
+    hand: CardInstance[];         // 我的手牌
+    shikigami: ShikigamiCard[];   // 我的式神
+    ghostFire: number;            // 我的鬼火
+    deck: number;                 // 牌库剩余数量（不显示内容）
+    discard: CardInstance[];      // 我的弃牌堆
+  };
+  
+  // === 公共区域 ===
+  field: {
+    boss: BossState;              // 当前鬼王
+    yokaiSlots: YokaiSlot[];      // 游荡妖怪区
+    spellDecks: SpellDeckState;   // 阴阳术牌堆
+  };
   
   // 事件日志
   eventLog: GameEventLog[];
 }
 
-interface PlayerFullView {
+// 顶部玩家区的摘要信息（不显示手牌内容）
+interface PlayerSummary {
   id: string;
   name: string;
-  
-  // 数值
-  ghostFire: number;              // 鬼火数量
   charm: number;                  // 声望
-  
-  // 完整手牌（所有人都能看到当前行动者的手牌）
-  hand: CardInstance[];
-  
-  // 式神
-  shikigami: ShikigamiCard[];
-  
-  // 弃牌堆
-  discardPile: CardInstance[];
-  
-  // 状态
-  isActive: boolean;              // 是否正在行动
+  ghostFire: number;              // 鬼火
+  handCount: number;              // 手牌数量（不显示具体内容）
+  shikigamiNames: string[];       // 式神名字
+  isActive: boolean;              // 是否正在行动（高亮）
   isConnected: boolean;           // 是否在线
 }
 
-// 操作权限判断
+// 是否能操作
 function canOperate(state: ClientViewState): boolean {
-  return state.currentTurn.activePlayerId === state.myPlayerId;
+  return state.isMyTurn;
 }
 ```
 
@@ -356,62 +361,54 @@ class TurnChangeHandler {
 }
 ```
 
-### 2.4 游戏界面布局（4人局示例）
+### 2.4 游戏界面布局（基于UI设计稿）
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │  ▶ 当前行动: 玩家B [声望:8] 🔥×2                   ⏱️ 01:45     │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│   ┌────────┐   ┌────────┐   ┌────────┐   ┌────────┐                    │
-│   │ 玩家A  │   │ 玩家B  │   │ 玩家C  │   │ 玩家D  │  ← 玩家信息栏     │
-│   │ 🏆 12  │   │ 🏆 8   │   │ 🏆 15  │   │ 🏆 10  │                    │
-│   │ 🔥 3   │   │ 🔥 2   │   │ 🔥 4   │   │ 🔥 5   │                    │
-│   │ 🃏 5   │   │ 🃏 4   │   │ 🃏 6   │   │ 🃏 5   │  ← 手牌数量       │
-│   │[山兔]  │   │[座敷]  │   │[茨木]  │   │[桃花]  │  ← 式神           │
-│   │[青灯]  │   │[小白]  │   │[萤草]  │   │[姑获]  │                    │
-│   └────────┘   └──🔷───┘   └────────┘   └────────┘                    │
-│                   ↑ 当前行动高亮                                        │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│         ┌────────────────────────────────────────────┐                  │
-│         │              🎃 酒吞童子                   │                  │
-│         │              HP: 35/50                     │                  │
-│         │         ⚔️ ████████████░░░░░░░             │                  │
-│         └────────────────────────────────────────────┘                  │
-│                                                                         │
-│      ┌─────────┐   ┌─────────┐   ┌─────────┐                           │
-│      │   🎃    │   │   🎃    │   │   🎃    │   ← 场上妖怪              │
-│      │  河童   │   │  狸猫   │   │  骨女   │                           │
-│      │  HP:3   │   │  HP:4   │   │  HP:5   │                           │
-│      └─────────┘   └─────────┘   └─────────┘                           │
-│                                                                         │
-├─────────────────────────────────────────────────────────────────────────┤
-│                    ═══ 当前行动玩家的操作区 ═══                         │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │  手牌:                                                              │ │
-│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐     式神: [座敷童子] [小白]      │ │
-│  │  │阴阳术│ │阴阳术│ │御魂牌│ │御魂牌│                                 │ │
-│  │  │ 初级 │ │ 中级 │ │骸骨  │ │三尾狐│     🔥 鬼火: 2               │ │
-│  │  └─────┘ └─────┘ └─────┘ └─────┘                                   │ │
-│  │                                                                     │ │
-│  │     [打出卡牌]    [使用技能]    [结束回合]   ← 只有行动者可点击     │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-├─────────────────────────────────────────────────────────────────────────┤
-│  📜 玩家B 打出「中级阴阳术」→ 河童 造成 3 点伤害                        │
-└─────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 交互信息提示                                              游戏LOGO         │
+│            ╔═══════════════════════════════════════════════╗                │
+│            ║  [玩家1] [玩家2🔷] [玩家3] [玩家4] [玩家5]    ║  ← 玩家区     │
+│            ║   声望    声望     声望     声望    声望      ║  （顶部高亮   │
+│            ║   鬼火    鬼火     鬼火     鬼火    鬼火      ║    当前行动） │
+│            ╚═══════════════════════════════════════════════╝                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌─────────┐    ┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐    游荡妖怪区        │
+│   │         │    │     ││     ││     ││     ││     │                       │
+│   │  鬼王区 │    │妖怪1││妖怪2││妖怪3││妖怪4││妖怪5│                       │
+│   │         │    │     ││     ││     ││     ││     │                       │
+│   │         │    └─────┘└─────┘└─────┘└─────┘└─────┘                       │
+│   │         │                                                               │
+│   └─────────┘    [12] 获得式神          获得阴阳术    [12] 查看超度区      │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 式神区                                                                      │
+│  ┌─────┐┌─────┐┌─────┐┌─────┐   ┌────┐  ┌─────┐┌─────┐...┌─────┐         │
+│  │式神1││式神2││式神3││式神4│   │牌库│  │手牌1││手牌2│   │手牌10│ 手牌区  │
+│  └─────┘└─────┘└─────┘└─────┘   │    │  └─────┘└─────┘...└─────┘ *10张   │
+│                                  │弃牌│                                     │
+│                                  └────┘                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**布局说明**：
-- **顶部**：当前行动玩家指示器 + 倒计时
-- **上方**：所有玩家信息栏（声望🏆、鬼火🔥、手牌数🃏、式神）
-- **中央**：鬼王 + 场上妖怪
-- **下方**：当前行动玩家的操作区（手牌、技能、操作按钮）
-- **底部**：事件日志
+**布局说明**（参照UI设计稿）：
 
-**观战时**：操作按钮变灰，显示「等待 玩家B 行动...」
+| 区域 | 位置 | 说明 |
+|------|------|------|
+| **玩家区** | 顶部中央 | 显示所有玩家状态，当前行动者高亮🔷 |
+| **鬼王区** | 左侧 | 当前鬼王 |
+| **游荡妖怪区** | 中上 | 场上的妖怪（最多5只） |
+| **式神区** | 左下 | 我的出战式神（最多4个） |
+| **牌库/弃牌** | 中下 | 我的牌库和弃牌堆 |
+| **手牌区** | 右下 | 我的手牌（最多10张） |
+| **获得式神** | 中央左 | 式神招募区 |
+| **获得阴阳术** | 中央右 | 阴阳术牌堆 |
+| **查看超度区** | 右侧 | 查看已击败的妖怪 |
+
+**关键点**：
+- 每个玩家看到的是**自己的视角**（自己的手牌、式神）
+- 顶部玩家区的**高亮位置**会随回合切换
+- 其他玩家行动时，只同步**结果**到公共区域（妖怪血量变化、鬼王受伤等）
 
 ### 2.5 操作结果同步
 
@@ -460,60 +457,127 @@ type GameBroadcastEvent =
 
 ### 2.6 状态同步策略
 
-由于所有玩家共享视角，服务端广播完整的游戏状态：
+**核心原则**：每个玩家只看到自己的私有信息 + 公共信息 + 其他玩家的操作结果
 
 ```typescript
 // server/src/game/StateBroadcaster.ts
 
 class StateBroadcaster {
   
-  // 广播游戏状态给所有玩家（共享视角）
-  broadcastState(gameState: GameState): void {
-    const sharedView = this.createSharedView(gameState);
+  // 发送个人视角状态（只在需要时调用）
+  sendPersonalState(playerId: string, gameState: GameState): void {
+    const player = gameState.players.find(p => p.id === playerId);
     
-    for (const player of this.room.players) {
-      player.connection.send({
-        type: 'STATE_SYNC',
-        state: sharedView,
-        myPlayerId: player.id,  // 告知客户端自己是谁
-      });
-    }
+    player.connection.send({
+      type: 'STATE_SYNC',
+      state: {
+        currentTurn: {
+          activePlayerId: gameState.currentPlayerId,
+          phase: gameState.turnPhase,
+          turnNumber: gameState.turnNumber,
+        },
+        isMyTurn: gameState.currentPlayerId === playerId,
+        
+        // 顶部玩家区（摘要信息）
+        playersInfo: gameState.players.map(p => ({
+          id: p.id,
+          name: p.name,
+          charm: p.charm,
+          ghostFire: p.ghostFire,
+          handCount: p.hand.length,      // 只显示数量
+          shikigamiNames: p.shikigami.map(s => s.name),
+          isActive: p.id === gameState.currentPlayerId,
+          isConnected: p.isConnected,
+        })),
+        
+        // 我的私有区域（只有自己能看到完整手牌）
+        myState: {
+          hand: player.hand,             // 完整手牌
+          shikigami: player.shikigami,
+          ghostFire: player.ghostFire,
+          deckCount: player.deck.length,
+          discard: player.discard,
+        },
+        
+        // 公共区域
+        field: {
+          boss: gameState.currentBoss,
+          yokaiSlots: gameState.yokaiSlots,
+          spellDecks: gameState.spellDecks,
+        },
+      },
+    });
   }
   
-  // 创建共享视图（所有人看到相同内容）
-  private createSharedView(state: GameState): SharedGameView {
-    return {
-      currentTurn: {
-        activePlayerId: state.currentPlayerId,
-        phase: state.turnPhase,
-        remainingTime: state.turnTimer,
-      },
-      
-      // 所有玩家的完整信息
-      players: state.players.map(player => ({
-        id: player.id,
-        name: player.name,
-        ghostFire: player.ghostFire,
-        charm: player.charm,
-        hand: player.hand,           // 完整手牌（共享视角）
-        shikigami: player.shikigami,
-        discardPile: player.discard,
-        isActive: player.id === state.currentPlayerId,
-        isConnected: player.isConnected,
-      })),
-      
-      // 战场信息
-      field: {
-        boss: state.currentBoss,
-        yokaiSlots: state.yokaiSlots,
-        spellDecks: state.spellDecks,
-      },
-    };
+  // 广播操作结果（给所有人）
+  broadcastActionResult(event: GameEvent): void {
+    for (const player of this.room.players) {
+      player.connection.send({
+        type: 'GAME_EVENT',
+        event,
+      });
+    }
   }
 }
 ```
 
-**注意**：牌库顺序仍然隐藏，玩家无法知道下一张会抽到什么牌。
+### 2.7 结果同步事件
+
+当某玩家完成操作，服务端广播**结果事件**给所有人：
+
+```typescript
+type GameEvent =
+  | {
+      type: 'TURN_START';
+      playerId: string;           // 轮到谁行动
+      playerName: string;
+    }
+  | {
+      type: 'CARD_PLAYED';
+      playerId: string;
+      cardName: string;           // 打出的牌名（不透露其他手牌）
+      target?: string;
+    }
+  | {
+      type: 'DAMAGE_DEALT';
+      source: string;             // 来源（玩家名/技能名）
+      target: string;             // 目标（妖怪/鬼王）
+      damage: number;
+      remainingHp: number;        // 目标剩余血量
+    }
+  | {
+      type: 'YOKAI_DEFEATED';
+      playerId: string;
+      yokaiName: string;
+      charmGained: number;
+    }
+  | {
+      type: 'SKILL_USED';
+      playerId: string;
+      shikigamiName: string;
+      skillName: string;
+      effectDesc: string;         // 效果描述
+    }
+  | {
+      type: 'TURN_END';
+      playerId: string;
+      nextPlayerId: string;       // 下一个行动的玩家
+    }
+  | {
+      type: 'PLAYER_STATS_UPDATE';
+      playerId: string;
+      charm?: number;             // 声望变化后的值
+      ghostFire?: number;         // 鬼火变化后的值
+      handCount?: number;         // 手牌数量变化
+    };
+```
+
+**同步流程**：
+```
+玩家A操作 → 服务端处理 → 广播结果事件 → 所有玩家更新显示
+                                    ↓
+                        下一个玩家开始行动
+```
 
 ---
 

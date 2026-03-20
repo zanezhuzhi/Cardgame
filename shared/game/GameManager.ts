@@ -433,13 +433,18 @@ export class GameManager {
   // ============ 退治/购买 ============
 
   attackTarget(player: PlayerState, targetId: string, damage: number): boolean {
+    // 检查分配伤害不超过累积值
+    if (damage > player.damage) return false;
+
     // 检查是否是战场妖怪
     for (let i = 0; i < 6; i++) {
       const yokai = this.state.field.yokaiSlots[i];
       if (yokai && yokai.instanceId === targetId) {
+        // 从累积伤害中扣除
+        player.damage -= damage;
         yokai.hp -= damage;
         
-        this.addLog('attack', `${player.name} 对 ${yokai.name} 造成 ${damage} 点伤害`, player.id);
+        this.addLog('attack', `${player.name} 对 ${yokai.name} 造成 ${damage} 点伤害（剩余伤害:${player.damage}）`, player.id);
         
         // 检查是否击杀
         if (yokai.hp <= 0) {

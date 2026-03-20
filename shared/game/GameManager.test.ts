@@ -99,23 +99,100 @@ describe('GameManager 游戏管理器', () => {
   // ============ 🔴 RED - 待实现的功能 ============
 
   describe('🔴 伤害分配系统', () => {
+    let player: ReturnType<GameManager['getCurrentPlayer']>;
+    let yokaiCard: any;
+
     beforeEach(() => {
       game.addPlayer('p1', '玩家1');
       game.addPlayer('p2', '玩家2');
-      game.getState().phase = 'playing';
+      const state = game.getState();
+      state.phase = 'playing';
       game.startTurn();
       game.confirmShikigamiPhase();
+
+      player = game.getCurrentPlayer();
+
+      // 在战场放一只3HP的妖怪
+      yokaiCard = {
+        instanceId: 'yokai_test_01',
+        cardId: 'yokai_001',
+        cardType: 'yokai',
+        name: '测试妖怪',
+        hp: 3,
+        maxHp: 3,
+        charm: 1,
+        image: ''
+      };
+      state.field.yokaiSlots[0] = yokaiCard;
+
+      // 给玩家手牌（阴阳术：伤害2）
+      player.hand = [
+        { instanceId: 'spell_01', cardId: 'spell_basic', cardType: 'spell', name: '基础术式', hp: 1, maxHp: 1, damage: 2, charm: 0, image: '' },
+        { instanceId: 'spell_02', cardId: 'spell_basic', cardType: 'spell', name: '基础术式', hp: 1, maxHp: 1, damage: 2, charm: 0, image: '' },
+      ];
     });
 
-    it.todo('打出阴阳术后伤害值累加');
+    it('打出阴阳术后伤害值累加', () => {
+      // 打出第一张（+2伤害）
+      game.handleAction('p1', { type: 'PLAY_CARD', cardInstanceId: 'spell_01' });
+      expect(player.damage).toBe(2);
 
-    it.todo('伤害分配只能进行一次');
+      // 打出第二张（再+2伤害）
+      game.handleAction('p1', { type: 'PLAY_CARD', cardInstanceId: 'spell_02' });
+      expect(player.damage).toBe(4);
+    });
 
-    it.todo('分配伤害后剩余伤害清零');
+    it('分配伤害后妖怪HP减少', () => {
+      // 打出两张牌，累积4点伤害
+      game.handleAction('p1', { type: 'PLAY_CARD', cardInstanceId: 'spell_01' });
+      game.handleAction('p1', { type: 'PLAY_CARD', cardInstanceId: 'spell_02' });
 
-    it.todo('目标生命降至0前不能指定新目标');
+      // 分配3点伤害给妖怪
+      const result = game.handleAction('p1', { type: 'ATTACK', targetId: 'yokai_test_01', damage: 3 });
 
-    it.todo('回合结束时所有伤害清零');
+      expect(result).toBe(true);
+      expect(yokaiCard.hp).toBe(0);
+    });
+
+    it('分配伤害不能超过当前累积伤害', () => {
+      // 只打出一张牌，累积2点伤害
+      game.handleAction('p1', { type: 'PLAY_CARD', cardInstanceId: 'spell_01' });
+      expect(player.damage).toBe(2);
+
+      // 尝试分配5点伤害（超出）→ 应该失败
+      const result = game.handleAction('p1', { type: 'ATTACK', targetId: 'yokai_test_01', damage: 5 });
+      expect(result).toBe(false);
+      expect(player.damage).toBe(2); // 伤害值不变
+    });
+
+    it('回合结束时所有伤害清零', () => {
+      // 打出牌累积伤害
+      game.handleAction('p1', { type: 'PLAY_CARD', cardInstanceId: 'spell_01' });
+      expect(player.damage).toBe(2);
+
+      // 结束回合
+      game.handleAction('p1', { type: 'END_TURN' });
+
+      // 切换到下一个玩家
+      const nextPlayer = game.getCurrentPlayer();
+      // 原来的玩家p1在回合结束后伤害应该清零
+      const p1 = game.getState().players.find(p => p.id === 'p1')!;
+      expect(p1.damage).toBe(0);
+    });
+
+    it('分配伤害后从累积伤害中扣除', () => {
+      // 累积4点伤害
+      game.handleAction('p1', { type: 'PLAY_CARD', cardInstanceId: 'spell_01' });
+      game.handleAction('p1', { type: 'PLAY_CARD', cardInstanceId: 'spell_02' });
+      expect(player.damage).toBe(4);
+
+      // 分配2点给妖怪（妖怪3HP，仍存活）
+      game.handleAction('p1', { type: 'ATTACK', targetId: 'yokai_test_01', damage: 2 });
+
+      // 累积伤害减少2，还剩2
+      expect(player.damage).toBe(2);
+      expect(yokaiCard.hp).toBe(1);
+    });
   });
 
   describe('🔴 退治妖怪', () => {

@@ -602,28 +602,78 @@ export class GameManager {
 
   // ============ 式神技能 ============
 
-  useShikigamiSkill(player: PlayerState, shikigamiIndex: number, targetId?: string): boolean {
-    const shikigami = player.shikigami[shikigamiIndex];
-    const state = player.shikigamiState[shikigamiIndex];
-    
-    if (!shikigami || !state) return false;
-    if (state.isExhausted) return false;
-    
-    const skillCost = shikigami.skill.cost;
-    if (player.ghostFire < skillCost) return false;
-    
-    // 扣除鬼火
-    player.ghostFire -= skillCost;
-    
-    // 标记已行动
-    state.isExhausted = true;
-    
-    this.addLog('use_skill', `${player.name} 的 ${shikigami.name} 使用了 ${shikigami.skill.name}`, player.id);
-    
-    // TODO: 执行技能效果
-    
+  useShikigamiSkill(player: PlayerState, shikigamiId: string, targetId?: string): boolean {
+    // 按 id 查找式神及其状态
+    const shikigami = player.shikigami.find(s => s.id === shikigamiId);
+    const shikigamiState = player.shikigamiState.find(s => s.cardId === shikigamiId);
+
+    if (!shikigami || !shikigamiState) return false;
+
+    // 【永】被动技不需要主动触发
+    if (!shikigami.skill || shikigami.skill.effectType === '永') return false;
+
+    // 疲劳检查（【触】触发技由系统自动处理，玩家不能手动触发）
+    if (shikigamiState.isExhausted) return false;
+
+    // 【启】主动技：检查鬼火
+    if (shikigami.skill.effectType === '启') {
+      const cost = shikigami.skill.cost ?? 0;
+      if (player.ghostFire < cost) return false;
+
+      // 扣除鬼火
+      player.ghostFire -= cost;
+    }
+
+    // 标记疲劳
+    shikigamiState.isExhausted = true;
+
+    // 执行技能效果
+    this.resolveSkillEffect(player, shikigami, shikigamiState, targetId);
+
+    this.addLog('use_skill',
+      `${player.name} 的 ${shikigami.name} 使用了【${shikigami.skill.effectType}】${shikigami.skill.name}`,
+      player.id
+    );
+
     this.updateState();
     return true;
+  }
+
+  /**
+   * 解析并执行式神技能效果
+   * 目前实现核心效果，后续按需扩展
+   */
+  private resolveSkillEffect(
+    player: PlayerState,
+    shikigami: any,
+    shikigamiState: ShikigamiState,
+    targetId?: string
+  ): void {
+    const effect = shikigami.skill?.effect;
+    if (!effect) return;
+
+    switch (effect) {
+      // 山童【怪力】：前2张阴阳术额外伤害+1
+      case 'bonus_spell_damage_2':
+        shikigamiState.markers['bonusSpellDamage'] = 2;
+        break;
+
+      // 白狼【冥想】：弃置N张手牌，伤害+N（由玩家打牌决定，标记激活状态）
+      case 'discard_for_damage':
+        shikigamiState.markers['discardForDamage'] = 1;
+        break;
+
+      // 书翁【万象之书】：鬼火-N伤害+N+1（cost已扣，补算effect部分）
+      case 'variable_damage':
+        if (shikigami.skill.usedCost !== undefined) {
+          player.damage += shikigami.skill.usedCost + 1;
+        }
+        break;
+
+      // 默认：无额外效果（框架已处理鬼火扣除和疲劳）
+      default:
+        break;
+    }
   }
 
   // ============ 游戏结束 ============
@@ -741,8 +791,7 @@ export class GameManager {
         
       case 'USE_SKILL':
         if (this.state.turnPhase !== 'action') return false;
-        const shikigamiIndex = player.shikigami.findIndex(s => s.id === action.shikigamiId);
-        return this.useShikigamiSkill(player, shikigamiIndex, action.targetId);
+        return this.useShikigamiSkill(player, action.shikigamiId, action.targetId);
         
       case 'ATTACK':
         if (this.state.turnPhase !== 'action') return false;

@@ -387,11 +387,112 @@ describe('GameManager 游戏管理器', () => {
   });
 
   describe('🔴 式神技能', () => {
-    it.todo('消耗鬼火使用式神技能');
+    let player: ReturnType<GameManager['getCurrentPlayer']>;
 
-    it.todo('鬼火不足时无法使用技能');
+    beforeEach(() => {
+      game.addPlayer('p1', '玩家1');
+      game.addPlayer('p2', '玩家2');
+      const state = game.getState();
+      state.phase = 'playing';
+      game.startTurn();
+      game.confirmShikigamiPhase();
 
-    it.todo('疲劳的式神无法再次使用技能');
+      player = game.getCurrentPlayer();
+
+      // 给玩家装备一个式神：山童（【启】鬼火-1：本回合前2张阴阳术额外伤害+1）
+      player.shikigami = [{
+        id: 'shikigami_shantong',
+        name: '山童',
+        type: 'shikigami',
+        rarity: 'R',
+        charm: 1,
+        multiPlayer: false,
+        skill: {
+          name: '怪力',
+          effectType: '启',
+          cost: 1,        // 消耗1点鬼火
+          effect: 'bonus_spell_damage_2', // 前2张阴阳术额外+1伤害
+        },
+        image: 'shikigami_shantong.png',
+        count: 1,
+      }];
+      player.shikigamiState = [{
+        cardId: 'shikigami_shantong',
+        isExhausted: false,
+        markers: {},
+      }];
+
+      // 给玩家3点鬼火
+      player.ghostFire = 3;
+    });
+
+    it('【启】消耗鬼火使用式神技能', () => {
+      const ghostFireBefore = player.ghostFire;
+
+      const result = game.handleAction('p1', {
+        type: 'USE_SKILL',
+        shikigamiId: 'shikigami_shantong',
+      });
+
+      expect(result).toBe(true);
+      // 消耗1点鬼火
+      expect(player.ghostFire).toBe(ghostFireBefore - 1);
+    });
+
+    it('使用技能后式神进入疲劳状态', () => {
+      game.handleAction('p1', {
+        type: 'USE_SKILL',
+        shikigamiId: 'shikigami_shantong',
+      });
+
+      const state = player.shikigamiState.find(s => s.cardId === 'shikigami_shantong');
+      expect(state?.isExhausted).toBe(true);
+    });
+
+    it('鬼火不足时无法使用【启】技能', () => {
+      player.ghostFire = 0; // 鬼火清空
+
+      const result = game.handleAction('p1', {
+        type: 'USE_SKILL',
+        shikigamiId: 'shikigami_shantong',
+      });
+
+      expect(result).toBe(false);
+      expect(player.ghostFire).toBe(0); // 鬼火不变
+    });
+
+    it('疲劳的式神无法再次使用技能', () => {
+      // 第一次使用（成功）
+      game.handleAction('p1', {
+        type: 'USE_SKILL',
+        shikigamiId: 'shikigami_shantong',
+      });
+
+      // 第二次使用（应该失败）
+      const result = game.handleAction('p1', {
+        type: 'USE_SKILL',
+        shikigamiId: 'shikigami_shantong',
+      });
+
+      expect(result).toBe(false);
+    });
+
+    it('回合开始时式神疲劳状态重置', () => {
+      // 用技能让式神疲劳
+      game.handleAction('p1', { type: 'USE_SKILL', shikigamiId: 'shikigami_shantong' });
+      const state = player.shikigamiState.find(s => s.cardId === 'shikigami_shantong');
+      expect(state?.isExhausted).toBe(true);
+
+      // 结束回合 → 下一玩家 → 再结束 → 回到p1
+      game.handleAction('p1', { type: 'END_TURN' });
+      const p2 = game.getCurrentPlayer();
+      game.handleAction('p2', { type: 'CONFIRM_SHIKIGAMI' });
+      game.handleAction('p2', { type: 'END_TURN' });
+
+      // 回到p1的回合，式神应该重置
+      const refreshedState = player.shikigamiState.find(s => s.cardId === 'shikigami_shantong');
+      expect(refreshedState?.isExhausted).toBe(false);
+    });
   });
 
   describe('🔴 鬼王系统', () => {

@@ -668,6 +668,35 @@ describe('GameManager 游戏管理器', () => {
       expect(lastLog?.message).toContain('玩家1');
     });
 
+    it('式神区的声誉也计入最终结算', () => {
+      const state = game.getState();
+      state.phase = 'playing';
+
+      const p1 = state.players[0]!;
+      p1.deck = [];
+      p1.hand = [];
+      p1.discard = [];
+
+      // 式神区有一个SSR式神（声誉3）
+      p1.shikigami = [{
+        id: 'shikigami_妖刀姬',
+        name: '妖刀姬',
+        type: 'shikigami',
+        rarity: 'SSR',
+        charm: 3,
+        multiPlayer: false,
+        skill: { name: '杀戮', effectType: '启', cost: 2, effect: '' },
+        image: '',
+        count: 1,
+      }];
+
+      (game as any).endGame();
+
+      expect(state.phase).toBe('ended');
+      // 声誉应该包含式神的3点
+      expect(p1.totalCharm).toBe(3);
+    });
+
     it('声誉和牌数都相同时判为平局', () => {
       const state = game.getState();
       state.phase = 'playing';

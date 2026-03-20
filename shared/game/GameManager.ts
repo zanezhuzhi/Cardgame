@@ -744,15 +744,18 @@ export class GameManager {
     const playerScores: PlayerScore[] = [];
     
     for (const player of this.state.players) {
-      // 结算所有区域的牌（不含超度区）
+      // 结算所有区域的牌（不含超度区 exiled）
       const allCards = [
         ...player.deck,
         ...player.hand,
         ...player.discard,
         ...player.played,
       ];
-      // 声誉 = 正声誉（妖怪/式神/令牌）+ 负声誉（恶评）之和
-      const totalCharm = allCards.reduce((sum, card) => sum + (card.charm || 0), 0);
+      // 声誉 = 牌堆声誉 + 式神区声誉（式神在场也计分）
+      const deckCharm = allCards.reduce((sum, card) => sum + (card.charm || 0), 0);
+      const shikigamiCharm = player.shikigami.reduce((sum, s) => sum + (s.charm || 0), 0);
+      const totalCharm = deckCharm + shikigamiCharm;
+
       // 同步实时追踪值
       player.totalCharm = totalCharm;
       

@@ -363,7 +363,7 @@ function getCardImage(card: CardInstance | any): string {
   const dir: Record<string, string> = {
     boss: 'bosses', yokai: 'yokai', shikigami: 'shikigami', spell: 'spells', penalty: 'curses'
   }
-  return `/src/assets/images/${dir[type]}/${numId}.webp`
+  return `/images/${dir[type]}/${numId}.webp`
 }
 
 // 禁用全局拖拽默认行为，防止长按出现多选框/图片拖走

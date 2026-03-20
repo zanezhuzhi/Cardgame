@@ -1,0 +1,12 @@
+# 特效资源目录
+# 
+# 支持格式: GIF / PNG序列帧 / Lottie JSON
+# 
+# 特效列表:
+# - fx_kill.gif - 击杀特效 (烟雾消散)
+# - fx_damage.gif - 受伤特效 (红光闪烁)
+# - fx_heal.gif - 治愈特效 (绿光)
+# - fx_sakura.gif - 樱花飘落
+# - fx_level_up.gif - 升级特效
+#
+# 提示: 可以用 CSS 动画替代，参考 theme-wafuu.css

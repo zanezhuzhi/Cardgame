@@ -13,37 +13,37 @@
 
     <!-- 游戏界面 -->
     <div v-else class="game-board">
-
-      <!-- ① 顶部栏：轮数 + 玩家列表 + 游戏名 -->
-      <div class="top-bar">
-        <div class="round-badge">第{{state?.turnNumber||1}}轮</div>
-        <!-- 玩家列表（最多6人） -->
-        <div class="players-row">
-          <!-- 当前玩家 -->
-          <div class="player-block active">
-            <div class="player-avatar">
-              <img v-if="player?.shikigami?.[0]" :src="getCardImage(player.shikigami[0])" class="avatar-img"/>
-              <span v-else>👤</span>
-            </div>
-            <div class="player-stats">
-              <div class="ps-row"><span class="ps-icon">👑</span><span class="ps-val">{{player?.totalCharm||0}}</span></div>
-              <div class="ps-row"><span class="ps-icon">🃏</span><span class="ps-val">{{(player?.deck?.length||0)+(player?.hand?.length||0)+(player?.discard?.length||0)}}</span></div>
-            </div>
-          </div>
-          <!-- 其他玩家空位 -->
-          <div class="player-block" v-for="i in 5" :key="i">
-            <div class="player-avatar"><span>�</span></div>
-            <div class="player-stats">
-              <div class="ps-row"><span class="ps-icon">👑</span><span class="ps-val">—</span></div>
-              <div class="ps-row"><span class="ps-icon">🃏</span><span class="ps-val">—</span></div>
-            </div>
+      <!-- 顶部：信息+玩家+LOGO -->
+      <div class="top-row">
+        <div class="info-panel">
+          <div class="panel-title">交互信息提示</div>
+          <div class="log-area" ref="logRef">
+            <div v-for="(l,i) in logs" :key="i" class="log-line">{{l.message}}</div>
           </div>
         </div>
-        <div class="game-title">百鬼夜行</div>
+        <div class="player-panel">
+          <div class="player-slot active">{{player?.name}}</div>
+          <div class="player-slot" v-for="i in 5" :key="i"></div>
+        </div>
+        <div class="logo-panel">
+          <div class="logo">🎴 御魂传说</div>
+          <div class="stats">
+            <span>🔥{{player?.ghostFire||0}}/5</span>
+            <span>⚔️{{player?.damage||0}}</span>
+            <span>👑{{player?.totalCharm||0}}</span>
+            <span>R{{state?.turnNumber||0}}</span>
+          </div>
+          <!-- 临时Buff显示 -->
+          <div v-if="activeBuffs.length" class="buffs">
+            <div v-for="b in activeBuffs" :key="b.type" class="buff-tag">{{b.label}}</div>
+          </div>
+        </div>
       </div>
 
-      <!-- 鬼王区：600×650, left:0, top:150 -->
-      <div class="boss-zone">
+      <!-- 中间：鬼王+妖怪 -->
+      <div class="mid-row">
+        <div class="boss-panel">
+          <div class="panel-title">👹 鬼王区</div>
           <div v-if="boss" class="boss-card"
                :class="{
                  'boss-attackable': canAttackBoss,
@@ -54,44 +54,35 @@
                @mouseenter="showBossTooltip($event, boss)"
                @mouseleave="hideTooltip">
             <img v-if="getCardImage(boss)" :src="getCardImage(boss)" class="card-art boss-art" />
+            <!-- 可攻击时的引导覆盖层 -->
             <div v-if="canAttackBoss" class="boss-attack-overlay">
               ⚔️ 点击攻击<br/>
-              <span class="boss-dmg-preview">{{player?.damage}} 伤害</span>
+              <span class="boss-dmg-preview">{{ player?.damage }} 伤害</span>
             </div>
+            <!-- 等待退治/超度选择时 -->
             <div v-if="isBossDefeated" class="boss-defeated-overlay">💀 已击败<br/>请选择...</div>
             <div class="boss-card-info">
+              <div class="boss-stage">Ⅰ</div>
               <div class="boss-name">{{boss.name}}</div>
               <div class="boss-hp">❤️{{state?.field.bossCurrentHp}}/{{boss.hp}}</div>
               <div class="boss-charm">👑+{{boss.charm||0}}</div>
             </div>
           </div>
-          <div v-else class="boss-empty-slot">
-            <div class="boss-empty-text">鬼王</div>
-            <div class="boss-remain">剩余 {{state?.field.bossDeck?.length||0}}</div>
+          <!-- 妖怪全清但伤害不足时的提示 -->
+          <div v-if="allYokaiCleared && state?.turnPhase === 'action' && !canAttackBoss && boss"
+               class="boss-no-dmg-hint">
+            妖怪已清！<br/>积累伤害后攻击鬼王
           </div>
-          <div v-if="allYokaiCleared && state?.turnPhase==='action' && !canAttackBoss && boss" class="boss-no-dmg-hint">
-            妖怪已清！积累伤害后攻击鬼王
-          </div>
+          <div v-else class="boss-empty">全部击败</div>
+          <div class="boss-remain">剩余:{{state?.field.bossDeck.length||0}}</div>
         </div>
-
-      <!-- 来袭效果横条：540×46, left:0, top:640 -->
-      <div class="boss-arrival-bar" v-if="boss">
-        <span class="arrival-label">来袭效果</span>
-        <span class="arrival-text">{{ boss.arrivalEffect || boss.effect || '击败后获得声誉' }}</span>
-      </div>
-
-      <!-- 妖怪区：750×650, left:600, top:150 -->
-      <div class="main-area">
-
-        <!-- 妖怪区 -->
-        <div class="yokai-zone">
-          <!-- 游荡妖怪竖标题用绝对定位，在CSS中控制 -->
-          <div class="yokai-title">游荡妖怪</div>
+        <div class="yokai-panel">
+          <div class="panel-title">👻 游荡妖怪区</div>
           <div class="yokai-grid">
-            <div v-for="(y,i) in yokai" :key="i"
-                 class="yokai-card"
+            <div v-for="(y,i) in yokai" :key="i" 
+                 class="yokai-card" 
                  :class="{
-                   empty:!y,
+                   empty: !y, 
                    wounded: y && isWounded(y) && !isKilled(y),
                    canKill: y && canKillYokai(y),
                    killed: y && isKilled(y),
@@ -101,11 +92,11 @@
                  @mouseenter="y && showTooltip($event, y)"
                  @mouseleave="hideTooltip">
               <template v-if="y">
-                <img v-if="getCardImage(y)" :src="getCardImage(y)" class="card-art yokai-art"/>
+                <img v-if="getCardImage(y)" :src="getCardImage(y)" class="card-art yokai-art" />
                 <div class="yokai-info">
                   <div class="y-name">{{y.name}}</div>
                   <div class="y-stat">
-                    <span :class="{'hp-damaged':getYokaiCurrentHp(y)<y.hp}">❤️{{getYokaiCurrentHp(y)}}/{{y.hp}}</span>
+                    <span :class="{'hp-damaged': getYokaiCurrentHp(y) < y.hp}">❤️{{getYokaiCurrentHp(y)}}/{{y.hp}}</span>
                     <span>👑{{y.charm||0}}</span>
                   </div>
                 </div>
@@ -113,118 +104,73 @@
               </template>
             </div>
           </div>
-        </div>
-
-        <!-- 信息栏（右） -->
-        <div class="info-zone">
-          <!-- 日志区（滚动） -->
-          <div class="log-scroll" ref="logRef">
-            <div v-for="(l,i) in logs" :key="i" class="log-line">{{l.message}}</div>
-          </div>
-          <!-- 当前状态提示 -->
-          <div class="info-status">
-            <div class="status-line">{{phaseText}}</div>
-            <div class="status-line secondary">
-              🔥{{player?.ghostFire||0}} &nbsp; ⚔️{{player?.damage||0}}
-              <span v-if="activeBuffs.length"> &nbsp;
-                <span v-for="b in activeBuffs" :key="b.type" class="buff-tag-sm">{{b.label}}</span>
-              </span>
-            </div>
-          </div>
-          <!-- 操作按钮组 -->
-          <div class="action-btns">
-            <button class="act-btn" @click="openShikigamiModal"
-                    :disabled="!canAcquireShikigami && !canReplaceShikigami">
-              获得式神
-            </button>
+          <div class="action-bar">
+            <span class="deck-num">{{state?.field.yokaiDeck.length||0}}</span>
             <button class="act-btn" @click="getSpell" :disabled="!canSpell">获得阴阳术</button>
+            <span class="exile-num">{{player?.exiled?.length||0}}</span>
             <button class="act-btn" @click="showExiled=true">查看超度区</button>
           </div>
         </div>
+      </div>
 
-      </div><!-- /main-area -->
-
-      <!-- ③ 底部栏 -->
-      <div class="bottom-bar">
-
-        <!-- 式神区（左） -->
-        <div class="shiki-zone">
+      <!-- 底部：式神+牌库+手牌+结束 -->
+      <div class="bot-row">
+        <div class="shiki-panel">
+          <div class="panel-title">
+            🦊 式神区 ({{player?.shikigami?.length||0}}/3)
+            <button class="shiki-btn" 
+                    v-if="canAcquireShikigami || canReplaceShikigami"
+                    @click="openShikigamiModal">
+              {{ canAcquireShikigami ? '获取式神' : '置换式神' }}
+            </button>
+          </div>
           <div class="shiki-cards">
-            <div v-for="(s,i) in player?.shikigami" :key="s.id"
-                 class="shiki-card"
-                 :class="{tired:player?.shikigamiState[i]?.isExhausted, selecting:shikigamiModal.selectingOld}"
+            <div v-for="(s,i) in player?.shikigami" :key="s.id" 
+                 class="shiki-card" 
+                 :class="{tired:player?.shikigamiState[i]?.isExhausted, selecting: shikigamiModal.selectingOld}"
                  @click="shikigamiModal.selectingOld ? selectOldShikigami(s.id) : useSkill(s.id)"
                  @mouseenter="showShikigamiTooltip($event, s)"
                  @mouseleave="hideTooltip">
-              <img v-if="getCardImage(s)" :src="getCardImage(s)" class="card-art shiki-art"/>
+              <img v-if="getCardImage(s)" :src="getCardImage(s)" class="card-art shiki-art" />
               <div class="shiki-info">
                 <div class="s-name">{{s.name}}</div>
                 <div class="s-skill" v-if="s.skill">【启】{{s.skill.name}}(🔥{{s.skill.cost||0}})</div>
                 <div class="s-skill" v-else-if="s.passive">【被动】{{s.passive.name}}</div>
               </div>
             </div>
-            <div v-for="i in (3-(player?.shikigami?.length||0))" :key="'empty'+i" class="shiki-card empty"></div>
           </div>
         </div>
-
-        <!-- 手牌区（中） -->
-        <div class="hand-zone">
-          <div class="hand-label">手牌 ×{{player?.hand?.length||0}}</div>
+        <div class="pile-panel">
+          <div class="pile deck"><span>牌库</span><b>{{player?.deck?.length||0}}</b></div>
+          <div class="pile disc"><span>弃牌</span><b>{{player?.discard?.length||0}}</b></div>
+        </div>
+        <div class="hand-panel">
+          <div class="panel-title">🎯 手牌 *{{player?.hand?.length||0}}</div>
           <div class="hand-cards">
-            <div v-for="c in player?.hand" :key="c.instanceId"
-                 class="hand-card"
-                 :class="[cardType(c), {selecting:selectingCards, unplayable:!canPlay(c)}]"
+            <div v-for="c in player?.hand" :key="c.instanceId" 
+                 class="hand-card" 
+                 :class="[cardType(c), {selecting: selectingCards, unplayable: !canPlay(c)}]"
                  @click="handleCardClick(c)"
                  @mouseenter="showTooltip($event, c)"
                  @mouseleave="hideTooltip">
-              <img v-if="getCardImage(c)" :src="getCardImage(c)" class="card-art hand-art"/>
+              <img v-if="getCardImage(c)" :src="getCardImage(c)" class="card-art hand-art" />
               <div class="card-info">
                 <div class="c-name">{{c.name}}</div>
-                <div class="c-stat" v-if="c.cardType==='spell'||c.cardType==='yokai'">⚔️{{c.damage||c.hp||1}}</div>
-                <div class="c-stat" v-else-if="c.cardType==='token'">🎁</div>
-                <div class="c-stat" v-else-if="c.cardType==='penalty'">💔{{c.charm||0}}</div>
+                <div class="c-stat" v-if="c.cardType === 'spell' || c.cardType === 'yokai'">⚔️{{c.damage||c.hp||1}}</div>
+                <div class="c-stat" v-else-if="c.cardType === 'token'">🎁</div>
+                <div class="c-stat" v-else-if="c.cardType === 'penalty'">💔{{c.charm||0}}</div>
                 <div class="c-stat" v-else>—</div>
               </div>
             </div>
           </div>
         </div>
-
-        <!-- 右侧工具区 -->
-        <div class="right-tools">
-          <!-- 左列：牌库 + 弃牌堆（垂直叠） -->
-          <div class="pile-col">
-            <div class="pile-btn" @click="showExiled=true">
-              <span class="pile-label">牌库</span>
-              <span class="pile-count">{{player?.deck?.length||0}}</span>
-            </div>
-            <div class="pile-btn">
-              <span class="pile-label">弃牌堆</span>
-              <span class="pile-count">{{player?.discard?.length||0}}</span>
-            </div>
-          </div>
-          <!-- 个人信息区：头像180×180 + 声望/牌数横排 -->
-          <div class="stat-col">
-            <div class="stat-avatar">
-              <img v-if="player?.shikigami?.[0]" :src="getCardImage(player.shikigami[0])" />
-              <span v-else>👤</span>
-            </div>
-            <div class="stat-nums">
-              <div class="stat-box">
-                <span class="stat-icon">👑</span>
-                <span class="stat-val">{{player?.totalCharm||0}}</span>
-              </div>
-              <div class="stat-box">
-                <span class="stat-icon">🃏</span>
-                <span class="stat-val">{{(player?.deck?.length||0)+(player?.hand?.length||0)+(player?.discard?.length||0)}}</span>
-              </div>
-            </div>
-            <button class="end-btn" @click="endTurn" :disabled="state?.turnPhase!=='action'">
-              结束回合 →
-            </button>
-          </div>
+        <div class="end-panel">
+          <button class="end-btn" @click="endTurn" :disabled="state?.turnPhase!=='action'">
+            结束回合 →
+          </button>
+          <div class="phase">{{phaseText}}</div>
         </div>
-
-      </div><!-- /bottom-bar -->
+      </div>
 
       <!-- 弹窗：妖怪刷新确认 -->
       <div class="modal" v-if="state?.pendingYokaiRefresh">
@@ -984,488 +930,31 @@ async function selectNewShikigami(shikigami: any) {
 
 <style scoped>
 *{box-sizing:border-box}
-.game-container{
-  width:100vw;min-height:100vh;
-  background:#1A1A2E;color:#fff;
-  font-family:'Microsoft YaHei',sans-serif;
-  /* 确保不被其他样式遮住 */
-  position:relative;z-index:0;
-}
+.game-container{min-height:100vh;background:#1a1a2e;color:#fff;font-family:'Microsoft YaHei',sans-serif}
 
 /* 大厅 */
-.lobby{
-  display:flex;justify-content:center;align-items:center;
-  width:100vw;height:100vh;
-  position:fixed;top:0;left:0;
-  z-index:100;
-  background:#1A1A2E;
-}
-.lobby-card{
-  background:rgba(45,31,61,.9);
-  border:2px solid #D4A574;
-  padding:48px 40px;border-radius:16px;text-align:center;
-  min-width:320px;
-  box-shadow:0 0 40px rgba(212,165,116,.2);
-}
-.lobby-card h1{font-size:36px;margin-bottom:8px;color:#FFD700}
-.lobby-card h2{color:#aaa;margin-bottom:24px;font-size:18px}
-.name-input{
-  width:100%;padding:12px;border-radius:8px;
-  border:1px solid rgba(212,165,116,.5);
-  background:rgba(0,0,0,.3);color:#fff;
-  font-size:16px;margin-bottom:16px;
-  outline:none;
-}
-.btn{padding:12px 32px;border:none;border-radius:8px;cursor:pointer;font-size:16px;color:#fff}
-.btn.primary{background:linear-gradient(135deg,#8b4513,#D4A574);color:#fff;font-weight:bold}
+.lobby{display:flex;justify-content:center;align-items:center;min-height:100vh}
+.lobby-card{background:rgba(255,255,255,.1);padding:40px;border-radius:16px;text-align:center}
+.lobby-card h1{font-size:32px;margin-bottom:10px}
+.lobby-card h2{color:#888;margin-bottom:20px}
+.name-input{width:100%;padding:10px;border-radius:8px;border:none;margin-bottom:15px}
+.btn{padding:12px 24px;border:none;border-radius:8px;cursor:pointer;font-size:16px}
+.btn.primary{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff}
 .btn:disabled{opacity:.5;cursor:not-allowed}
-.tips{margin-top:20px;color:#888;font-size:13px}
+.tips{margin-top:20px;color:#666;font-size:13px}
 
 /* ══════════════════════════════════════════════
-   游戏主布局 - 严格按照 Figma CSS 1920×1080 还原
-   --s = 100vw/1920 作为缩放单位
+   游戏主布局
 ══════════════════════════════════════════════ */
-:root{
-  --bg-main:#1A1A2E; --bg-panel:#2D1F3D; --bg-panel2:#151525;
-  --border-gold:#D4A574; --border-gold-bright:#FFD700;
-  --text-gold:#FFD700; --text-dim:#aaa; --text-white:#FFFFFF;
-  --s: calc(100vw / 1920);
-}
-
-/* 游戏主容器：fixed全屏，1920×1080等比缩放 */
 .game-board{
-  position:fixed; top:0; left:0;
-  width:100vw; height:calc(var(--s)*1080);
-  background:#1A1A2E;
-  font-family:'Segoe UI',system-ui,sans-serif;
-  color:#FFFFFF; overflow:hidden; z-index:10;
+  display:flex;flex-direction:column;height:100vh;
+  padding:6px;gap:5px;overflow:hidden;
+  background:linear-gradient(160deg,#0d1117 0%,#111827 50%,#0f172a 100%);
+  font-family:'Segoe UI',sans-serif;
 }
 
-/* ══ ① 顶部栏 1920×150, top:0 ══ */
-.top-bar{
-  position:absolute; left:0; top:0;
-  width:calc(var(--s)*1920); height:calc(var(--s)*150);
-  background:#2D1F3D;
-  border:2px solid #D4A574;
-  box-sizing:border-box;
-  display:flex; align-items:center;
-  padding:0 calc(var(--s)*52);
-  gap:calc(var(--s)*10);
-  overflow:hidden;
-}
-/* 第3轮：left:52, top:51, font-size:36 */
-.round-badge{
-  position:relative;
-  font-size:calc(var(--s)*36);
-  font-weight:400; color:#FFD700;
-  white-space:nowrap; flex-shrink:0;
-  line-height:calc(var(--s)*49);
-}
-/* 百鬼夜行：left:1644, font-size:64 */
-.game-title{
-  position:absolute;
-  left:calc(var(--s)*1644); top:calc(var(--s)*17);
-  width:calc(var(--s)*256); height:calc(var(--s)*116);
-  font-size:calc(var(--s)*64);
-  font-weight:400; color:#FFFFFF;
-  line-height:calc(var(--s)*116);
-  white-space:nowrap;
-}
-/* 6个玩家块，间距按Figma：玩家1 left:180, 玩家2 left:425, 步进245 */
-.players-row{
-  display:flex; gap:0;
-  position:absolute;
-  left:calc(var(--s)*180); top:calc(var(--s)*15);
-}
-/* 每块220×120：头像120×120 + 右侧(总牌数85×60 top:0 + 总声望85×60 top:60) */
-.player-block{
-  display:flex; align-items:flex-start;
-  gap:calc(var(--s)*15);
-  width:calc(var(--s)*220); height:calc(var(--s)*120);
-  opacity:.55;
-  margin-right:calc(var(--s)*25);
-}
-.player-block.active{ opacity:1; }
-.player-avatar{
-  width:calc(var(--s)*120); height:calc(var(--s)*120);
-  background:#D9D9D9; overflow:hidden; flex-shrink:0;
-  display:flex; align-items:center; justify-content:center;
-  font-size:calc(var(--s)*40);
-}
-.avatar-img{width:100%;height:100%;object-fit:cover;object-position:top}
-.player-stats{ display:flex; flex-direction:column; gap:0; flex-shrink:0; }
-.ps-row{
-  display:flex; align-items:center;
-  width:calc(var(--s)*85); height:calc(var(--s)*60);
-  background:#151525; border:1px solid #D4A574;
-  box-sizing:border-box;
-  padding:0 calc(var(--s)*5); gap:calc(var(--s)*4);
-}
-.ps-icon{ font-size:calc(var(--s)*18); flex-shrink:0; }
-.ps-val{ font-size:calc(var(--s)*22); font-weight:bold; color:#FFFFFF; }
-
-/* ══ ② 鬼王区 600×490, left:0, top:150 ══ */
-.boss-zone{
-  position:absolute;
-  left:0; top:calc(var(--s)*150);
-  width:calc(var(--s)*600); height:calc(var(--s)*490);
-  background:#151525;
-  border:2px solid #D4A574;
-  box-sizing:border-box;
-  display:flex; flex-direction:column;
-  align-items:center; justify-content:center;
-  overflow:hidden;
-}
-
-/* ══ 妖怪区 750×650, left:600, top:150 ══ */
-.main-area{
-  position:absolute;
-  left:calc(var(--s)*600); top:calc(var(--s)*150);
-  width:calc(var(--s)*750); height:calc(var(--s)*650);
-  background:#151525;
-  border:2px solid #D4A574;
-  box-sizing:border-box;
-  overflow:hidden;
-}
-/* 妖怪网格：3列×2行，每格200×280
-   妖怪1: left:640→相对妖怪区:40, top:180→相对:30
-   妖怪4: left:640, top:480→相对:330 */
-.yokai-zone{
-  position:absolute; left:0; top:0; width:100%; height:100%;
-  display:flex; flex-direction:row;
-  padding:calc(var(--s)*30) 0 calc(var(--s)*30) calc(var(--s)*40);
-  gap:0;
-}
-.yokai-grid{
-  display:grid;
-  grid-template-columns: repeat(3, calc(var(--s)*200));
-  grid-template-rows: repeat(2, calc(var(--s)*280));
-  gap:calc(var(--s)*20);
-  align-content:start;
-  flex-shrink:0;
-}
-/* 游荡妖怪：left:1300(canvas)→相对妖怪区(left:600):700, top:388→238, 50×196 */
-.yokai-title{
-  position:absolute;
-  left:calc(var(--s)*700); top:calc(var(--s)*238);
-  width:calc(var(--s)*50); height:calc(var(--s)*196);
-  writing-mode:vertical-rl; text-orientation:upright;
-  font-size:calc(var(--s)*36); font-weight:400; color:#FFD700;
-  line-height:calc(var(--s)*49);
-  display:flex; align-items:center; justify-content:center;
-}
-
-/* ══ 交互信息区 570×650, left:1350, top:150 ══ */
-.info-zone{
-  position:absolute;
-  left:calc(var(--s)*1350); top:calc(var(--s)*150);
-  width:calc(var(--s)*570); height:calc(var(--s)*650);
-  background:#151525;
-  border:2px solid #D4A574;
-  box-sizing:border-box;
-  display:flex; flex-direction:column;
-  overflow:hidden;
-}
-.boss-empty-slot{
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  width:100%;flex:1;
-}
-.boss-empty-text{
-  font-size:32px;font-weight:bold;color:rgba(200,168,64,.25);
-  letter-spacing:.1em;
-}
-.boss-remain{font-size:11px;color:var(--text-dim);margin-top:4px}
-
-/* 妖怪区（旧定义已移至上方新块，此处保留yokai-card样式） */
-.yokai-card{
-  background:var(--bg-panel2);
-  border:1px solid var(--border-gold);
-  border-radius:6px;
-  cursor:pointer;
-  display:flex;flex-direction:column;justify-content:flex-end;
-  position:relative;overflow:hidden;
-  transition:all .18s;
-}
-.yokai-card:hover:not(.empty){
-  border-color:var(--border-gold-bright);
-  box-shadow:0 0 16px rgba(200,168,64,.3);
-  transform:translateY(-2px);
-}
-.yokai-card.empty{background:rgba(30,21,48,.5);border-color:rgba(122,96,48,.3);cursor:default}
-.yokai-card.wounded{border-color:#ff6b6b;box-shadow:0 0 8px rgba(255,80,80,.3)}
-.yokai-card.canKill{border-color:#4CAF50;box-shadow:0 0 12px rgba(76,175,80,.7);animation:canKillPulse 1.2s infinite}
-.yokai-card.killed{border-color:#e91e63;box-shadow:0 0 10px rgba(233,30,99,.5)}
-.yokai-card.selecting{border-color:#ff9800;animation:pulse 1s infinite}
-.yokai-info{
-  position:relative;z-index:1;
-  background:linear-gradient(0deg,rgba(0,0,0,.92) 0%,rgba(0,0,0,.4) 70%,transparent 100%);
-  padding:14px 6px 5px;
-}
-.y-name{font-size:11px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#f0e6d3}
-.y-stat{font-size:10px;color:#ccc;margin-top:2px;display:flex;gap:6px;justify-content:center}
-.hp-damaged{color:#ff6b6b;font-weight:bold}
-.killed-badge{
-  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2;
-  background:rgba(0,0,0,.9);padding:4px 10px;border-radius:5px;
-  font-size:10px;color:#e91e63;white-space:nowrap;font-weight:bold;
-  border:1px solid rgba(233,30,99,.5);
-}
-
-/* 信息栏（旧定义已移至上方新块，此处保留子元素样式） */
-.log-scroll{
-  flex:1;overflow-y:auto;padding:8px 10px;
-  display:flex;flex-direction:column;gap:2px;
-}
-.log-scroll::-webkit-scrollbar{width:4px}
-.log-scroll::-webkit-scrollbar-track{background:transparent}
-.log-scroll::-webkit-scrollbar-thumb{background:var(--border-gold);border-radius:2px}
-.log-line{
-  font-size:11px;line-height:1.5;color:#c0b0d0;
-  padding:3px 0;border-bottom:1px solid rgba(122,96,48,.2);
-}
-.info-status{
-  padding:8px 10px;border-top:1px solid var(--border-gold);border-bottom:1px solid var(--border-gold);
-  background:var(--bg-panel2);
-}
-.status-line{font-size:12px;color:var(--text-gold);font-weight:bold}
-.status-line.secondary{font-size:11px;color:#b0a0c8;margin-top:3px}
-.buff-tag-sm{
-  display:inline-block;background:linear-gradient(135deg,#ff9800,#e65100);
-  padding:1px 5px;border-radius:3px;font-size:9px;margin-left:3px;
-}
-/* ══ 信息栏操作按钮区 ══
-   Figma: 3个按钮横排，各150×120
-   left: 1370/1560/1750(canvas) → 相对info-zone(left:1350): 20/210/400
-   top: 660(canvas) → 相对middle-zone(top:150): 510 → 相对info-zone top:510
-*/
-.action-btns{
-  /* 横排3个按钮，底部对齐 */
-  display:flex;flex-direction:row;
-  gap:0;padding:0;
-  flex-shrink:0;
-  height:calc(var(--s)*120);
-  margin-top:auto; /* 推到底部 */
-  border-top:1px solid #D4A574;
-}
-.act-btn{
-  flex:1;
-  height:100%;
-  background:#1A1A2E;
-  border:none;
-  border-right:1px solid #D4A574;
-  color:#FFFFFF;
-  cursor:pointer;font-size:calc(var(--s)*18);font-weight:bold;
-  transition:all .15s;letter-spacing:.05em;
-  display:flex;align-items:center;justify-content:center;
-}
-.act-btn:last-child{ border-right:none; }
-.act-btn:hover:not(:disabled){
-  background:rgba(212,165,116,.15);
-  color:#FFD700;
-}
-.act-btn:disabled{opacity:.3;cursor:not-allowed}
-
-/* ══ ③ 底部区域 ══
-   式神区: 450×280, left:0, top:800
-   手牌区: 1030×280, left:450, top:800
-   stat区: 440×280, left:1480, top:800
-*/
-.bottom-bar{
-  position:absolute;
-  left:0; top:calc(var(--s)*800);
-  width:calc(var(--s)*1920); height:calc(var(--s)*280);
-  background:#2D1F3D;
-  border:2px solid #D4A574;
-  box-sizing:border-box;
-  overflow:hidden;
-}
-
-/* ── 式神区 450×280, left:0, top:0 ── */
-.shiki-zone{
-  position:absolute;
-  left:0; top:0;
-  width:calc(var(--s)*450); height:calc(var(--s)*280);
-  background:#151525;
-  border-right:2px solid #D4A574;
-  box-sizing:border-box;
-  padding:calc(var(--s)*10) calc(var(--s)*10);
-}
-.shiki-cards{
-  display:flex;gap:calc(var(--s)*10);height:100%;
-}
-/* 式神卡：高度撑满式神区，宽度按比例 */
-.shiki-card{
-  flex:1; max-width:8vw;
-  height:100%;
-  background:#151525;
-  border:calc(var(--s)*1) solid #D4A574;
-  box-sizing:border-box;
-  cursor:pointer;
-  display:flex;flex-direction:column;justify-content:flex-end;
-  position:relative;overflow:hidden;
-  transition:all .18s;
-}
-.shiki-card:hover:not(.tired):not(.empty){
-  border-color:#FFD700;
-  box-shadow:0 0 calc(var(--s)*16) rgba(212,165,116,.5);
-  transform:translateY(calc(var(--s)*-4));
-}
-.shiki-card.tired{opacity:.35;filter:grayscale(.8)}
-.shiki-card.empty{
-  background:rgba(21,21,37,.4);
-  border-color:rgba(212,165,116,.2);
-  border-style:dashed;
-  cursor:default;
-}
-.shiki-card.selecting{border-color:#ff9800;animation:pulse 1s infinite}
-.shiki-info{
-  position:relative;z-index:1;
-  background:linear-gradient(0deg,rgba(0,0,0,.95) 0%,rgba(0,0,0,.5) 65%,transparent 100%);
-  padding:calc(var(--s)*18) calc(var(--s)*6) calc(var(--s)*6);
-}
-.s-name{font-size:calc(var(--s)*12);font-weight:700;color:#f5e0c0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.s-skill{font-size:calc(var(--s)*10);color:#c8a96e;margin-top:calc(var(--s)*3);line-height:1.3}
-
-/* ── 手牌区 1030×280, left:450, top:800 ── */
-.hand-zone{
-  position:absolute;
-  left:calc(var(--s)*450); top:0;
-  width:calc(var(--s)*1030); height:calc(var(--s)*280);
-  background:#2D1F3D;
-  border-left:2px solid #D4A574;
-  border-right:2px solid #D4A574;
-  box-sizing:border-box;
-  display:flex; flex-direction:column;
-  padding:calc(var(--s)*10) calc(var(--s)*12) calc(var(--s)*8);
-}
-.hand-label{
-  font-size:calc(var(--s)*36);
-  color:#FFD700;font-weight:bold;
-  margin-bottom:calc(var(--s)*8);
-  flex-shrink:0;
-}
-.hand-cards{
-  display:flex;gap:calc(var(--s)*12);overflow-x:auto;flex:1;
-  align-items:stretch;
-}
-.hand-cards::-webkit-scrollbar{height:calc(var(--s)*4)}
-.hand-cards::-webkit-scrollbar-track{background:rgba(0,0,0,.2)}
-.hand-cards::-webkit-scrollbar-thumb{background:#D4A574;border-radius:calc(var(--s)*2)}
-/* 手牌卡片：固定宽度，高度撑满手牌区 */
-.hand-card{
-  width:7vw;flex-shrink:0;
-  background:#151525;
-  border:calc(var(--s)*1) solid #D4A574;
-  box-sizing:border-box;
-  cursor:pointer;
-  transition:all .18s;
-  display:flex;flex-direction:column;justify-content:flex-end;
-  height:100%;position:relative;overflow:hidden;
-}
-.hand-card:hover:not(.unplayable){
-  transform:translateY(calc(var(--s)*-10));
-  border-color:#FFD700;
-  box-shadow:0 calc(var(--s)*8) calc(var(--s)*24) rgba(212,165,116,.4);
-  z-index:2;
-}
-.hand-card.spell{background:linear-gradient(160deg,#0d2b5e,#1565C0)}
-.hand-card.yokai{background:linear-gradient(160deg,#0a2a14,#1b5e20)}
-.hand-card.token{background:linear-gradient(160deg,#3e2000,#e65100)}
-.hand-card.penalty{background:linear-gradient(160deg,#1a1a2e,#37474f)}
-.hand-card.boss{background:linear-gradient(160deg,#2a0030,#6a1b9a)}
-.hand-card.unplayable{opacity:.4;cursor:not-allowed;filter:grayscale(.4)}
-.hand-card.unplayable:hover{transform:none;box-shadow:none}
-.hand-card.selecting{border:calc(var(--s)*2) solid #ff9800;box-shadow:0 0 calc(var(--s)*10) rgba(255,152,0,.5)}
-.card-info{
-  position:relative;z-index:1;
-  background:linear-gradient(0deg,rgba(0,0,0,.92) 0%,rgba(0,0,0,.5) 70%,transparent 100%);
-  padding:calc(var(--s)*16) calc(var(--s)*5) calc(var(--s)*5);
-}
-.c-name{font-size:calc(var(--s)*11);font-weight:700;color:#f0e6d3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.c-stat{font-size:calc(var(--s)*12);color:#ddd;margin-top:calc(var(--s)*2)}
-
-/* ── 右侧工具/Stat区 440×280, left:1480, top:800 ── */
-.right-tools{
-  position:absolute;
-  left:calc(var(--s)*1480); top:0;
-  width:calc(var(--s)*440); height:calc(var(--s)*280);
-  display:flex; flex-direction:row;
-  box-sizing:border-box;
-}
-
-/* 牌库/弃牌区：左半，~50% */
-.pile-col{
-  width:50%; height:100%;
-  background:#151525;
-  border-right:2px solid #D4A574;
-  box-sizing:border-box;
-  display:flex;flex-direction:column;
-  align-items:center;justify-content:center;
-  padding:1vh 0.5vw;
-  gap:1vh;
-}
-.pile-btn{
-  width:80%; flex:1;
-  max-height:12vh;
-  background:#1A1A2E;
-  border:2px solid #D4A574;
-  box-sizing:border-box;
-  cursor:pointer;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.3vh;
-  transition:all .15s;
-}
-.pile-btn:hover{border-color:#FFD700;background:rgba(26,26,46,.8)}
-.pile-label{font-size:calc(var(--s)*18);color:#FFFFFF;letter-spacing:.03em}
-.pile-count{font-size:calc(var(--s)*28);font-weight:bold;color:#FFFFFF}
-
-/* 个人信息区：右半，~50% */
-.stat-col{
-  width:50%; height:100%;
-  background:#151525;
-  box-sizing:border-box;
-  display:flex;flex-direction:column;
-  align-items:center;
-  padding:1vh 0.5vw;
-  gap:0.5vh;
-  position:relative;
-}
-/* 头像占大部分高度 */
-.stat-avatar{
-  width:90%; flex:1;
-  border:1px solid #D4A574;
-  background:#D9D9D9;
-  overflow:hidden;
-  min-height:0;
-}
-.stat-avatar img{width:100%;height:100%;object-fit:cover}
-/* 声望 + 牌数：横排 */
-.stat-nums{
-  display:flex;gap:0.3vw;flex-shrink:0;width:100%;
-}
-.stat-box{
-  flex:1; height:5vh;
-  background:#151525;
-  border:1px solid #D4A574;
-  box-sizing:border-box;
-  display:flex;align-items:center;justify-content:center;
-  gap:0.2vw;
-}
-.stat-icon{font-size:calc(var(--s)*20);flex-shrink:0}
-.stat-val{font-size:calc(var(--s)*24);font-weight:bold;color:#FFFFFF}
-
-/* 结束回合按钮 */
-.end-btn{
-  width:100%; height:5vh;flex-shrink:0;
-  background:linear-gradient(135deg,#8b1a3a,#5c0e26);
-  border:1px solid rgba(200,80,100,.5);
-  color:#fff;font-size:calc(var(--s)*16);
-  cursor:pointer;font-weight:bold;
-  transition:all .18s;
-}
-.end-btn:hover:not(:disabled){
-  background:linear-gradient(135deg,#c0244e,#8b1a3a);
-}
-.end-btn:disabled{opacity:.35;cursor:not-allowed}
+/* ── 顶部栏 ── */
+.top-row{display:flex;gap:5px;height:84px;flex-shrink:0}
 
 .info-panel{
   width:190px;
@@ -1607,27 +1096,6 @@ async function selectNewShikigami(shikigami: any) {
   background:rgba(0,0,0,.3);
   border-radius:4px;padding:3px 6px;
 }
-
-/* ══ 来袭效果横条 540×46, left:0, top:640 ══ */
-.boss-arrival-bar{
-  position:absolute;
-  left:0; top:calc(var(--s)*640);
-  width:calc(var(--s)*540); height:calc(var(--s)*46);
-  background:#8B1A1A;
-  border:2px solid #D4A574;
-  box-sizing:border-box;
-  display:flex; align-items:center;
-  padding:0 calc(var(--s)*12); gap:calc(var(--s)*8);
-  overflow:hidden;
-}
-.arrival-label{
-  font-size:calc(var(--s)*16); font-weight:700;
-  color:#FFD700; white-space:nowrap; flex-shrink:0;
-}
-.arrival-text{
-  font-size:calc(var(--s)*14); color:#FFCCCC;
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-}
 .boss-card-info{
   position:absolute;bottom:0;left:0;right:0;
   background:linear-gradient(0deg,rgba(0,0,0,.9) 0%,transparent 100%);
@@ -1652,7 +1120,34 @@ async function selectNewShikigami(shikigami: any) {
   border-radius:10px;padding:6px;
   display:flex;flex-direction:column;overflow:hidden;
 }
-/* yokai-grid/card 旧定义已删除，以上方新定义为准 */
+.yokai-grid{
+  display:grid;grid-template-columns:repeat(6,1fr);
+  grid-template-rows:1fr;gap:5px;
+  flex:1;min-height:0;
+}
+.yokai-card{
+  background:rgba(30,50,90,.5);
+  border:1px solid rgba(80,120,200,.2);
+  border-radius:8px;
+  cursor:pointer;
+  display:flex;flex-direction:column;justify-content:flex-end;
+  position:relative;overflow:hidden;align-self:stretch;
+  transition:all .18s;
+}
+.yokai-card:hover:not(.empty){
+  border-color:rgba(120,160,255,.6);
+  box-shadow:0 4px 16px rgba(80,120,255,.3);
+  transform:translateY(-2px);
+}
+.yokai-card.empty{
+  background:rgba(30,50,90,.15);
+  border-color:rgba(80,120,200,.08);
+  cursor:default;
+}
+.yokai-card.wounded{border-color:#ff6b6b;box-shadow:0 0 8px rgba(255,80,80,.3)}
+.yokai-card.canKill{border-color:#4CAF50;box-shadow:0 0 12px rgba(76,175,80,.7);animation:canKillPulse 1.2s infinite}
+.yokai-card.killed{border-color:#e91e63;box-shadow:0 0 10px rgba(233,30,99,.5)}
+.yokai-card.selecting{border-color:#ff9800;animation:pulse 1s infinite}
 
 /* 妖怪卡片底部信息条 */
 .yokai-info{

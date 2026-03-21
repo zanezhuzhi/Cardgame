@@ -13,35 +13,33 @@
 
     <!-- 游戏界面 -->
     <div v-else class="game-board">
-      <!-- 顶部：信息+玩家+LOGO -->
+      <!-- 顶部栏 (height:150px) -->
       <div class="top-row">
-        <div class="info-panel">
-          <div class="panel-title">交互信息提示</div>
-          <div class="log-area" ref="logRef">
-            <div v-for="(l,i) in logs" :key="i" class="log-line">{{l.message}}</div>
-          </div>
-        </div>
+        <!-- 回合数 -->
+        <div class="turn-display">第{{state?.turnNumber||1}}轮</div>
+        
+        <!-- 6个玩家信息 -->
         <div class="player-panel">
-          <div class="player-slot active">{{player?.name}}</div>
-          <div class="player-slot" v-for="i in 5" :key="i"></div>
+          <div class="player-info-slot" v-for="i in 6" :key="i">
+            <div class="player-avatar" :class="{active: i===1}">
+              <span v-if="i===1">{{player?.name?.charAt(0)||'P'}}</span>
+            </div>
+            <div class="player-stats">
+              <div class="mini-stat"><span>🃏</span>{{i===1 ? player?.hand?.length||0 : 0}}</div>
+              <div class="mini-stat"><span>👑</span>{{i===1 ? player?.totalCharm||0 : 0}}</div>
+            </div>
+          </div>
         </div>
+        
+        <!-- LOGO -->
         <div class="logo-panel">
-          <div class="logo">🎴 御魂传说</div>
-          <div class="stats">
-            <span>🔥{{player?.ghostFire||0}}/5</span>
-            <span>⚔️{{player?.damage||0}}</span>
-            <span>👑{{player?.totalCharm||0}}</span>
-            <span>R{{state?.turnNumber||0}}</span>
-          </div>
-          <!-- 临时Buff显示 -->
-          <div v-if="activeBuffs.length" class="buffs">
-            <div v-for="b in activeBuffs" :key="b.type" class="buff-tag">{{b.label}}</div>
-          </div>
+          <div class="logo">百鬼夜行</div>
         </div>
       </div>
 
-      <!-- 中间：鬼王+妖怪 -->
+      <!-- 中间：鬼王+妖怪+右侧信息 -->
       <div class="mid-row">
+        <!-- 鬼王区 -->
         <div class="boss-panel">
           <div class="panel-title">👹 鬼王区</div>
           <div v-if="boss" class="boss-card"
@@ -104,48 +102,75 @@
               </template>
             </div>
           </div>
-          <div class="action-bar">
-            <span class="deck-num">{{state?.field.yokaiDeck.length||0}}</span>
-            <button class="act-btn" @click="getSpell" :disabled="!canSpell">获得阴阳术</button>
-            <span class="exile-num">{{player?.exiled?.length||0}}</span>
-            <button class="act-btn" @click="showExiled=true">查看超度区</button>
+          <div class="yokai-label">游荡妖怪</div>
+        </div>
+        
+        <!-- 右侧信息区 -->
+        <div class="info-side-panel">
+          <div class="info-box">
+            <div v-for="(l,i) in logs.slice(-8)" :key="i" class="info-line">{{l.message}}</div>
+          </div>
+          <div class="action-buttons">
+            <button class="side-btn" @click="getSpell" :disabled="!canSpell">获得阴阳术</button>
+            <button class="side-btn" @click="openShikigamiModal" v-if="canAcquireShikigami || canReplaceShikigami">
+              {{ canAcquireShikigami ? '获得式神' : '置换式神' }}
+            </button>
+            <button class="side-btn" @click="showExiled=true">查看超度区</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- 中部个人信息区 (top:640px) -->
+      <div class="personal-info-row">
+        <div class="self-info">
+          <div class="avatar-box"></div>
+          <div class="stat-box">
+            <div class="stat-item"><span>👑</span><b>{{player?.totalCharm||0}}</b></div>
+            <div class="stat-item"><span>🃏</span><b>{{(player?.deck?.length||0)+(player?.hand?.length||0)+(player?.discard?.length||0)}}</b></div>
+          </div>
+        </div>
+        <div class="deck-discard-area">
+          <div class="pile-box deck-box">
+            <b>{{player?.deck?.length||0}}</b>
+            <span>牌库</span>
+          </div>
+          <div class="pile-box discard-box">
+            <b>{{player?.discard?.length||0}}</b>
+            <span>弃牌堆</span>
           </div>
         </div>
       </div>
 
-      <!-- 底部：式神+牌库+手牌+结束 -->
+      <!-- 底部：式神+手牌+结束 (top:800px) -->
       <div class="bot-row">
+        <!-- 式神区 -->
         <div class="shiki-panel">
-          <div class="panel-title">
-            🦊 式神区 ({{player?.shikigami?.length||0}}/3)
-            <button class="shiki-btn" 
-                    v-if="canAcquireShikigami || canReplaceShikigami"
-                    @click="openShikigamiModal">
-              {{ canAcquireShikigami ? '获取式神' : '置换式神' }}
-            </button>
-          </div>
+          <div class="shiki-label">式神</div>
           <div class="shiki-cards">
             <div v-for="(s,i) in player?.shikigami" :key="s.id" 
                  class="shiki-card" 
-                 :class="{tired:player?.shikigamiState[i]?.isExhausted, selecting: shikigamiModal.selectingOld}"
-                 @click="shikigamiModal.selectingOld ? selectOldShikigami(s.id) : useSkill(s.id)"
+                 :class="{tired:player?.shikigamiState[i]?.isExhausted}"
+                 @click="useSkill(s.id)"
                  @mouseenter="showShikigamiTooltip($event, s)"
                  @mouseleave="hideTooltip">
               <img v-if="getCardImage(s)" :src="getCardImage(s)" class="card-art shiki-art" />
               <div class="shiki-info">
                 <div class="s-name">{{s.name}}</div>
                 <div class="s-skill" v-if="s.skill">【启】{{s.skill.name}}(🔥{{s.skill.cost||0}})</div>
-                <div class="s-skill" v-else-if="s.passive">【被动】{{s.passive.name}}</div>
               </div>
             </div>
           </div>
+          <div class="ghost-fire-bar">
+            <div v-for="i in 5" :key="i" class="fire-slot" :class="{active: i <= (player?.ghostFire||0)}"></div>
+          </div>
         </div>
-        <div class="pile-panel">
-          <div class="pile deck"><span>牌库</span><b>{{player?.deck?.length||0}}</b></div>
-          <div class="pile disc"><span>弃牌</span><b>{{player?.discard?.length||0}}</b></div>
-        </div>
+        
+        <!-- 手牌区 -->
         <div class="hand-panel">
-          <div class="panel-title">🎯 手牌 *{{player?.hand?.length||0}}</div>
+          <div class="damage-display">
+            <span>⚔️</span><b>{{player?.damage||0}}</b>
+          </div>
+          <div class="hand-label">手牌</div>
           <div class="hand-cards">
             <div v-for="c in player?.hand" :key="c.instanceId" 
                  class="hand-card" 
@@ -393,6 +418,20 @@ onMounted(() => {
   document.addEventListener('dragstart', e => e.preventDefault())
   document.addEventListener('selectstart', e => e.preventDefault())
   document.addEventListener('contextmenu', e => e.preventDefault())
+  
+  // 禁用Ctrl+滚轮缩放
+  document.addEventListener('wheel', (e) => {
+    if (e.ctrlKey) {
+      e.preventDefault()
+    }
+  }, { passive: false })
+  
+  // 禁用键盘缩放快捷键 Ctrl+Plus/Minus/0
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && (e.key === '+' || e.key === '-' || e.key === '=' || e.key === '0')) {
+      e.preventDefault()
+    }
+  })
 })
 
 const playerName = ref('阴阳师')
@@ -944,99 +983,182 @@ async function selectNewShikigami(shikigami: any) {
 .tips{margin-top:20px;color:#666;font-size:13px}
 
 /* ══════════════════════════════════════════════
-   游戏主布局
+   游戏主布局 - 基于1920x1080设计稿
+   使用min(宽度比例, 高度比例)确保完全适配视口
 ══════════════════════════════════════════════ */
 .game-board{
-  display:flex;flex-direction:column;height:100vh;
-  padding:6px;gap:5px;overflow:hidden;
-  background:linear-gradient(160deg,#0d1117 0%,#111827 50%,#0f172a 100%);
+  /* 取宽高中较小的缩放比例，确保内容不超出视口 */
+  --sw: calc(100vw / 1920);  /* 基于宽度的缩放 */
+  --sh: calc(100vh / 1080);  /* 基于高度的缩放 */
+  --s: min(var(--sw), var(--sh));  /* 取较小值 */
+  
+  position:relative;
+  width:calc(var(--s) * 1920);
+  height:calc(var(--s) * 1080);
+  background:#1A1A2E;
   font-family:'Segoe UI',sans-serif;
+  overflow:hidden;
+  touch-action:pan-x pan-y;
+  user-select:none;
+  
+  /* 居中显示 */
+  margin:0 auto;
+}
+/* 禁止滚轮缩放 */
+.game-board *{
+  touch-action:manipulation;
 }
 
-/* ── 顶部栏 ── */
-.top-row{display:flex;gap:5px;height:84px;flex-shrink:0}
+/* ══════════════════════════════════════════════
+   顶部区域 - Figma精确坐标 (top: 0, height: 150px)
+══════════════════════════════════════════════ */
+.top-row{
+  position:absolute;
+  left:0;
+  top:0;
+  width:100%;
+  height:calc(var(--s) * 150);
+  background:#2D1F3D;
+  border:2px solid #D4A574;
+  box-sizing:border-box;
+  display:flex;
+  align-items:center;
+  padding:0 calc(var(--s) * 20);
+}
 
 .info-panel{
-  width:190px;
-  background:rgba(255,255,255,.04);
-  border:1px solid rgba(255,255,255,.08);
-  border-radius:8px;padding:6px;
-  display:flex;flex-direction:column;
-  backdrop-filter:blur(4px);
+  display:none; /* 暂时隐藏，后续移到右侧信息区 */
 }
 .panel-title{
-  font-size:10px;color:rgba(255,200,100,.7);
-  letter-spacing:.05em;margin-bottom:4px;
-  text-transform:uppercase;font-weight:600;
+  font-size:calc(var(--s) * 24);
+  color:#FFD700;
+  letter-spacing:.05em;
+  margin-bottom:calc(var(--s) * 8);
+  font-weight:600;
+  text-align:center;
 }
 .log-area{flex:1;overflow-y:auto;font-size:9px;line-height:1.5}
 .log-line{padding:2px 0;border-bottom:1px solid rgba(255,255,255,.05);color:#bbb}
 
-.player-panel{
-  flex:1;
-  background:rgba(255,255,255,.03);
-  border:1px solid rgba(255,255,255,.07);
-  border-radius:8px;padding:5px;
-  display:flex;gap:4px;
-}
-.player-slot{
-  flex:1;
-  background:rgba(100,120,180,.15);
-  border:1px solid rgba(100,120,180,.2);
-  border-radius:5px;
-  display:flex;align-items:center;justify-content:center;
-  font-size:10px;color:#aaa;
-}
-.player-slot.active{
-  background:rgba(102,126,234,.25);
-  border-color:rgba(102,126,234,.6);
-  color:#fff;font-weight:bold;
-  box-shadow:0 0 10px rgba(102,126,234,.3);
+/* 回合数显示 */
+.turn-display{
+  position:absolute;
+  left:calc(var(--s) * 52);
+  top:calc(var(--s) * 51);
+  font-size:calc(var(--s) * 42);
+  color:#FFD700;
+  font-weight:bold;
 }
 
-.logo-panel{
-  width:130px;
-  background:rgba(255,255,255,.04);
-  border:1px solid rgba(255,180,50,.2);
-  border-radius:8px;padding:6px;text-align:center;
+/* 玩家信息槽 - 6个玩家位 */
+.player-panel{
+  position:absolute;
+  left:calc(var(--s) * 180);
+  top:calc(var(--s) * 15);
+  display:flex;
+  gap:calc(var(--s) * 25);
 }
-.logo{font-size:13px;font-weight:bold;color:#f5c842;letter-spacing:.05em}
+.player-info-slot{
+  display:flex;
+  gap:calc(var(--s) * 5);
+}
+.player-avatar{
+  width:calc(var(--s) * 120);
+  height:calc(var(--s) * 120);
+  background:#D9D9D9;
+  display:flex;align-items:center;justify-content:center;
+  font-size:calc(var(--s) * 32);
+  color:#333;
+}
+.player-avatar.active{
+  border:2px solid #FFD700;
+  box-shadow:0 0 calc(var(--s) * 10) rgba(255,215,0,.5);
+}
+.player-stats{
+  display:flex;flex-direction:column;gap:0;
+}
+.mini-stat{
+  width:calc(var(--s) * 85);
+  height:calc(var(--s) * 60);
+  background:#151525;
+  border:1px solid #D4A574;
+  display:flex;align-items:center;justify-content:center;gap:calc(var(--s) * 5);
+  font-size:calc(var(--s) * 24);
+  color:#fff;
+}
+.mini-stat span{font-size:calc(var(--s) * 22)}
+
+/* LOGO面板 - 右侧 "百鬼夜行" */
+.logo-panel{
+  position:absolute;
+  right:calc(var(--s) * 20);
+  top:calc(var(--s) * 17);
+  text-align:center;
+}
+.logo{
+  font-size:calc(var(--s) * 64);
+  font-weight:bold;
+  color:#fff;
+  font-family:'Angkor',serif;
+  letter-spacing:calc(var(--s) * 4);
+}
 .stats{
-  margin-top:5px;display:flex;flex-wrap:wrap;
-  gap:4px;justify-content:center;font-size:10px;
+  margin-top:calc(var(--s) * 10);
+  display:flex;flex-wrap:wrap;
+  gap:calc(var(--s) * 8);
+  justify-content:center;
+  font-size:calc(var(--s) * 14);
 }
 .stats span{
-  background:rgba(0,0,0,.3);
-  padding:2px 5px;border-radius:4px;
-  border:1px solid rgba(255,255,255,.1);
+  background:#151525;
+  padding:calc(var(--s) * 4) calc(var(--s) * 8);
+  border-radius:calc(var(--s) * 4);
+  border:1px solid #D4A574;
 }
-.buffs{margin-top:4px;display:flex;flex-wrap:wrap;gap:3px;justify-content:center}
+.buffs{margin-top:calc(var(--s) * 6);display:flex;flex-wrap:wrap;gap:calc(var(--s) * 4);justify-content:center}
 .buff-tag{
   background:linear-gradient(135deg,#ff9800,#e65100);
-  padding:2px 5px;border-radius:3px;font-size:8px;
-  box-shadow:0 1px 4px rgba(255,152,0,.4);
+  padding:calc(var(--s) * 4) calc(var(--s) * 8);
+  border-radius:calc(var(--s) * 4);
+  font-size:calc(var(--s) * 12);
 }
 
-/* ── 中间：鬼王 + 妖怪区 ── */
-.mid-row{display:flex;gap:5px;flex:1;min-height:0;overflow:hidden}
+/* ══════════════════════════════════════════════
+   中部区域 - Figma精确坐标 (top: 150px, height: 650px)
+══════════════════════════════════════════════ */
+.mid-row{
+  position:absolute;
+  left:0;
+  top:calc(var(--s) * 150);
+  width:100%;
+  height:calc(var(--s) * 650);
+  box-sizing:border-box;
+  /* 不需要整体边框，各子区域有自己的边框 */
+}
 
+/* 鬼王区 - left:0, width:600px, height:490px */
 .boss-panel{
-  width:112px;
-  background:rgba(120,20,20,.2);
-  border:1px solid rgba(200,50,50,.35);
-  border-radius:10px;padding:6px;
+  position:absolute;
+  left:0;
+  top:0;
+  width:calc(var(--s) * 600);
+  height:calc(var(--s) * 490);
+  background:#151525;
+  border:2px solid #D4A574;
+  box-sizing:border-box;
   display:flex;flex-direction:column;align-items:center;
-  gap:4px;
+  padding:calc(var(--s) * 20);
 }
 .boss-card{
   background:linear-gradient(160deg,#3a0a0a,#1a0520);
-  border:1px solid rgba(220,50,80,.5);
-  border-radius:8px;padding:0;
+  border:2px solid #D4A574;
+  border-radius:calc(var(--s) * 8);
   text-align:center;cursor:pointer;
-  width:100%;aspect-ratio:2/3;
+  width:calc(var(--s) * 540);
+  height:calc(var(--s) * 380);
   position:relative;overflow:hidden;
   transition:all .2s;
-  box-shadow:0 4px 16px rgba(180,0,50,.3);
+  box-shadow:0 calc(var(--s) * 4) calc(var(--s) * 16) rgba(180,0,50,.3);
 }
 .boss-card:hover{
   transform:scale(1.03);
@@ -1113,26 +1235,173 @@ async function selectNewShikigami(shikigami: any) {
   border:1px solid rgba(255,255,255,.08);
 }
 
+/* 游荡妖怪区 - left:600px, width:750px */
 .yokai-panel{
-  flex:1;
-  background:rgba(20,30,60,.3);
-  border:1px solid rgba(80,120,200,.25);
-  border-radius:10px;padding:6px;
-  display:flex;flex-direction:column;overflow:hidden;
+  position:absolute;
+  left:calc(var(--s) * 600);
+  top:0;
+  width:calc(var(--s) * 750);
+  height:calc(var(--s) * 650);
+  background:#151525;
+  border:2px solid #D4A574;
+  box-sizing:border-box;
+  display:flex;flex-direction:column;
+  padding:calc(var(--s) * 15);
+  overflow:hidden;
 }
+
+/* 游荡妖怪标签 */
+.yokai-label{
+  position:absolute;
+  right:calc(var(--s) * -50);
+  top:50%;
+  transform:translateY(-50%);
+  writing-mode:vertical-rl;
+  font-size:calc(var(--s) * 36);
+  color:#FFD700;
+  letter-spacing:calc(var(--s) * 8);
+}
+
+/* 右侧信息区 - left:1350px, width:570px, height:650px (填满中部区域) */
+.info-side-panel{
+  position:absolute;
+  left:calc(var(--s) * 1350);
+  top:0;
+  width:calc(var(--s) * 570);
+  height:calc(var(--s) * 650);
+  background:#151525;
+  border:2px solid #D4A574;
+  box-sizing:border-box;
+  display:flex;flex-direction:column;
+  padding:calc(var(--s) * 10);
+  overflow:hidden;
+}
+.info-box{
+  flex:1;
+  background:#1A1A2E;
+  border:1px solid #D4A574;
+  padding:calc(var(--s) * 10);
+  overflow-y:auto;
+  overflow-x:hidden;
+  display:flex;flex-direction:column;gap:calc(var(--s) * 6);
+}
+.info-line{
+  background:#2D1F3D;
+  border:1px solid #D4A574;
+  padding:calc(var(--s) * 8) calc(var(--s) * 12);
+  font-size:calc(var(--s) * 20);
+  color:#fff;
+  min-height:calc(var(--s) * 48);
+  display:flex;align-items:center;
+  word-break:break-all;
+  line-height:1.4;
+  flex-shrink:0;
+}
+.action-buttons{
+  display:flex;
+  gap:calc(var(--s) * 20);
+  padding:calc(var(--s) * 15) 0;
+  justify-content:center;
+  margin-top:auto;
+}
+.side-btn{
+  width:calc(var(--s) * 150);
+  height:calc(var(--s) * 100);
+  background:#1A1A2E;
+  border:2px solid #D4A574;
+  color:#fff;
+  font-size:calc(var(--s) * 22);
+  cursor:pointer;
+  transition:all .2s;
+  border-radius:calc(var(--s) * 4);
+}
+.side-btn:hover:not(:disabled){background:#2D1F3D}
+.side-btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* ══════════════════════════════════════════════
+   个人信息区 - top:640px, height:160px
+══════════════════════════════════════════════ */
+.personal-info-row{
+  position:absolute;
+  left:0;
+  top:calc(var(--s) * 640);
+  width:calc(var(--s) * 600);
+  height:calc(var(--s) * 160);
+  display:flex;
+}
+.self-info{
+  width:calc(var(--s) * 245);
+  height:100%;
+  background:#151525;
+  border:2px solid #D4A574;
+  box-sizing:border-box;
+  display:flex;
+  padding:calc(var(--s) * 10);
+  gap:calc(var(--s) * 10);
+}
+.avatar-box{
+  width:calc(var(--s) * 120);
+  height:calc(var(--s) * 120);
+  border:1px solid #D4A574;
+  background:#1A1A2E;
+}
+.stat-box{
+  flex:1;
+  display:flex;flex-direction:column;gap:calc(var(--s) * 5);
+}
+.stat-item{
+  background:#151525;
+  border:1px solid #D4A574;
+  padding:calc(var(--s) * 8);
+  display:flex;align-items:center;gap:calc(var(--s) * 8);
+  font-size:calc(var(--s) * 20);
+}
+.stat-item span{font-size:calc(var(--s) * 24)}
+.stat-item b{color:#fff}
+
+.deck-discard-area{
+  width:calc(var(--s) * 360);
+  height:100%;
+  background:#151525;
+  border:2px solid #D4A574;
+  box-sizing:border-box;
+  display:flex;
+  gap:calc(var(--s) * 20);
+  padding:calc(var(--s) * 18);
+  justify-content:center;
+}
+.pile-box{
+  width:calc(var(--s) * 150);
+  height:calc(var(--s) * 120);
+  background:#1A1A2E;
+  border:2px solid #D4A574;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+}
+.pile-box b{font-size:calc(var(--s) * 40);color:#fff}
+.pile-box span{font-size:calc(var(--s) * 24);color:#aaa}
+
+/* 3列x2行 妖怪网格 */
 .yokai-grid{
-  display:grid;grid-template-columns:repeat(6,1fr);
-  grid-template-rows:1fr;gap:5px;
-  flex:1;min-height:0;
+  display:grid;
+  grid-template-columns:repeat(3, calc(var(--s) * 180));
+  grid-template-rows:repeat(2, calc(var(--s) * 250));
+  gap:calc(var(--s) * 15);
+  justify-content:center;
+  align-content:center;
+  flex:1;
 }
 .yokai-card{
-  background:rgba(30,50,90,.5);
-  border:1px solid rgba(80,120,200,.2);
-  border-radius:8px;
+  width:calc(var(--s) * 180);
+  height:calc(var(--s) * 250);
+  background:#1A1A2E;
+  border:1px solid #D4A574;
+  border-radius:calc(var(--s) * 4);
   cursor:pointer;
   display:flex;flex-direction:column;justify-content:flex-end;
-  position:relative;overflow:hidden;align-self:stretch;
+  position:relative;overflow:hidden;
   transition:all .18s;
+  box-sizing:border-box;
 }
 .yokai-card:hover:not(.empty){
   border-color:rgba(120,160,255,.6);
@@ -1153,24 +1422,30 @@ async function selectNewShikigami(shikigami: any) {
 .yokai-info{
   position:relative;z-index:1;
   background:linear-gradient(0deg,rgba(0,0,0,.88) 0%,rgba(0,0,0,.4) 70%,transparent 100%);
-  padding:14px 5px 5px;
+  padding:calc(var(--s) * 18) calc(var(--s) * 8) calc(var(--s) * 8);
 }
 .y-name{
-  font-size:10px;font-weight:700;
+  font-size:calc(var(--s) * 16);
+  font-weight:700;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   color:#f0e6d3;text-shadow:0 1px 4px rgba(0,0,0,.8);
+  text-align:center;
 }
 .y-stat{
-  font-size:9px;color:#ccc;margin-top:2px;
-  display:flex;gap:4px;justify-content:center;
+  font-size:calc(var(--s) * 14);
+  color:#ccc;
+  margin-top:calc(var(--s) * 4);
+  display:flex;gap:calc(var(--s) * 8);justify-content:center;
 }
 .hp-damaged{color:#ff6b6b;font-weight:bold}
 .killed-badge{
   position:absolute;top:50%;left:50%;
   transform:translate(-50%,-50%);
   background:rgba(0,0,0,.9);
-  padding:4px 10px;border-radius:5px;
-  font-size:10px;color:#e91e63;
+  padding:calc(var(--s) * 8) calc(var(--s) * 16);
+  border-radius:calc(var(--s) * 6);
+  font-size:calc(var(--s) * 16);
+  color:#e91e63;
   white-space:nowrap;font-weight:bold;
   border:1px solid rgba(233,30,99,.5);
   z-index:2;
@@ -1206,31 +1481,79 @@ async function selectNewShikigami(shikigami: any) {
 }
 .act-btn:disabled{opacity:.35;cursor:not-allowed}
 
-/* ── 底部：式神 + 牌库 + 手牌 + 结束 ── */
-.bot-row{display:flex;gap:5px;height:148px;flex-shrink:0}
-
-.shiki-panel{
-  width:165px;
-  background:rgba(60,30,10,.3);
-  border:1px solid rgba(180,120,50,.3);
-  border-radius:10px;padding:5px;overflow:hidden;
-  display:flex;flex-direction:column;
+/* ══════════════════════════════════════════════
+   底部区域 - Figma精确坐标 (top: 800px)
+══════════════════════════════════════════════ */
+.bot-row{
+  position:absolute;
+  left:0;
+  top:calc(var(--s) * 800);
+  width:100%;
+  height:calc(var(--s) * 280);
+  display:flex;
+  z-index:10;
 }
-.shiki-cards{display:flex;gap:4px;flex:1;min-height:0}
+
+/* 式神区 - left:0, width:450px */
+.shiki-panel{
+  position:absolute;
+  left:0;
+  top:0;
+  width:calc(var(--s) * 450);
+  height:calc(var(--s) * 280);
+  background:#151525;
+  border:2px solid #D4A574;
+  box-sizing:border-box;
+  display:flex;flex-direction:column;
+  padding:calc(var(--s) * 10);
+  align-items:center;
+}
+.shiki-label{
+  position:absolute;
+  top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  font-size:calc(var(--s) * 42);
+  color:#FFD700;
+  pointer-events:none;
+  opacity:.3;
+}
+.shiki-cards{
+  display:flex;
+  gap:calc(var(--s) * 10);
+  padding:calc(var(--s) * 10);
+}
+.ghost-fire-bar{
+  display:flex;
+  gap:calc(var(--s) * 5);
+  margin-top:auto;
+  padding-bottom:calc(var(--s) * 10);
+}
+.fire-slot{
+  width:calc(var(--s) * 40);
+  height:calc(var(--s) * 40);
+  background:#333;
+  border-radius:50%;
+  border:1px solid #D4A574;
+}
+.fire-slot.active{
+  background:linear-gradient(135deg,#ff6b35,#f7931e);
+  box-shadow:0 0 calc(var(--s) * 10) rgba(255,107,53,.6);
+}
 .shiki-card{
-  flex:1;
-  background:rgba(80,50,20,.4);
-  border:1px solid rgba(180,130,60,.2);
-  border-radius:7px;
+  width:calc(var(--s) * 135);
+  height:calc(var(--s) * 192);
+  background:#1A1A2E;
+  border:1px solid #D4A574;
+  border-radius:calc(var(--s) * 4);
   cursor:pointer;
   display:flex;flex-direction:column;justify-content:flex-end;
   position:relative;overflow:hidden;
   transition:all .18s;
 }
 .shiki-card:hover:not(.tired){
-  border-color:rgba(255,180,80,.5);
-  box-shadow:0 3px 12px rgba(200,140,50,.3);
-  transform:translateY(-2px);
+  border-color:#FFD700;
+  box-shadow:0 0 calc(var(--s) * 12) rgba(255,215,0,.4);
+  transform:translateY(calc(var(--s) * -4));
 }
 .shiki-card.tired{opacity:.35;filter:grayscale(.8)}
 
@@ -1238,42 +1561,100 @@ async function selectNewShikigami(shikigami: any) {
 .shiki-info{
   position:relative;z-index:1;
   background:linear-gradient(0deg,rgba(0,0,0,.9) 0%,rgba(0,0,0,.4) 70%,transparent 100%);
-  padding:12px 4px 4px;
+  padding:calc(var(--s) * 14) calc(var(--s) * 6) calc(var(--s) * 6);
 }
-.s-name{font-size:9px;font-weight:700;color:#f5e0c0;text-shadow:0 1px 3px rgba(0,0,0,.8)}
-.s-skill{font-size:8px;color:#c8a96e;margin-top:2px;line-height:1.3}
+.s-name{
+  font-size:calc(var(--s) * 14);
+  font-weight:700;
+  color:#f5e0c0;
+  text-shadow:0 1px 3px rgba(0,0,0,.8);
+  text-align:center;
+}
+.s-skill{
+  font-size:calc(var(--s) * 11);
+  color:#c8a96e;
+  margin-top:calc(var(--s) * 3);
+  line-height:1.3;
+  text-align:center;
+}
 
-.pile-panel{width:48px;display:flex;flex-direction:column;gap:3px}
+/* 牌库面板 - 移入式神区内部 */
+.pile-panel{
+  position:absolute;
+  right:calc(var(--s) * 10);
+  bottom:calc(var(--s) * 10);
+  display:flex;flex-direction:column;gap:calc(var(--s) * 5);
+}
 .pile{
-  flex:1;
-  background:rgba(255,255,255,.04);
-  border:1px solid rgba(255,255,255,.08);
-  border-radius:6px;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  width:calc(var(--s) * 80);
+  height:calc(var(--s) * 50);
+  background:#151525;
+  border:1px solid #D4A574;
+  border-radius:4px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
 }
-.pile span{font-size:8px;color:#777;text-transform:uppercase;letter-spacing:.05em}
-.pile b{font-size:16px;color:#ccc;font-weight:600}
+.pile span{font-size:calc(var(--s) * 14);color:#aaa}
+.pile b{font-size:calc(var(--s) * 20);color:#fff;font-weight:600}
 
+/* 手牌区 - left:450px, width:1175px */
 .hand-panel{
-  flex:1;
-  background:rgba(10,40,20,.3);
-  border:1px solid rgba(50,150,80,.25);
-  border-radius:10px;padding:5px;overflow:hidden;
+  position:absolute;
+  left:calc(var(--s) * 450);
+  top:0;
+  width:calc(var(--s) * 1175);
+  height:calc(var(--s) * 280);
+  background:#2D1F3D;
+  border:2px solid #D4A574;
+  box-sizing:border-box;
+  padding:calc(var(--s) * 10);
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
 }
-.hand-cards{display:flex;gap:5px;overflow-x:auto;height:100%;align-items:stretch;padding-bottom:2px}
+.damage-display{
+  position:absolute;
+  left:calc(var(--s) * 10);
+  top:calc(var(--s) * 10);
+  width:calc(var(--s) * 100);
+  height:calc(var(--s) * 70);
+  background:#151525;
+  border:1px solid #D4A574;
+  display:flex;align-items:center;justify-content:center;gap:calc(var(--s) * 8);
+  font-size:calc(var(--s) * 28);
+}
+.damage-display b{color:#fff;font-size:calc(var(--s) * 32)}
+.hand-label{
+  position:absolute;
+  top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  font-size:calc(var(--s) * 42);
+  color:#FFD700;
+  pointer-events:none;
+  opacity:0.3;
+}
+.hand-cards{
+  display:flex;
+  gap:calc(var(--s) * 10);
+  overflow-x:auto;
+  flex:1;
+  align-items:center;
+  justify-content:center;
+  padding:calc(var(--s) * 10);
+}
 .hand-cards::-webkit-scrollbar{height:3px}
 .hand-cards::-webkit-scrollbar-track{background:transparent}
 .hand-cards::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:2px}
 
 .hand-card{
-  min-width:70px;max-width:80px;
-  border-radius:8px;padding:0;
+  width:calc(var(--s) * 100);
+  height:calc(var(--s) * 140);
+  border-radius:calc(var(--s) * 6);
   text-align:center;cursor:pointer;flex-shrink:0;
   transition:all .18s;
   display:flex;flex-direction:column;justify-content:flex-end;
-  height:100%;position:relative;overflow:hidden;
-  border:1px solid rgba(255,255,255,.15);
-  box-shadow:0 2px 8px rgba(0,0,0,.4);
+  position:relative;overflow:hidden;
+  border:1px solid #D4A574;
+  box-shadow:0 calc(var(--s) * 2) calc(var(--s) * 8) rgba(0,0,0,.4);
 }
 .hand-card:hover:not(.unplayable){
   transform:translateY(-6px);
@@ -1294,31 +1675,53 @@ async function selectNewShikigami(shikigami: any) {
 .card-info{
   position:relative;z-index:1;
   background:linear-gradient(0deg,rgba(0,0,0,.92) 0%,rgba(0,0,0,.5) 70%,transparent 100%);
-  padding:14px 5px 5px;
+  padding:calc(var(--s) * 16) calc(var(--s) * 6) calc(var(--s) * 6);
 }
-.c-name{font-size:9px;font-weight:700;color:#f0e6d3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.c-stat{font-size:10px;color:#ddd;margin-top:2px}
+.c-name{
+  font-size:calc(var(--s) * 14);
+  font-weight:700;
+  color:#f0e6d3;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  text-align:center;
+}
+.c-stat{
+  font-size:calc(var(--s) * 14);
+  color:#ddd;
+  margin-top:calc(var(--s) * 3);
+  text-align:center;
+}
 
+/* 回合结束区 - left:1625px, width:295px */
 .end-panel{
-  width:72px;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
+  position:absolute;
+  left:calc(var(--s) * 1625);
+  top:0;
+  width:calc(var(--s) * 295);
+  height:calc(var(--s) * 280);
+  background:#2D1F3D;
+  border:2px solid #D4A574;
+  box-sizing:border-box;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:calc(var(--s) * 10);
 }
 .end-btn{
-  width:100%;padding:10px 4px;
-  background:linear-gradient(135deg,#c2185b,#880e4f);
-  border:1px solid rgba(220,50,100,.5);
-  border-radius:7px;color:#fff;font-size:10px;
-  cursor:pointer;font-weight:bold;letter-spacing:.05em;
-  box-shadow:0 3px 12px rgba(180,0,60,.4);
+  width:calc(var(--s) * 221);
+  height:calc(var(--s) * 198);
+  background:#539D9D;
+  border:2px solid #D4A574;
+  border-radius:calc(var(--s) * 8);
+  color:#fff;
+  font-size:calc(var(--s) * 32);
+  cursor:pointer;font-weight:bold;
   transition:all .18s;
 }
 .end-btn:hover:not(:disabled){
-  background:linear-gradient(135deg,#e91e63,#ad1457);
-  box-shadow:0 5px 20px rgba(220,50,100,.6);
-  transform:translateY(-1px);
+  background:#5DB5B5;
+  box-shadow:0 0 calc(var(--s) * 20) rgba(83,157,157,.6);
 }
-.end-btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
-.phase{font-size:10px;color:#777;text-align:center;letter-spacing:.03em}
+.end-btn:disabled{opacity:.4;cursor:not-allowed}
+.phase{font-size:calc(var(--s) * 16);color:#aaa;text-align:center}
 
 /* 弹窗 - 适配1024x768 */
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:100}
@@ -1414,12 +1817,12 @@ async function selectNewShikigami(shikigami: any) {
   position:fixed;
   z-index:9999;
   background:linear-gradient(135deg,#2d2d44 0%,#1a1a2e 100%);
-  border:2px solid rgba(255,255,255,.2);
-  border-radius:8px;
-  padding:10px 12px;
-  min-width:180px;
-  max-width:240px;
-  box-shadow:0 6px 24px rgba(0,0,0,.5);
+  border:2px solid #D4A574;
+  border-radius:12px;
+  padding:16px 20px;
+  min-width:280px;
+  max-width:360px;
+  box-shadow:0 8px 32px rgba(0,0,0,.6);
   pointer-events:none;
   animation:tooltipIn .12s ease-out;
   font-family:'Microsoft YaHei',sans-serif;
@@ -1435,20 +1838,20 @@ async function selectNewShikigami(shikigami: any) {
   display:flex;
   justify-content:space-between;
   align-items:center;
-  margin-bottom:6px;
-  padding-bottom:6px;
-  border-bottom:1px solid rgba(255,255,255,.1);
+  margin-bottom:10px;
+  padding-bottom:10px;
+  border-bottom:1px solid rgba(255,255,255,.2);
 }
 
 .tooltip-name{
-  font-size:13px;
+  font-size:18px;
   font-weight:bold;
 }
 
 .tooltip-type{
-  font-size:9px;
-  padding:2px 6px;
-  border-radius:3px;
+  font-size:12px;
+  padding:4px 10px;
+  border-radius:4px;
   background:rgba(100,100,100,.5);
 }
 
@@ -1487,39 +1890,39 @@ async function selectNewShikigami(shikigami: any) {
 
 .tooltip-stats{
   display:flex;
-  gap:8px;
-  margin-bottom:6px;
+  gap:12px;
+  margin-bottom:10px;
 }
 
 .stat-item{
-  font-size:11px;
+  font-size:14px;
   background:rgba(255,255,255,.1);
-  padding:3px 7px;
-  border-radius:3px;
+  padding:5px 10px;
+  border-radius:4px;
 }
 
 .tooltip-subtype{
-  font-size:10px;
+  font-size:13px;
   color:#aaa;
-  margin-bottom:5px;
+  margin-bottom:8px;
   font-style:italic;
 }
 
 .tooltip-effect{
-  font-size:11px;
-  line-height:1.4;
+  font-size:14px;
+  line-height:1.5;
   color:#e0e0e0;
-  padding:7px;
+  padding:10px;
   background:rgba(0,0,0,.2);
-  border-radius:4px;
-  border-left:2px solid #667eea;
+  border-radius:6px;
+  border-left:3px solid #667eea;
 }
 
 .tooltip-passive,.tooltip-skill{
-  margin-top:6px;
-  padding:7px;
+  margin-top:10px;
+  padding:10px;
   background:rgba(0,0,0,.2);
-  border-radius:4px;
+  border-radius:6px;
 }
 
 .tooltip-passive{
@@ -1532,9 +1935,9 @@ async function selectNewShikigami(shikigami: any) {
 
 .passive-label,.skill-label{
   display:block;
-  font-size:10px;
+  font-size:13px;
   font-weight:bold;
-  margin-bottom:3px;
+  margin-bottom:5px;
 }
 
 .passive-label{color:#4CAF50}
@@ -1542,8 +1945,8 @@ async function selectNewShikigami(shikigami: any) {
 
 .tooltip-passive p,.tooltip-skill p{
   margin:0;
-  font-size:10px;
+  font-size:13px;
   color:#ccc;
-  line-height:1.3;
+  line-height:1.4;
 }
 </style>

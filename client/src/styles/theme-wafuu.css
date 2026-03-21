@@ -68,7 +68,7 @@ img, a {
   color: #fff;
   font-family: 'Microsoft YaHei', 'Hiragino Sans GB', sans-serif;
   position: relative;
-  overflow: hidden;
+  /* overflow:hidden 移除，避免裁剪大厅弹窗 */
 }
 
 /* 背景装饰 - 鸟居剪影 */

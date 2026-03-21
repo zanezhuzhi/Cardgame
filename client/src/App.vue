@@ -365,23 +365,27 @@ import type { CardInstance } from '../../shared/types/cards'
 // ── 卡牌图片路径映射 ──────────────────────────────────────
 // id格式：boss_001 → 101.webp, yokai_001 → 201.webp, shikigami_001 → 401.webp
 // spell_001 → 601.webp, penalty_001 → 701.webp
-const ID_OFFSET: Record<string, number> = {
-  boss: 100, yokai: 200, shikigami: 400, spell: 600, penalty: 700
-}
+// 图片编号规则（按 妖怪卡.md 文档顺序）：
+//   201 = 招福达摩(token_001)
+//   202 = 赤舌(yokai_001), 203 = 唐纸伞妖(yokai_002) ... 239 = 三味(yokai_038)
+//   101-110 = 鬼王, 401-424 = 式神, 601-603 = 阴阳术, 701-702 = 恶评
 function getCardImage(card: CardInstance | any): string {
-  // CardInstance 用 cardId，原始卡牌数据用 id
   const rawId = card?.cardId || card?.id
   if (!rawId) return ''
   const m = String(rawId).match(/^(\w+)_(\d+)$/)
   if (!m) return ''
   const [, type, num] = m
-  const offset = ID_OFFSET[type]
-  if (offset === undefined) return ''
-  const numId = offset + parseInt(num)
-  const dir: Record<string, string> = {
-    boss: 'bosses', yokai: 'yokai', shikigami: 'shikigami', spell: 'spells', penalty: 'curses'
-  }
-  return `/images/${dir[type]}/${numId}.webp`
+  const n = parseInt(num)
+
+  let path = ''
+  if (type === 'token')     path = `/images/yokai/${200 + n}.webp`          // token_001 → 201
+  else if (type === 'yokai')     path = `/images/yokai/${201 + n}.webp`     // yokai_001 → 202
+  else if (type === 'boss')      path = `/images/bosses/${100 + n}.webp`    // boss_001 → 101
+  else if (type === 'shikigami') path = `/images/shikigami/${400 + n}.webp` // shikigami_001 → 401
+  else if (type === 'spell')     path = `/images/spells/${600 + n}.webp`    // spell_001 → 601
+  else if (type === 'penalty')   path = `/images/curses/${700 + n}.webp`    // penalty_001 → 701
+
+  return path
 }
 
 // 禁用全局拖拽默认行为，防止长按出现多选框/图片拖走

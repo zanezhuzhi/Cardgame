@@ -891,9 +891,13 @@ export class SinglePlayerGame {
     
     this.addLog(`⚔️ 对鬼王【${boss.name}】造成 ${damage} 点伤害（剩余:${this.state.field.bossCurrentHp}）`);
     
-    // 检查鬼王是否被击败
+    // 检查鬼王是否被击败 → 异步弹出退治/超度选择
     if (this.state.field.bossCurrentHp <= 0) {
-      this.defeatBoss();
+      this.state.field.bossCurrentHp = 0;
+      this.state.turnPhase = 'bossDefeated' as any; // 锁定操作，等待选择
+      this.notifyChange();
+      this.promptBossDefeat();   // 异步，不阻塞
+      return true;
     }
     
     this.notifyChange();
@@ -969,21 +973,101 @@ export class SinglePlayerGame {
     this.addLog(`✨ 退治了【${yokai.name}】！声誉+${yokai.charm || 0}`);
   }
 
-  private defeatBoss(): void {
+  /** 鬼王HP归零后，弹出退治/超度选择 */
+  private async promptBossDefeat(): Promise<void> {
+    const boss = this.state.field.currentBoss;
+    if (!boss) return;
+
+    // 部分鬼王有退治特殊效果提示
+    const retireLabel = boss.retireEffect
+      ? `退治【${boss.name}】（⚠️ ${boss.retireEffect}）`
+      : `退治【${boss.name}】（进入弃牌堆，可作为御魂使用）`;
+    const transcendLabel = `超度【${boss.name}】（移出游戏，获得声誉+${boss.charm || 0}）`;
+
+    const choice = this.onChoiceRequired
+      ? await this.onChoiceRequired([retireLabel, transcendLabel])
+      : 1; // 无UI时默认超度
+
+    if (choice === 0) {
+      await this.retireBoss();
+    } else {
+      await this.transcendBoss();
+    }
+
+    // 解锁操作
+    this.state.turnPhase = 'action';
+    this.notifyChange();
+  }
+
+  /** 退治鬼王：进弃牌堆 + 触发特殊退治效果 */
+  private async retireBoss(): Promise<void> {
     const player = this.getPlayer();
     const boss = this.state.field.currentBoss;
     if (!boss) return;
 
-    // 鬼王进入弃牌堆
     const bossInstance = this.createCardInstance(boss, 'boss');
-    player.discard.push(bossInstance);
-    
+
+    // 鲤鱼精被动：首次退治可放牌库顶
+    const hasKoifish = player.shikigami.some(s => s.name === '鲤鱼精');
+    const bubbleUsed = player.tempBuffs.some(b => (b as any).source === '泡泡之盾');
+    if (hasKoifish && !bubbleUsed && this.onChoiceRequired) {
+      const c = await this.onChoiceRequired([
+        `将【${boss.name}】放到牌库顶（泡泡之盾）`,
+        `将【${boss.name}】放入弃牌堆`
+      ]);
+      if (c === 0) {
+        player.deck.push(bossInstance);
+        player.tempBuffs.push({ type: 'BUBBLE_SHIELD_USED' as any, value: 0, duration: 1, source: '泡泡之盾' } as any);
+        this.addLog(`🛡️ 泡泡之盾：【${boss.name}】放到牌库顶`);
+      } else {
+        player.discard.push(bossInstance);
+      }
+    } else {
+      player.discard.push(bossInstance);
+    }
+
+    // 地震鲶特殊退治效果：弃置阴阳师下的牌
+    if (boss.name === '地震鲶') {
+      const hidden = (player as any).hiddenCards as CardInstance[] | undefined;
+      if (hidden && hidden.length > 0) {
+        this.addLog(`🌊 地震鲶退治效果：弃置阴阳师下的 ${hidden.length} 张牌`);
+        player.discard.push(...hidden);
+        (player as any).hiddenCards = [];
+      }
+    }
+
     player.totalCharm += boss.charm || 0;
-    
-    this.addLog(`� 击败鬼王【${boss.name}】！声誉+${boss.charm || 0}`);
-    
+    this.addLog(`⛩️ 退治鬼王【${boss.name}】！声誉+${boss.charm || 0}，御魂进入弃牌堆`);
+
     this.state.field.currentBoss = null;
     this.state.field.bossCurrentHp = 0;
+    this.revealNextBoss();
+  }
+
+  /** 超度鬼王：移出游戏，获得声誉 */
+  private async transcendBoss(): Promise<void> {
+    const player = this.getPlayer();
+    const boss = this.state.field.currentBoss;
+    if (!boss) return;
+
+    player.totalCharm += boss.charm || 0;
+    this.addLog(`✨ 超度鬼王【${boss.name}】！声誉+${boss.charm || 0}，移出游戏`);
+
+    this.state.field.currentBoss = null;
+    this.state.field.bossCurrentHp = 0;
+    this.revealNextBoss();
+  }
+
+  /** 翻出下一只鬼王（或判断游戏结束） */
+  private revealNextBoss(): void {
+    if (this.state.field.bossDeck.length > 0) {
+      this.revealBoss();
+    } else {
+      this.addLog(`🎉 所有鬼王已被击败！游戏即将结算...`);
+      if (this.checkGameEnd()) {
+        this.endGame();
+      }
+    }
   }
 
   /** 结束回合 */

@@ -44,16 +44,34 @@
       <div class="mid-row">
         <div class="boss-panel">
           <div class="panel-title">👹 鬼王区</div>
-          <div v-if="boss" class="boss-card" @click="hitBoss"
+          <div v-if="boss" class="boss-card"
+               :class="{
+                 'boss-attackable': canAttackBoss,
+                 'boss-defeated': isBossDefeated,
+                 'boss-hint': allYokaiCleared && !isBossDefeated && state?.turnPhase === 'action'
+               }"
+               @click="hitBoss"
                @mouseenter="showBossTooltip($event, boss)"
                @mouseleave="hideTooltip">
             <img v-if="getCardImage(boss)" :src="getCardImage(boss)" class="card-art boss-art" />
+            <!-- 可攻击时的引导覆盖层 -->
+            <div v-if="canAttackBoss" class="boss-attack-overlay">
+              ⚔️ 点击攻击<br/>
+              <span class="boss-dmg-preview">{{ player?.damage }} 伤害</span>
+            </div>
+            <!-- 等待退治/超度选择时 -->
+            <div v-if="isBossDefeated" class="boss-defeated-overlay">💀 已击败<br/>请选择...</div>
             <div class="boss-card-info">
               <div class="boss-stage">Ⅰ</div>
               <div class="boss-name">{{boss.name}}</div>
               <div class="boss-hp">❤️{{state?.field.bossCurrentHp}}/{{boss.hp}}</div>
               <div class="boss-charm">👑+{{boss.charm||0}}</div>
             </div>
+          </div>
+          <!-- 妖怪全清但伤害不足时的提示 -->
+          <div v-if="allYokaiCleared && state?.turnPhase === 'action' && !canAttackBoss && boss"
+               class="boss-no-dmg-hint">
+            妖怪已清！<br/>积累伤害后攻击鬼王
           </div>
           <div v-else class="boss-empty">全部击败</div>
           <div class="boss-remain">剩余:{{state?.field.bossDeck.length||0}}</div>
@@ -795,7 +813,27 @@ function canDamage(y: CardInstance): boolean {
   // 玩家有伤害且妖怪未被击杀
   return (player.value?.damage || 0) > 0 && !isKilled(y)
 }
-function hitBoss() { const d = player.value?.damage||0; if(d>0) game?.attackBoss(d) }
+// 妖怪区是否全部清空（可攻击鬼王）
+const allYokaiCleared = computed(() =>
+  state.value?.field.yokaiSlots.every(s => s === null) ?? false
+)
+// 是否处于鬼王被击败等待选择状态
+const isBossDefeated = computed(() =>
+  (state.value?.turnPhase as any) === 'bossDefeated'
+)
+// 鬼王是否可以被攻击
+const canAttackBoss = computed(() => {
+  const p = player.value
+  return state.value?.turnPhase === 'action'
+    && !!state.value?.field.currentBoss
+    && (p?.damage ?? 0) > 0
+})
+
+function hitBoss() {
+  if (!canAttackBoss.value) return
+  const d = player.value?.damage || 0
+  if (d > 0) game?.attackBoss(d)
+}
 function useSkill(id: string) { game?.useShikigamiSkill(id) }
 function getSpell() { game?.gainBasicSpell() }
 function endTurn() { game?.endTurn() }
@@ -1000,6 +1038,59 @@ async function selectNewShikigami(shikigami: any) {
   transform:scale(1.03);
   box-shadow:0 6px 24px rgba(220,50,80,.5);
   border-color:rgba(220,50,80,.8);
+}
+/* 可攻击状态 */
+.boss-card.boss-attackable{
+  border-color:rgba(255,80,80,.9);
+  box-shadow:0 0 20px rgba(255,50,50,.7);
+  animation:bossAttackPulse 1s infinite;
+  cursor:pointer;
+}
+/* 妖怪全清提示状态 */
+.boss-card.boss-hint{
+  border-color:rgba(255,200,50,.6);
+  box-shadow:0 0 12px rgba(255,200,50,.4);
+}
+/* 已击败等待选择 */
+.boss-card.boss-defeated{
+  border-color:rgba(150,150,150,.5);
+  filter:grayscale(.4);
+  cursor:default;
+}
+@keyframes bossAttackPulse{
+  0%,100%{box-shadow:0 0 12px rgba(255,50,50,.5)}
+  50%{box-shadow:0 0 28px rgba(255,50,50,.9)}
+}
+/* 攻击引导覆盖层 */
+.boss-attack-overlay{
+  position:absolute;inset:0;z-index:2;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:rgba(180,0,0,.55);
+  font-size:12px;font-weight:bold;color:#fff;
+  text-shadow:0 1px 4px rgba(0,0,0,.8);
+  border-radius:inherit;
+  pointer-events:none;
+}
+.boss-dmg-preview{
+  font-size:18px;color:#ffcc00;
+  text-shadow:0 0 8px rgba(255,200,0,.8);
+}
+/* 已击败覆盖层 */
+.boss-defeated-overlay{
+  position:absolute;inset:0;z-index:2;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.65);
+  font-size:11px;color:#aaa;
+  border-radius:inherit;pointer-events:none;
+}
+/* 伤害不足时的提示 */
+.boss-no-dmg-hint{
+  margin-top:6px;
+  font-size:9px;color:#ffcc66;
+  text-align:center;
+  line-height:1.4;
+  background:rgba(0,0,0,.3);
+  border-radius:4px;padding:3px 6px;
 }
 .boss-card-info{
   position:absolute;bottom:0;left:0;right:0;

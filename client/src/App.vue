@@ -386,32 +386,43 @@
             </div>
           </div>
 
-          <!-- 步骤3：选择新式神（复用4选2样式） -->
-          <div v-else-if="shikigamiModal.step === 3" class="shikigami-step shikigami-select-step">
-            <p class="step-hint">从下列{{ shikigamiModal.candidates.length }}个式神中选择1个</p>
-            <div class="shikigami-options-inline">
-              <div v-for="s in shikigamiModal.candidates" :key="s.id"
-                   class="shikigami-option-inline"
-                   :class="{ selected: shikigamiModal.selectedNewId === s.id }"
-                   @click="shikigamiModal.selectedNewId = s.id"
-                   @mouseenter="showSelectShikigamiTooltip($event, s)"
-                   @mouseleave="hideTooltip">
-                <div class="shikigami-card-inner">
-                  <img v-if="getCardImage(s)" :src="getCardImage(s)" class="shikigami-art-inline" />
-                  <div class="shikigami-overlay">
-                    <div class="shikigami-name">{{ s.name }}</div>
-                    <div class="shikigami-rarity" :class="'rarity-' + s.rarity?.toLowerCase()">{{ s.rarity }}</div>
-                  </div>
+          <!-- 步骤3：独立的式神选择界面 -->
+          <template v-else-if="shikigamiModal.step === 3">
+            <!-- 关闭原有modal-box，使用独立全屏界面 -->
+          </template>
+        </div>
+      </div>
+
+      <!-- 步骤3：独立的式神选择界面（不使用modal-box） -->
+      <div class="acquire-shikigami-overlay" v-if="shikigamiModal.show && shikigamiModal.step === 3">
+        <div class="acquire-shikigami-panel">
+          <h2 class="acquire-title">🦊 选择式神</h2>
+          <p class="acquire-hint">从下列{{ shikigamiModal.candidates.length }}个式神中选择1个</p>
+          
+          <div class="acquire-cards">
+            <div v-for="s in shikigamiModal.candidates" :key="s.id"
+                 class="shikigami-option"
+                 :class="{ selected: shikigamiModal.selectedNewId === s.id }"
+                 @click="shikigamiModal.selectedNewId = s.id"
+                 @mouseenter="showSelectShikigamiTooltip($event, s)"
+                 @mouseleave="hideTooltip">
+              <div class="shikigami-card-inner">
+                <img v-if="getCardImage(s)" :src="getCardImage(s)" class="shikigami-art" />
+                <div class="shikigami-overlay">
+                  <div class="shikigami-name">{{ s.name }}</div>
+                  <div class="shikigami-rarity" :class="'rarity-' + s.rarity?.toLowerCase()">{{ s.rarity }}</div>
                 </div>
-                <div class="select-badge" v-if="shikigamiModal.selectedNewId === s.id">✓</div>
               </div>
-            </div>
-            <div class="modal-actions-center">
-              <button class="btn primary confirm-acquire-btn" 
-                      :disabled="!shikigamiModal.selectedNewId"
-                      @click="confirmNewShikigami">确认获取</button>
+              <div class="select-badge" v-if="shikigamiModal.selectedNewId === s.id">✓</div>
             </div>
           </div>
+          
+          <button class="acquire-confirm-btn" 
+                  :class="{ ready: shikigamiModal.selectedNewId }"
+                  :disabled="!shikigamiModal.selectedNewId"
+                  @click="confirmNewShikigami">
+            {{ shikigamiModal.selectedNewId ? '确认获取' : '请选择一个式神' }}
+          </button>
         </div>
       </div>
 
@@ -2086,20 +2097,21 @@ function confirmNewShikigami() {
 }
 .hand-cards{
   display:flex;
-  gap:calc(var(--s) * 10);
+  gap:0;  /* 无间隙，通过margin-left实现叠加 */
   overflow-x:auto;
   flex:1;
-  align-items:center;
+  align-items:flex-end;
   justify-content:center;
-  padding:calc(var(--s) * 10);
+  padding:calc(var(--s) * 5) calc(var(--s) * 10);
 }
 .hand-cards::-webkit-scrollbar{height:3px}
 .hand-cards::-webkit-scrollbar-track{background:transparent}
 .hand-cards::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:2px}
 
+/* 手牌：200x280原始尺寸，横向叠加 */
 .hand-card{
-  width:calc(var(--s) * 100);
-  height:calc(var(--s) * 140);
+  width:calc(var(--s) * 120);   /* 缩放后约120px */
+  height:calc(var(--s) * 168);  /* 保持200:280比例 */
   border-radius:calc(var(--s) * 6);
   text-align:center;cursor:pointer;flex-shrink:0;
   transition:all .18s;
@@ -2107,12 +2119,21 @@ function confirmNewShikigami() {
   position:relative;overflow:hidden;
   border:1px solid #D4A574;
   box-shadow:0 calc(var(--s) * 2) calc(var(--s) * 8) rgba(0,0,0,.4);
+  margin-left:calc(var(--s) * -40);  /* 负边距实现叠加 */
+}
+.hand-card:first-child{
+  margin-left:0;  /* 第一张不叠加 */
 }
 .hand-card:hover:not(.unplayable){
-  transform:translateY(-6px);
-  box-shadow:0 8px 20px rgba(0,0,0,.5);
-  border-color:rgba(255,255,255,.4);
-  z-index:2;
+  transform:translateY(-15px);
+  box-shadow:0 12px 25px rgba(0,0,0,.6);
+  border-color:rgba(255,255,255,.5);
+  z-index:10;
+  margin-left:calc(var(--s) * 10);  /* 悬浮时展开 */
+  margin-right:calc(var(--s) * 10);
+}
+.hand-card:first-child:hover:not(.unplayable){
+  margin-left:0;
 }
 .hand-card.spell{background:linear-gradient(160deg,#0d2b5e,#1565C0)}
 .hand-card.yokai{background:linear-gradient(160deg,#0a2a14,#1b5e20)}
@@ -2177,7 +2198,7 @@ function confirmNewShikigami() {
 
 /* 弹窗 - 适配1024x768 */
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:100}
-.modal-box{background:#2d2d44;padding:16px;border-radius:8px;text-align:center;min-width:240px;max-width:400px}
+.modal-box{background:#2d2d44;padding:16px;border-radius:8px;text-align:center;min-width:240px;max-width:90vw}
 .modal-title{font-size:14px;font-weight:bold;margin-bottom:10px}
 .modal-hint{font-size:11px;color:#aaa;margin-bottom:8px}
 .modal-actions{margin-top:10px}
@@ -2221,7 +2242,7 @@ function confirmNewShikigami() {
 
 /* 式神获取/置换弹窗 */
 .shikigami-modal{min-width:320px;max-width:400px}
-.shikigami-step{padding:8px 0}
+.shikigami-step{padding:8px 0;text-align:center}
 .step-hint{font-size:12px;color:#aaa;margin-bottom:8px}
 .step-info{font-size:14px;font-weight:bold;color:#4CAF50;margin-bottom:12px}
 .spell-select-grid{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-height:160px;overflow-y:auto;padding:8px}
@@ -2245,52 +2266,66 @@ function confirmNewShikigami() {
 .new-shiki-card .s-rarity.rarity-r{color:#CD7F32}
 .new-shiki-card .s-charm{font-size:10px;margin-top:4px}
 
-/* 式神选择步骤（2选1，复用4选2样式） */
-.shikigami-select-step {
-  min-width: 480px;
-  text-align: center;
-}
-
-.shikigami-select-step .step-hint {
-  text-align: center;
-  margin-bottom: 20px;
-}
-
-.shikigami-options-inline {
+/* 获取式神独立界面 */
+.acquire-shikigami-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
   display: flex;
-  gap: 24px;
   justify-content: center;
-  margin: 0 auto 20px;
+  align-items: center;
+  z-index: 1000;
 }
 
-.shikigami-option-inline {
-  width: 200px;
-  background: rgba(40, 40, 70, 0.9);
-  border: 3px solid #333;
-  border-radius: 12px;
+.acquire-shikigami-panel {
+  text-align: center;
+  padding: 30px 50px;
+}
+
+.acquire-title {
+  font-size: 28px;
+  color: #ffd700;
+  margin-bottom: 10px;
+}
+
+.acquire-hint {
+  font-size: 16px;
+  color: #aaa;
+  margin-bottom: 30px;
+}
+
+.acquire-cards {
+  display: flex;
+  justify-content: center;
+  gap: 30px;
+  margin-bottom: 30px;
+}
+
+.acquire-confirm-btn {
+  min-width: 200px;
+  padding: 15px 40px;
+  font-size: 18px;
+  border: none;
+  border-radius: 10px;
+  cursor: not-allowed;
+  background: #444;
+  color: #888;
+  transition: all 0.3s;
+}
+
+.acquire-confirm-btn.ready {
   cursor: pointer;
-  transition: all 0.25s ease;
-  position: relative;
-  overflow: hidden;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  color: #fff;
+  box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);
 }
 
-.shikigami-option-inline:hover {
-  border-color: #667eea;
-  transform: translateY(-5px) scale(1.02);
-  box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
-}
-
-.shikigami-option-inline.selected {
-  border-color: #ffd700;
-  box-shadow: 0 0 25px rgba(255, 215, 0, 0.5);
-}
-
-.shikigami-art-inline {
-  width: 100%;
-  aspect-ratio: 3 / 4;
-  object-fit: cover;
-  object-position: center top;
-  display: block;
+.acquire-confirm-btn.ready:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 25px rgba(34, 197, 94, 0.5);
 }
 
 /* 按钮行 */

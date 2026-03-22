@@ -185,6 +185,41 @@ cd shared && npm test
 
 ---
 
+## 🧪 开发测试
+
+> 测试条件用于开发调试，正式发布前需关闭
+
+### 当前测试条件
+
+| ID | 描述 | 状态 | 代码位置 |
+|----|------|------|----------|
+| **test1** | 初始手牌增加1/2/3阶阴阳术 | ✅ 启用 | `SinglePlayerGame.ts` - `startGame()` |
+
+### test1 说明
+
+**目的**：测试获得式神功能
+
+**效果**：初始手牌额外获得：
+- 基础术式 (1点伤害)
+- 中级符咒 (2点伤害)
+- 高级符咒 (3点伤害)
+
+**操作方式**：
+```typescript
+// 文件: client/src/game/SinglePlayerGame.ts
+// 搜索: TEST1_ENABLED
+
+// 启用测试
+const TEST1_ENABLED = true;
+
+// 关闭测试
+const TEST1_ENABLED = false;
+```
+
+完整测试文档请查看：`docs/design/testset.md`
+
+---
+
 ## 游戏规则概述
 
 > 完整规则请查阅 `策划文档/游戏规则说明书.md`

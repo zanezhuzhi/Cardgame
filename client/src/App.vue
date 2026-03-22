@@ -155,9 +155,9 @@
             <div v-for="(l,i) in logs.slice(-8)" :key="i" class="info-line">{{l.message}}</div>
           </div>
           <div class="action-buttons">
-            <button class="side-btn" @click="getSpell" :disabled="!canSpell">获得阴阳术</button>
-            <button class="side-btn" @click="openShikigamiModal" v-if="canAcquireShikigami || canReplaceShikigami">
-              {{ canAcquireShikigami ? '获得式神' : '置换式神' }}
+            <button class="side-btn" :class="{ disabled: !canSpell }" @click="handleGetSpell">获得阴阳术</button>
+            <button class="side-btn" :class="{ disabled: !(canAcquireShikigami || canReplaceShikigami) }" @click="handleShikigamiAction">
+              {{ (player?.shikigami?.length || 0) >= 3 ? '置换式神' : '获得式神' }}
             </button>
             <button class="side-btn" @click="showExiled=true">查看超度区</button>
           </div>
@@ -255,6 +255,17 @@
         <div class="modal-box">
           <p>📋 式神调整阶段</p>
           <button class="btn primary" @click="confirmShiki">进入行动阶段</button>
+        </div>
+      </div>
+
+      <!-- 弹窗：操作提示 -->
+      <div class="modal" v-if="hintModal.show">
+        <div class="modal-box hint-modal">
+          <p class="modal-title">{{ hintModal.title }}</p>
+          <div class="hint-content">
+            <p v-for="(line, i) in hintModal.lines" :key="i">{{ line }}</p>
+          </div>
+          <button class="confirm-hint-btn" @click="hintModal.show = false">知道了</button>
         </div>
       </div>
 
@@ -375,19 +386,30 @@
             </div>
           </div>
 
-          <!-- 步骤3：选择新式神 -->
-          <div v-else-if="shikigamiModal.step === 3" class="shikigami-step">
-            <p class="step-hint">选择一个新式神</p>
-            <div class="new-shiki-grid">
+          <!-- 步骤3：选择新式神（复用4选2样式） -->
+          <div v-else-if="shikigamiModal.step === 3" class="shikigami-step shikigami-select-step">
+            <p class="step-hint">从下列{{ shikigamiModal.candidates.length }}个式神中选择1个</p>
+            <div class="shikigami-options-inline">
               <div v-for="s in shikigamiModal.candidates" :key="s.id"
-                   class="new-shiki-card" @click="selectNewShikigami(s)">
-                <div class="s-name">{{s.name}}</div>
-                <div class="s-rarity" :class="'rarity-'+s.rarity?.toLowerCase()">{{s.rarity}}</div>
-                <div class="s-charm">👑{{s.charm}}</div>
+                   class="shikigami-option-inline"
+                   :class="{ selected: shikigamiModal.selectedNewId === s.id }"
+                   @click="shikigamiModal.selectedNewId = s.id"
+                   @mouseenter="showSelectShikigamiTooltip($event, s)"
+                   @mouseleave="hideTooltip">
+                <div class="shikigami-card-inner">
+                  <img v-if="getCardImage(s)" :src="getCardImage(s)" class="shikigami-art-inline" />
+                  <div class="shikigami-overlay">
+                    <div class="shikigami-name">{{ s.name }}</div>
+                    <div class="shikigami-rarity" :class="'rarity-' + s.rarity?.toLowerCase()">{{ s.rarity }}</div>
+                  </div>
+                </div>
+                <div class="select-badge" v-if="shikigamiModal.selectedNewId === s.id">✓</div>
               </div>
             </div>
-            <div class="modal-actions">
-              <button class="btn" @click="closeShikigamiModal">取消</button>
+            <div class="modal-actions-center">
+              <button class="btn primary confirm-acquire-btn" 
+                      :disabled="!shikigamiModal.selectedNewId"
+                      @click="confirmNewShikigami">确认获取</button>
             </div>
           </div>
         </div>
@@ -515,6 +537,23 @@ const tooltip = reactive<{
   skill: null
 })
 
+// 操作提示弹窗
+const hintModal = reactive<{
+  show: boolean
+  title: string
+  lines: string[]
+}>({
+  show: false,
+  title: '',
+  lines: []
+})
+
+function showHint(title: string, lines: string[]) {
+  hintModal.title = title
+  hintModal.lines = lines
+  hintModal.show = true
+}
+
 // 效果选择弹窗
 const choiceModal = reactive<{
   show: boolean
@@ -564,6 +603,7 @@ const shikigamiModal = reactive<{
   oldShikigamiId: string
   candidates: any[]  // 抽到的式神
   selectingOld: boolean
+  selectedNewId: string  // 选中的新式神ID
 }>({
   show: false,
   isReplace: false,
@@ -572,7 +612,8 @@ const shikigamiModal = reactive<{
   selectedDamage: 0,
   oldShikigamiId: '',
   candidates: [],
-  selectingOld: false
+  selectingOld: false,
+  selectedNewId: ''
 })
 
 const player = computed(() => state.value?.players[0])
@@ -1002,6 +1043,48 @@ function hitBoss() {
 }
 function useSkill(id: string) { game?.useShikigamiSkill(id) }
 function getSpell() { game?.gainBasicSpell() }
+
+// 带提示的按钮处理函数
+function handleGetSpell() {
+  if (canSpell.value) {
+    getSpell()
+  } else {
+    showHint('⚠️ 无法获得阴阳术', [
+      '条件：本回合未获得过阴阳术'
+    ])
+  }
+}
+
+function handleShikigamiAction() {
+  const shikigamiCount = player.value?.shikigami?.length || 0
+  const isReplace = shikigamiCount >= 3
+  
+  if (isReplace) {
+    // 置换式神
+    if (canReplaceShikigami.value) {
+      shikigamiModal.isReplace = true
+      openShikigamiModal()
+    } else {
+      showHint('⚠️ 无法置换式神', [
+        '条件：',
+        '• 弃置1张高级符咒（3点伤害）'
+      ])
+    }
+  } else {
+    // 获得式神
+    if (canAcquireShikigami.value) {
+      shikigamiModal.isReplace = false
+      openShikigamiModal()
+    } else {
+      showHint('⚠️ 无法获得式神', [
+        '条件：',
+        '• 弃置≥5点伤害的符咒牌',
+        '• 其中需包含至少1张高级符咒'
+      ])
+    }
+  }
+}
+
 function endTurn() { game?.endTurn() }
 function refresh(b: boolean) { game?.decideYokaiRefresh(b) }
 function confirmShiki() { game?.confirmShikigamiPhase() }
@@ -1033,11 +1116,13 @@ function openShikigamiModal() {
   shikigamiModal.oldShikigamiId = ''
   shikigamiModal.candidates = []
   shikigamiModal.selectingOld = false
+  shikigamiModal.selectedNewId = ''
 }
 
 function closeShikigamiModal() {
   shikigamiModal.show = false
   shikigamiModal.selectingOld = false
+  shikigamiModal.selectedNewId = ''
 }
 
 function toggleSpellForShikigami(card: CardInstance) {
@@ -1057,10 +1142,11 @@ async function nextShikigamiStep() {
     shikigamiModal.step = 2
     shikigamiModal.selectingOld = true
   } else {
-    // 获取模式：直接执行获取
-    const success = await game?.acquireShikigami(shikigamiModal.selectedSpells)
-    if (success) {
-      closeShikigamiModal()
+    // 获取模式：先消耗符咒，然后进入步骤3选式神
+    const candidates = await game?.prepareAcquireShikigami(shikigamiModal.selectedSpells)
+    if (candidates && candidates.length > 0) {
+      shikigamiModal.candidates = candidates
+      shikigamiModal.step = 3  // 进入式神选择步骤
     }
   }
 }
@@ -1084,9 +1170,18 @@ async function executeReplaceShikigami() {
 }
 
 async function selectNewShikigami(shikigami: any) {
-  // 这个函数目前不会被调用，因为选择逻辑在game中处理
-  // 保留以备将来扩展
-  closeShikigamiModal()
+  // 选中式神（不再直接确认）
+  shikigamiModal.selectedNewId = shikigami.id
+}
+
+function confirmNewShikigami() {
+  if (!shikigamiModal.selectedNewId) return
+  
+  // 确认获取选中的式神
+  const success = game?.confirmAcquireShikigami(shikigamiModal.selectedNewId)
+  if (success) {
+    closeShikigamiModal()
+  }
 }
 </script>
 
@@ -1671,8 +1766,9 @@ async function selectNewShikigami(shikigami: any) {
   transition:all .2s;
   border-radius:calc(var(--s) * 4);
 }
-.side-btn:hover:not(:disabled){background:#2D1F3D}
-.side-btn:disabled{opacity:.4;cursor:not-allowed}
+.side-btn:hover:not(.disabled){background:#2D1F3D}
+.side-btn.disabled{opacity:.5;cursor:pointer;border-color:#666}
+.side-btn.disabled:hover{background:#2a2a3e}
 
 /* ══════════════════════════════════════════════
    个人信息区 - top:640px, height:160px
@@ -2086,6 +2182,14 @@ async function selectNewShikigami(shikigami: any) {
 .modal-hint{font-size:11px;color:#aaa;margin-bottom:8px}
 .modal-actions{margin-top:10px}
 
+/* 操作提示弹窗 */
+.hint-modal{min-width:300px;max-width:400px}
+.hint-modal .modal-title{font-size:18px;color:#ffd700;margin-bottom:15px}
+.hint-content{text-align:left;padding:10px 15px;background:rgba(0,0,0,.3);border-radius:6px;margin-bottom:15px}
+.hint-content p{font-size:14px;color:#ddd;margin:6px 0;line-height:1.5}
+.confirm-hint-btn{padding:10px 30px;background:linear-gradient(135deg,#667eea,#764ba2);border:none;border-radius:8px;color:#fff;font-size:14px;cursor:pointer;transition:all .2s}
+.confirm-hint-btn:hover{transform:translateY(-2px);box-shadow:0 4px 15px rgba(102,126,234,.5)}
+
 /* 效果选择弹窗 */
 .choice-modal{min-width:260px}
 .choice-options{display:flex;flex-direction:column;gap:8px}
@@ -2140,6 +2244,80 @@ async function selectNewShikigami(shikigami: any) {
 .new-shiki-card .s-rarity.rarity-sr{color:#C0C0C0}
 .new-shiki-card .s-rarity.rarity-r{color:#CD7F32}
 .new-shiki-card .s-charm{font-size:10px;margin-top:4px}
+
+/* 式神选择步骤（2选1，复用4选2样式） */
+.shikigami-select-step {
+  min-width: 480px;
+  text-align: center;
+}
+
+.shikigami-select-step .step-hint {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.shikigami-options-inline {
+  display: flex;
+  gap: 24px;
+  justify-content: center;
+  margin: 0 auto 20px;
+}
+
+.shikigami-option-inline {
+  width: 200px;
+  background: rgba(40, 40, 70, 0.9);
+  border: 3px solid #333;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.shikigami-option-inline:hover {
+  border-color: #667eea;
+  transform: translateY(-5px) scale(1.02);
+  box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+}
+
+.shikigami-option-inline.selected {
+  border-color: #ffd700;
+  box-shadow: 0 0 25px rgba(255, 215, 0, 0.5);
+}
+
+.shikigami-art-inline {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  object-position: center top;
+  display: block;
+}
+
+/* 按钮行 */
+.modal-actions-row {
+  display: flex;
+  gap: 15px;
+  justify-content: center;
+  margin-top: 15px;
+}
+
+.modal-actions-row .btn {
+  min-width: 120px;
+  padding: 12px 24px;
+}
+
+/* 居中单按钮 */
+.modal-actions-center {
+  display: flex;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.confirm-acquire-btn {
+  min-width: 200px;
+  padding: 14px 40px;
+  font-size: 16px;
+}
 
 /* 式神区按钮 */
 .panel-title{display:flex;align-items:center;justify-content:space-between;padding:0 2px}

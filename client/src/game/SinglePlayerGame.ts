@@ -337,6 +337,22 @@ export class SinglePlayerGame {
     // 抓5张起始手牌
     this.drawCards(GAME_CONSTANTS.STARTING_HAND_SIZE);
     
+    // TEST1: 初始手牌增加1/2/3阶阴阳术（测试获得式神）
+    // 关闭方式：将 TEST1_ENABLED 改为 false
+    const TEST1_ENABLED = true;
+    if (TEST1_ENABLED) {
+      const player = this.getPlayer();
+      // 使用内联定义，避免依赖 cardsData 结构
+      const testSpells: CardInstance[] = [
+        { instanceId: generateId(), cardId: 'spell_001', cardType: 'spell', name: '基础术式', hp: 1, damage: 1, charm: 0 },
+        { instanceId: generateId(), cardId: 'spell_002', cardType: 'spell', name: '中级符咒', hp: 2, damage: 2, charm: 0 },
+        { instanceId: generateId(), cardId: 'spell_003', cardType: 'spell', name: '高级符咒', hp: 3, damage: 3, charm: 1 },
+      ];
+      player.hand.push(...testSpells);
+      this.addLog('🧪 [TEST1] 添加测试阴阳术：1+2+3=6点伤害');
+    }
+    // END TEST1
+    
     // 翻出第一个鬼王（麒麟，无来袭效果）
     this.revealBoss();
     
@@ -1410,11 +1426,15 @@ export class SinglePlayerGame {
     return this.hasAdvancedSpellInHand();
   }
 
-  /** 获取式神（需要恰好5点伤害，含高级符咒） */
-  async acquireShikigami(spellInstanceIds: string[]): Promise<boolean> {
+  // 临时存储准备获取的式神候选
+  private pendingShikigamiCandidates: ShikigamiCard[] = [];
+  private pendingSpellIds: string[] = [];
+
+  /** 准备获取式神：验证并消耗符咒，返回2个候选式神供选择 */
+  async prepareAcquireShikigami(spellInstanceIds: string[]): Promise<ShikigamiCard[] | null> {
     if (!this.canAcquireShikigami()) {
       this.addLog(`❌ 无法获取式神`);
-      return false;
+      return null;
     }
 
     const player = this.getPlayer();
@@ -1429,13 +1449,13 @@ export class SinglePlayerGame {
     // 必须≥5点
     if (totalDamage < 5) {
       this.addLog(`❌ 符咒伤害必须≥5点（当前${totalDamage}点）`);
-      return false;
+      return null;
     }
     
     // 必须包含高级符咒
     if (!selectedSpells.some(c => this.isAdvancedSpell(c))) {
       this.addLog(`❌ 必须包含至少1张高级符咒`);
-      return false;
+      return null;
     }
 
     // 将选中的卡牌移入超度区
@@ -1455,18 +1475,30 @@ export class SinglePlayerGame {
     
     if (drawnShikigami.length === 0) {
       this.addLog(`❌ 式神供应堆已空`);
+      return null;
+    }
+
+    // 存储候选，等待玩家选择
+    this.pendingShikigamiCandidates = drawnShikigami;
+    this.pendingSpellIds = spellInstanceIds;
+    
+    this.notifyChange();
+    return drawnShikigami;
+  }
+
+  /** 确认获取式神：玩家选择了一个候选式神 */
+  confirmAcquireShikigami(shikigamiId: string): boolean {
+    const player = this.getPlayer();
+    const supply = this.state.field.shikigamiSupply!;
+    
+    // 找到选中的式神
+    const selectedShikigami = this.pendingShikigamiCandidates.find(s => s.id === shikigamiId);
+    if (!selectedShikigami) {
+      this.addLog(`❌ 无效的式神选择`);
       return false;
     }
 
-    // 让玩家选择1张
-    let selectedIndex = 0;
-    if (drawnShikigami.length > 1 && this.onChoiceRequired) {
-      const options = drawnShikigami.map(s => `${s.name}（${s.rarity}）`);
-      selectedIndex = await this.onChoiceRequired(options);
-    }
-
-    const selectedShikigami = drawnShikigami[selectedIndex]!;
-    const notSelected = drawnShikigami.filter((_, i) => i !== selectedIndex);
+    const notSelected = this.pendingShikigamiCandidates.filter(s => s.id !== shikigamiId);
 
     // 将选中的式神加入玩家式神区
     player.shikigami.push(selectedShikigami);
@@ -1482,7 +1514,26 @@ export class SinglePlayerGame {
     this.addLog(`🦊 获得式神【${selectedShikigami.name}】！（${selectedShikigami.rarity}）`);
     this.addLog(`📋 当前式神数量：${player.shikigami.length}/${GAME_CONSTANTS.MAX_SHIKIGAMI}`);
     
+    // 清空临时状态
+    this.pendingShikigamiCandidates = [];
+    this.pendingSpellIds = [];
+    
     this.notifyChange();
+    return true;
+  }
+
+  /** 获取式神（旧接口，保留兼容） */
+  async acquireShikigami(spellInstanceIds: string[]): Promise<boolean> {
+    const candidates = await this.prepareAcquireShikigami(spellInstanceIds);
+    if (!candidates || candidates.length === 0) return false;
+    
+    // 如果只有1个候选，直接获取
+    if (candidates.length === 1) {
+      return this.confirmAcquireShikigami(candidates[0].id);
+    }
+    
+    // 多个候选需要玩家选择（通过UI）
+    // 这里返回true表示准备成功，实际获取在confirmAcquireShikigami中完成
     return true;
   }
 

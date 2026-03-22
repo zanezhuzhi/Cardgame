@@ -9,7 +9,7 @@
 | ID | 描述 | 状态 | 代码位置 |
 |----|------|------|----------|
 | test1 | 初始手牌增加1/2/3阶阴阳术 | ❌ 关闭 | SinglePlayerGame.ts |
-| test2 | 初始手牌增加1/2/3/3阶阴阳术 | ✅ 启用 | SinglePlayerGame.ts |
+| test2 | 初始手牌增加1/2/3/3阶阴阳术 | ❌ 关闭 | SinglePlayerGame.ts |
 
 ---
 

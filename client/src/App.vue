@@ -269,6 +269,27 @@
         </div>
       </div>
 
+      <!-- 弹窗：阴阳术选择 -->
+      <div class="modal" v-if="spellSelectModal.show" @click.self="closeSpellModal">
+        <div class="modal-box spell-select-modal">
+          <p class="modal-title">📜 获得阴阳术</p>
+          <p class="spell-modal-hint">选择要获得的阴阳术类型</p>
+          <div class="spell-type-list">
+            <div v-for="spell in spellOptions" :key="spell.id"
+                 class="spell-type-card"
+                 :class="{ disabled: !spell.canGet }"
+                 @click="selectSpell(spell.id)">
+              <div class="spell-type-header">
+                <span class="spell-type-name">{{ spell.name }}</span>
+                <span class="spell-type-damage">⚔️{{ spell.damage }}</span>
+              </div>
+              <div class="spell-type-condition">{{ spell.condition }}</div>
+            </div>
+          </div>
+          <button class="cancel-btn" @click="closeSpellModal">取消</button>
+        </div>
+      </div>
+
       <!-- 弹窗：效果选择（CHOICE效果） -->
       <div class="modal" v-if="choiceModal.show">
         <div class="modal-box choice-modal">
@@ -653,7 +674,11 @@ const player = computed(() => state.value?.players[0])
 const yokai = computed(() => state.value?.field.yokaiSlots || [])
 const boss = computed(() => state.value?.field.currentBoss)
 const logs = computed(() => (state.value?.log || []).slice(-6))
-const canSpell = computed(() => game?.canGainBasicSpell() ?? false)
+const canSpell = computed(() => {
+  // 触发响应式依赖
+  const _ = state.value?.turnPhase
+  return game?.canGainBasicSpell() ?? false
+})
 
 // 式神获取/置换相关 - 依赖 state 触发响应式更新
 const canAcquireShikigami = computed(() => {
@@ -1090,17 +1115,58 @@ function hitBoss() {
   if (d > 0) game?.attackBoss(d)
 }
 function useSkill(id: string) { game?.useShikigamiSkill(id) }
-function getSpell() { game?.gainBasicSpell() }
+// 阴阳术选择弹窗
+const spellSelectModal = reactive({
+  show: false
+})
 
-// 带提示的按钮处理函数
-function handleGetSpell() {
-  if (canSpell.value) {
-    getSpell()
-  } else {
-    showHint('⚠️ 无法获得阴阳术', [
-      '条件：本回合未获得过阴阳术'
-    ])
+// 使用 computed 让 spellOptions 响应式更新
+const spellOptions = computed(() => [
+  { 
+    id: 'basic', 
+    name: '基础术式', 
+    damage: 1, 
+    condition: canSpell.value ? '每回合可免费获得1张' : '❌ 本回合已获得过',
+    canGet: canSpell.value
+  },
+  { 
+    id: 'medium', 
+    name: '中级符咒', 
+    damage: 2, 
+    condition: '超度1张基础术式 + 弃牌堆中1张生命≥2的妖怪',
+    canGet: false // TODO: 实现条件判断
+  },
+  { 
+    id: 'advanced', 
+    name: '高级符咒', 
+    damage: 3, 
+    condition: '超度1张中级符咒 + 弃牌堆中1张生命≥4的妖怪',
+    canGet: false // TODO: 实现条件判断
   }
+])
+
+function handleGetSpell() {
+  // 打开阴阳术选择弹窗
+  spellSelectModal.show = true
+}
+
+function selectSpell(spellId: string) {
+  if (spellId === 'basic') {
+    if (canSpell.value) {
+      game?.gainBasicSpell()
+      spellSelectModal.show = false
+    } else {
+      showHint('⚠️ 无法获得', ['本回合已获得过阴阳术'])
+    }
+  } else if (spellId === 'medium') {
+    showHint('⚠️ 暂未实现', ['中级符咒需要通过【启】效果获得'])
+  } else if (spellId === 'advanced') {
+    showHint('⚠️ 暂未实现', ['高级符咒需要通过【启】效果获得'])
+  }
+}
+
+function closeSpellModal() {
+  spellSelectModal.show = false
 }
 
 function handleShikigamiAction() {
@@ -2199,15 +2265,10 @@ async function confirmReplaceShikigami() {
   margin-left:calc(var(--s) * -70);
 }
 .hand-card:hover:not(.unplayable){
-  transform:translateY(calc(var(--s) * -20));
-  box-shadow:0 12px 25px rgba(0,0,0,.6);
-  border-color:rgba(255,255,255,.5);
+  transform:translateY(calc(var(--s) * -25)) scale(1.08);
+  box-shadow:0 15px 30px rgba(0,0,0,.7);
+  border-color:rgba(255,255,255,.6);
   z-index:10;
-  margin-left:calc(var(--s) * 15);
-  margin-right:calc(var(--s) * 15);
-}
-.hand-card:first-child:hover:not(.unplayable){
-  margin-left:0;
 }
 .hand-card.spell{background:linear-gradient(160deg,#0d2b5e,#1565C0)}
 .hand-card.yokai{background:linear-gradient(160deg,#0a2a14,#1b5e20)}
@@ -2280,6 +2341,44 @@ async function confirmReplaceShikigami() {
 /* 操作提示弹窗 */
 .hint-modal{min-width:300px;max-width:400px}
 .hint-modal .modal-title{font-size:18px;color:#ffd700;margin-bottom:15px}
+
+/* 阴阳术选择弹窗 */
+.spell-select-modal{min-width:350px}
+.spell-modal-hint{color:#aaa;font-size:13px;margin-bottom:15px;text-align:center}
+.spell-type-list{display:flex;flex-direction:column;gap:10px;margin-bottom:20px}
+.spell-type-card{
+  background:linear-gradient(135deg,#1a1a3e,#2a2a5e);
+  border:2px solid #4a4a8a;
+  border-radius:8px;
+  padding:12px 15px;
+  cursor:pointer;
+  transition:all .2s;
+}
+.spell-type-card:hover:not(.disabled){
+  border-color:#7a7afa;
+  background:linear-gradient(135deg,#2a2a5e,#3a3a7e);
+  transform:translateX(5px);
+}
+.spell-type-card.disabled{
+  opacity:0.5;
+  cursor:not-allowed;
+  border-color:#333;
+}
+.spell-type-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.spell-type-name{font-size:16px;font-weight:bold;color:#fff}
+.spell-type-damage{font-size:14px;color:#ff6b6b}
+.spell-type-condition{font-size:12px;color:#888;line-height:1.4}
+.cancel-btn{
+  width:100%;
+  padding:10px;
+  background:#444;
+  border:none;
+  border-radius:6px;
+  color:#fff;
+  cursor:pointer;
+  font-size:14px;
+}
+.cancel-btn:hover{background:#555}
 .hint-content{text-align:left;padding:10px 15px;background:rgba(0,0,0,.3);border-radius:6px;margin-bottom:15px}
 .hint-content p{font-size:14px;color:#ddd;margin:6px 0;line-height:1.5}
 .confirm-hint-btn{padding:10px 30px;background:linear-gradient(135deg,#667eea,#764ba2);border:none;border-radius:8px;color:#fff;font-size:14px;cursor:pointer;transition:all .2s}

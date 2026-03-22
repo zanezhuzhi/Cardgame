@@ -189,16 +189,17 @@ export class SinglePlayerGame {
     // 创建阴阳术供应堆
     const spellSupply: { [key: string]: CardInstance[] } = {
       basic: [],
-      middle: [],
+      medium: [],
       advanced: []
     };
     for (const spell of cardsData.spell as any[]) {
       const count = spell.count || 10;
       for (let i = 0; i < count; i++) {
         const instance = this.createCardInstance(spell, 'spell');
-        if (spell.level === 'basic') spellSupply.basic.push(instance);
-        else if (spell.level === 'middle') spellSupply.middle.push(instance);
-        else if (spell.level === 'advanced') spellSupply.advanced.push(instance);
+        // 根据名称判断阴阳术等级
+        if (spell.name === '基础术式') spellSupply.basic.push(instance);
+        else if (spell.name === '中级符咒') spellSupply.medium.push(instance);
+        else if (spell.name === '高级符咒') spellSupply.advanced.push(instance);
       }
     }
 
@@ -213,13 +214,13 @@ export class SinglePlayerGame {
       penaltyPile: shuffle(penaltyPile),
       yokaiDeck: shuffle(yokaiDeck),
       spellSupply: {
-        basic: spellSupply.basic[0] || null,
-        medium: spellSupply.middle[0] || null,
-        advanced: spellSupply.advanced[0] || null
+        basic: spellSupply.basic,
+        medium: spellSupply.medium,
+        advanced: spellSupply.advanced
       },
       spellCounts: {
         basic: spellSupply.basic.length,
-        medium: spellSupply.middle.length,
+        medium: spellSupply.medium.length,
         advanced: spellSupply.advanced.length
       },
       tokenShop: 10,  // 招福达摩
@@ -354,7 +355,7 @@ export class SinglePlayerGame {
     
     // TEST2: 初始手牌增加1/2/3/3阶阴阳术（测试置换式神）
     // 关闭方式：将 TEST2_ENABLED 改为 false
-    const TEST2_ENABLED = true;
+    const TEST2_ENABLED = false;
     if (TEST2_ENABLED) {
       const player = this.getPlayer();
       const testSpells: CardInstance[] = [

@@ -155,11 +155,17 @@
             <div v-for="(l,i) in logs.slice(-8)" :key="i" class="info-line">{{l.message}}</div>
           </div>
           <div class="action-buttons">
-            <button class="side-btn" :class="{ disabled: !canSpell }" @click="handleGetSpell">获得阴阳术</button>
+            <button class="side-btn" :class="{ disabled: !canSpell }" @click="handleGetSpell">
+              获得阴阳术
+              <span v-if="recommendSpell && canSpell" class="recommend-badge">推荐</span>
+            </button>
             <button class="side-btn" :class="{ disabled: !(canAcquireShikigami || canReplaceShikigami) }" @click="handleShikigamiAction">
               {{ (player?.shikigami?.length || 0) >= 3 ? '置换式神' : '获得式神' }}
             </button>
-            <button class="side-btn" @click="showExiled=true">查看超度区</button>
+            <div class="exile-btn" @click="showExiled=true">
+              <span class="exile-count">{{ allExiledCards.length }}</span>
+              <span class="exile-label">超度区</span>
+            </div>
           </div>
         </div>
       </div>
@@ -174,11 +180,11 @@
           </div>
         </div>
         <div class="deck-discard-area">
-          <div class="pile-box deck-box">
+          <div class="pile-box deck-box" @click="showDeck=true">
             <b>{{player?.deck?.length||0}}</b>
             <span>牌库</span>
           </div>
-          <div class="pile-box discard-box">
+          <div class="pile-box discard-box" @click="showDiscard=true">
             <b>{{player?.discard?.length||0}}</b>
             <span>弃牌堆</span>
           </div>
@@ -225,8 +231,13 @@
               <img v-if="getCardImage(c)" :src="getCardImage(c)" class="card-art hand-art" />
               <div class="card-info">
                 <div class="c-name">{{c.name}}</div>
-                <div class="c-stat" v-if="c.cardType === 'spell' || c.cardType === 'yokai'">⚔️{{c.damage||c.hp||1}}</div>
-                <div class="c-stat" v-else-if="c.cardType === 'token'">🎁</div>
+                <div class="c-stat" v-if="c.cardType === 'spell'">⚔️{{c.damage||1}}</div>
+                <div class="c-stat" v-else-if="c.cardType === 'yokai' || c.cardType === 'token'">
+                  <template v-if="getHandCardEffects(c).length">
+                    <span v-for="(eff, i) in getHandCardEffects(c)" :key="i">{{eff.icon}}{{eff.value}}</span>
+                  </template>
+                  <template v-else>🎁</template>
+                </div>
                 <div class="c-stat" v-else-if="c.cardType === 'penalty'">💔{{c.charm||0}}</div>
                 <div class="c-stat" v-else>—</div>
               </div>
@@ -341,17 +352,93 @@
         </div>
       </div>
 
-      <!-- 弹窗：超度区查看 -->
-      <div class="modal" v-if="showExiled">
-        <div class="modal-box exiled-modal">
-          <p class="modal-title">📜 超度区</p>
-          <div class="exiled-cards" v-if="player?.exiled?.length">
-            <div v-for="c in player.exiled" :key="c.instanceId" class="exiled-card">
-              {{c.name}}
+      <!-- 弹窗：超度区查看（公共区域） -->
+      <div class="modal" v-if="showExiled" @click.self="showExiled=false">
+        <div class="exiled-panel">
+          <h2 class="exiled-title">📜 公共超度区</h2>
+          <p class="exiled-hint">所有玩家超度的卡牌（移出游戏，不计入声誉）</p>
+          <div class="exiled-card-list" v-if="allExiledCards.length">
+            <div v-for="c in allExiledCards" :key="c.instanceId || c.id" 
+                 class="exiled-card-item"
+                 :class="c.cardType || c.type"
+                 @mouseenter="showTooltip($event, c)"
+                 @mouseleave="hideTooltip">
+              <img v-if="getCardImage(c)" :src="getCardImage(c)" class="card-art" />
+              <div class="card-info">
+                <div class="c-name">{{c.name}}</div>
+                <div class="c-stat">
+                  <template v-if="c.cardType === 'spell' || c.type === 'spell'">⚔️{{c.damage||1}}</template>
+                  <template v-else-if="getHandCardEffects(c).length">
+                    <span v-for="(eff, i) in getHandCardEffects(c)" :key="i">{{eff.icon}}{{eff.value}}</span>
+                  </template>
+                  <template v-else-if="c.cardType === 'penalty' || c.type === 'penalty'">💔{{c.charm||0}}</template>
+                  <template v-else>🎁</template>
+                </div>
+              </div>
             </div>
           </div>
           <p v-else class="empty-hint">暂无超度的卡牌</p>
-          <button class="btn" @click="showExiled=false">关闭</button>
+          <button class="exiled-close-btn" @click="showExiled=false">关闭</button>
+        </div>
+      </div>
+
+      <!-- 弹窗：牌库查看 -->
+      <div class="modal" v-if="showDeck" @click.self="showDeck=false">
+        <div class="pile-view-panel">
+          <h2 class="pile-view-title">📚 牌库</h2>
+          <p class="pile-view-hint">待抽取的卡牌（{{ player?.deck?.length || 0 }}张）</p>
+          <div class="pile-card-list" v-if="player?.deck?.length">
+            <div v-for="c in player.deck" :key="c.instanceId" 
+                 class="pile-card-item"
+                 :class="c.cardType"
+                 @mouseenter="showTooltip($event, c)"
+                 @mouseleave="hideTooltip">
+              <img v-if="getCardImage(c)" :src="getCardImage(c)" class="card-art" />
+              <div class="card-info">
+                <div class="c-name">{{c.name}}</div>
+                <div class="c-stat">
+                  <template v-if="c.cardType === 'spell'">⚔️{{c.damage||1}}</template>
+                  <template v-else-if="getHandCardEffects(c).length">
+                    <span v-for="(eff, i) in getHandCardEffects(c)" :key="i">{{eff.icon}}{{eff.value}}</span>
+                  </template>
+                  <template v-else-if="c.cardType === 'penalty'">💔{{c.charm||0}}</template>
+                  <template v-else>🎁</template>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p v-else class="empty-hint">牌库为空</p>
+          <button class="pile-close-btn" @click="showDeck=false">关闭</button>
+        </div>
+      </div>
+
+      <!-- 弹窗：弃牌堆查看 -->
+      <div class="modal" v-if="showDiscard" @click.self="showDiscard=false">
+        <div class="pile-view-panel">
+          <h2 class="pile-view-title">🗑️ 弃牌堆</h2>
+          <p class="pile-view-hint">已使用的卡牌（{{ player?.discard?.length || 0 }}张）</p>
+          <div class="pile-card-list" v-if="player?.discard?.length">
+            <div v-for="c in player.discard" :key="c.instanceId" 
+                 class="pile-card-item"
+                 :class="c.cardType"
+                 @mouseenter="showTooltip($event, c)"
+                 @mouseleave="hideTooltip">
+              <img v-if="getCardImage(c)" :src="getCardImage(c)" class="card-art" />
+              <div class="card-info">
+                <div class="c-name">{{c.name}}</div>
+                <div class="c-stat">
+                  <template v-if="c.cardType === 'spell'">⚔️{{c.damage||1}}</template>
+                  <template v-else-if="getHandCardEffects(c).length">
+                    <span v-for="(eff, i) in getHandCardEffects(c)" :key="i">{{eff.icon}}{{eff.value}}</span>
+                  </template>
+                  <template v-else-if="c.cardType === 'penalty'">💔{{c.charm||0}}</template>
+                  <template v-else>🎁</template>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p v-else class="empty-hint">弃牌堆为空</p>
+          <button class="pile-close-btn" @click="showDiscard=false">关闭</button>
         </div>
       </div>
 
@@ -485,7 +572,9 @@
           {{tooltip.card.subtype}}
         </div>
         <div class="tooltip-effect" v-if="tooltip.effect">
-          {{tooltip.effect}}
+          <p v-for="(line, i) in tooltip.effect.split('。').filter((s: string) => s.trim())" :key="i">
+            {{line}}。
+          </p>
         </div>
         <div class="tooltip-passive" v-if="tooltip.passive">
           <span class="passive-label">【被动】{{tooltip.passive.name}}</span>
@@ -561,6 +650,8 @@ const logRef = ref<HTMLElement|null>(null)
 
 // 选择相关状态
 const showExiled = ref(false)
+const showDeck = ref(false)
+const showDiscard = ref(false)
 const selectingTarget = ref(false)
 const selectingCards = ref(false)
 
@@ -680,6 +771,27 @@ const canSpell = computed(() => {
   return game?.canGainBasicSpell() ?? false
 })
 
+// 公共超度区：合并所有来源的超度卡牌
+const allExiledCards = computed(() => {
+  const fieldExile = state.value?.field?.exileZone || []
+  const playerExile = player.value?.exiled || []
+  return [...fieldExile, ...playerExile]
+})
+
+// 推荐获得阴阳术：牌库中阴阳术总伤害<11时
+const recommendSpell = computed(() => {
+  const p = player.value
+  if (!p) return false
+  
+  // 统计牌库中所有阴阳术的总伤害值（deck + hand + discard）
+  const allCards = [...(p.deck || []), ...(p.hand || []), ...(p.discard || [])]
+  const spellDamage = allCards
+    .filter(c => c.cardType === 'spell')
+    .reduce((sum, c) => sum + (c.damage || 1), 0)
+  
+  return spellDamage < 11
+})
+
 // 式神获取/置换相关 - 依赖 state 触发响应式更新
 const canAcquireShikigami = computed(() => {
   // 触发响应式依赖
@@ -781,6 +893,61 @@ const tooltipStyle = computed(() => {
   }
 })
 
+// ── 从卡牌效果文本解析图标 ──────────────────────────────────────
+// 根据effect文本解析出效果（伤害+N、鬼火+N、抓牌+N）
+// 图标：⚔️伤害 🔥鬼火 🎴抓牌
+function parseCardEffects(card: any): Array<{icon: string, value: number | string}> {
+  const effect = card.effect || ''
+  const results: Array<{icon: string, value: number | string}> = []
+  
+  // 匹配 伤害+数字 或 伤害+X 等模式
+  const damageMatch = effect.match(/伤害\+(\d+|[XN])/g)
+  if (damageMatch) {
+    damageMatch.forEach((m: string) => {
+      const val = m.replace('伤害+', '')
+      results.push({ icon: '⚔️', value: isNaN(Number(val)) ? val : Number(val) })
+    })
+  }
+  
+  // 匹配 鬼火+数字 或 鬼火+X
+  const fireMatch = effect.match(/鬼火\+(\d+|[XN])/g)
+  if (fireMatch) {
+    fireMatch.forEach((m: string) => {
+      const val = m.replace('鬼火+', '')
+      results.push({ icon: '🔥', value: isNaN(Number(val)) ? val : Number(val) })
+    })
+  }
+  
+  // 匹配 抓牌+数字 或 抓牌+X
+  const drawMatch = effect.match(/抓牌\+(\d+|[XN])/g)
+  if (drawMatch) {
+    drawMatch.forEach((m: string) => {
+      const val = m.replace('抓牌+', '')
+      results.push({ icon: '🎴', value: isNaN(Number(val)) ? val : Number(val) })
+    })
+  }
+  
+  // 最多返回3组效果
+  return results.slice(0, 3)
+}
+
+// 获取卡牌在手牌中显示的效果图标（用于tooltip）
+function getCardEffectStats(card: any): Record<string, {icon: string, value: number | string}> | null {
+  const effects = parseCardEffects(card)
+  if (effects.length === 0) return null
+  
+  const stats: Record<string, {icon: string, value: number | string}> = {}
+  effects.forEach((e, i) => {
+    stats[`effect${i}`] = e
+  })
+  return stats
+}
+
+// 获取手牌卡片上显示的效果图标数组（用于卡片UI）
+function getHandCardEffects(card: any): Array<{icon: string, value: number | string}> {
+  return parseCardEffects(card)
+}
+
 // 显示卡牌悬浮提示
 function showTooltip(event: MouseEvent, card: CardInstance) {
   tooltip.card = card
@@ -799,24 +966,12 @@ function showTooltip(event: MouseEvent, card: CardInstance) {
     tooltip.effect = card.effect || `造成 ${card.damage || 1} 点伤害`
     tooltip.passive = null
     tooltip.skill = null
-  } else if (cardType === 'yokai') {
-    tooltip.typeLabel = '御魂'
-    tooltip.typeClass = 'type-yokai'
-    tooltip.stats = {
-      hp: { icon: '❤️', value: card.hp || 0 },
-      charm: { icon: '👑', value: card.charm || 0 }
-    }
-    tooltip.effect = card.effect || '无特殊效果'
-    tooltip.passive = null
-    tooltip.skill = null
-  } else if (cardType === 'token') {
-    tooltip.typeLabel = '令牌'
-    tooltip.typeClass = 'type-token'
-    tooltip.stats = {
-      hp: { icon: '❤️', value: card.hp || 1 },
-      charm: { icon: '👑', value: card.charm || 1 }
-    }
-    tooltip.effect = card.effect || '可用于超度'
+  } else if (cardType === 'yokai' || cardType === 'token') {
+    tooltip.typeLabel = cardType === 'yokai' ? '御魂' : '令牌'
+    tooltip.typeClass = cardType === 'yokai' ? 'type-yokai' : 'type-token'
+    // 在手牌/牌库/弃牌堆中显示效果图标，而非血量
+    tooltip.stats = getCardEffectStats(card)
+    tooltip.effect = card.effect || (cardType === 'token' ? '可用于超度' : '无特殊效果')
     tooltip.passive = null
     tooltip.skill = null
   } else if (cardType === 'penalty') {
@@ -1906,8 +2061,26 @@ async function confirmReplaceShikigami() {
   cursor:pointer;
   transition:all .2s;
   border-radius:calc(var(--s) * 4);
+  position:relative;
 }
 .side-btn:hover:not(.disabled){background:#2D1F3D}
+.recommend-badge{
+  position:absolute;
+  top:-8px;
+  right:-8px;
+  background:linear-gradient(135deg,#ff6b6b,#ee5a24);
+  color:#fff;
+  font-size:11px;
+  padding:2px 6px;
+  border-radius:8px;
+  font-weight:bold;
+  box-shadow:0 2px 6px rgba(238,90,36,.5);
+  animation:pulse-badge 1.5s infinite;
+}
+@keyframes pulse-badge{
+  0%,100%{transform:scale(1)}
+  50%{transform:scale(1.1)}
+}
 .side-btn.disabled{opacity:.5;cursor:pointer;border-color:#666}
 .side-btn.disabled:hover{background:#2a2a3e}
 
@@ -2408,10 +2581,146 @@ async function confirmReplaceShikigami() {
 .target-card .c-stat{font-size:9px;margin-top:2px}
 
 /* 超度区弹窗 */
-.exiled-modal{min-width:240px}
-.exiled-cards{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin:10px 0}
-.exiled-card{padding:5px 8px;background:rgba(100,100,100,.3);border-radius:4px;font-size:10px}
-.empty-hint{color:#888;margin:12px 0;font-size:11px}
+/* 超度区按钮（类似牌库样式） */
+.exile-btn{
+  width:calc(var(--s) * 150);
+  height:calc(var(--s) * 100);
+  background:#1A1A2E;
+  border:2px solid #D4A574;
+  color:#fff;
+  cursor:pointer;
+  border-radius:calc(var(--s) * 4);
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  transition:all .2s;
+}
+.exile-btn:hover{background:#2D1F3D}
+.exile-count{font-size:calc(var(--s) * 32);font-weight:bold}
+.exile-label{font-size:calc(var(--s) * 16);color:#aaa}
+
+/* 超度区弹窗 */
+.exiled-panel{
+  background:linear-gradient(180deg,#1a1a2e 0%,#0d0d1a 100%);
+  border:3px solid #D4A574;
+  border-radius:12px;
+  padding:25px 30px;
+  text-align:center;
+  max-width:90vw;
+  max-height:80vh;
+  overflow-y:auto;
+}
+.exiled-title{color:#ffd700;font-size:22px;margin-bottom:10px}
+.exiled-hint{font-size:13px;color:#888;margin-bottom:20px}
+.exiled-card-list{
+  display:flex;
+  flex-wrap:wrap;
+  gap:15px;
+  justify-content:center;
+  margin-bottom:20px;
+}
+.exiled-card-item{
+  width:120px;
+  height:168px;
+  border-radius:6px;
+  overflow:hidden;
+  position:relative;
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-end;
+  border:2px solid #666;
+  background:linear-gradient(160deg,#1a1a3e,#2a2a5e);
+}
+.exiled-card-item .card-art{
+  position:absolute;
+  top:0;left:0;
+  width:100%;height:100%;
+  object-fit:cover;
+}
+.exiled-card-item .card-info{
+  position:relative;z-index:1;
+  background:linear-gradient(0deg,rgba(0,0,0,.9) 0%,rgba(0,0,0,.5) 70%,transparent 100%);
+  padding:20px 8px 8px;
+}
+.exiled-card-item .c-name{font-size:13px;font-weight:bold;color:#f0e6d3}
+.exiled-card-item .c-stat{font-size:12px;color:#ddd;margin-top:4px}
+.exiled-card-item.yokai{border-color:#4a7c59}
+.exiled-card-item.spell{border-color:#4a6c9c}
+.exiled-card-item.boss{border-color:#9c4a4a}
+.exiled-close-btn{
+  padding:10px 40px;
+  background:#444;
+  border:none;
+  border-radius:6px;
+  color:#fff;
+  cursor:pointer;
+  font-size:14px;
+}
+.exiled-close-btn:hover{background:#555}
+.empty-hint{color:#888;margin:20px 0;font-size:14px}
+
+/* 牌库/弃牌堆查看弹窗 */
+.pile-box{cursor:pointer;transition:all .2s}
+.pile-box:hover{background:#2D1F3D;border-color:#FFD700}
+.pile-view-panel{
+  background:linear-gradient(180deg,#1a1a2e 0%,#0d0d1a 100%);
+  border:3px solid #D4A574;
+  border-radius:12px;
+  padding:25px 30px;
+  text-align:center;
+  max-width:90vw;
+  max-height:80vh;
+  overflow-y:auto;
+}
+.pile-view-title{color:#ffd700;font-size:22px;margin-bottom:10px}
+.pile-view-hint{font-size:13px;color:#888;margin-bottom:20px}
+.pile-card-list{
+  display:flex;
+  flex-wrap:wrap;
+  gap:15px;
+  justify-content:center;
+  margin-bottom:20px;
+}
+.pile-card-item{
+  width:120px;
+  height:168px;
+  border-radius:6px;
+  overflow:hidden;
+  position:relative;
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-end;
+  border:2px solid #666;
+  background:linear-gradient(160deg,#1a1a3e,#2a2a5e);
+}
+.pile-card-item .card-art{
+  position:absolute;
+  top:0;left:0;
+  width:100%;height:100%;
+  object-fit:cover;
+}
+.pile-card-item .card-info{
+  position:relative;z-index:1;
+  background:linear-gradient(0deg,rgba(0,0,0,.9) 0%,rgba(0,0,0,.5) 70%,transparent 100%);
+  padding:20px 8px 8px;
+}
+.pile-card-item .c-name{font-size:13px;font-weight:bold;color:#f0e6d3}
+.pile-card-item .c-stat{font-size:12px;color:#ddd;margin-top:4px}
+.pile-card-item.spell{border-color:#4a6c9c}
+.pile-card-item.token{border-color:#9c8a4a}
+.pile-card-item.yokai{border-color:#4a7c59}
+.pile-card-item.penalty{border-color:#9c4a4a}
+.pile-close-btn{
+  padding:10px 40px;
+  background:#444;
+  border:none;
+  border-radius:6px;
+  color:#fff;
+  cursor:pointer;
+  font-size:14px;
+}
+.pile-close-btn:hover{background:#555}
 
 /* 式神获取/置换弹窗 */
 .shikigami-modal{min-width:320px;max-width:400px}
@@ -2571,10 +2880,10 @@ async function confirmReplaceShikigami() {
 .card-art{
   position:absolute;inset:0;width:100%;height:100%;
   object-fit:cover;object-position:top center;
-  opacity:.55;border-radius:inherit;pointer-events:none;
+  border-radius:inherit;pointer-events:none;
   z-index:0;
 }
-.boss-art{object-position:center center;opacity:.6}
+.boss-art{object-position:center center}
 /* 文字层在图片上方 */
 .boss-card > *:not(.card-art),
 .yokai-card > *:not(.card-art),
@@ -2687,6 +2996,12 @@ async function confirmReplaceShikigami() {
   background:rgba(0,0,0,.2);
   border-radius:6px;
   border-left:3px solid #667eea;
+}
+.tooltip-effect p{
+  margin:0 0 6px 0;
+}
+.tooltip-effect p:last-child{
+  margin-bottom:0;
 }
 
 .tooltip-passive,.tooltip-skill{

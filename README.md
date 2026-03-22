@@ -91,6 +91,22 @@ Cardgame/
 
 <p align="center">Made with ❤️ for card game lovers</p>
 
+## 🔄 协作开发规范
+
+> ⚠️ **重要：每次开发前必须先同步远程更新！**
+
+```bash
+# 开始工作前先拉取最新代码
+git pull origin main
+
+# 完成工作后推送
+git add -A
+git commit -m "你的提交信息"
+git push
+```
+
+---
+
 ## 🔄 开发流程规范
 
 > **必须遵循的开发流程，确保规则一致性和代码质量**

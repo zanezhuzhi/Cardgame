@@ -339,10 +339,9 @@ export class SinglePlayerGame {
     
     // TEST1: 初始手牌增加1/2/3阶阴阳术（测试获得式神）
     // 关闭方式：将 TEST1_ENABLED 改为 false
-    const TEST1_ENABLED = true;
+    const TEST1_ENABLED = false;
     if (TEST1_ENABLED) {
       const player = this.getPlayer();
-      // 使用内联定义，避免依赖 cardsData 结构
       const testSpells: CardInstance[] = [
         { instanceId: generateId(), cardId: 'spell_001', cardType: 'spell', name: '基础术式', hp: 1, damage: 1, charm: 0 },
         { instanceId: generateId(), cardId: 'spell_002', cardType: 'spell', name: '中级符咒', hp: 2, damage: 2, charm: 0 },
@@ -352,6 +351,22 @@ export class SinglePlayerGame {
       this.addLog('🧪 [TEST1] 添加测试阴阳术：1+2+3=6点伤害');
     }
     // END TEST1
+    
+    // TEST2: 初始手牌增加1/2/3/3阶阴阳术（测试置换式神）
+    // 关闭方式：将 TEST2_ENABLED 改为 false
+    const TEST2_ENABLED = true;
+    if (TEST2_ENABLED) {
+      const player = this.getPlayer();
+      const testSpells: CardInstance[] = [
+        { instanceId: generateId(), cardId: 'spell_001', cardType: 'spell', name: '基础术式', hp: 1, damage: 1, charm: 0 },
+        { instanceId: generateId(), cardId: 'spell_002', cardType: 'spell', name: '中级符咒', hp: 2, damage: 2, charm: 0 },
+        { instanceId: generateId(), cardId: 'spell_003', cardType: 'spell', name: '高级符咒', hp: 3, damage: 3, charm: 1 },
+        { instanceId: generateId(), cardId: 'spell_003', cardType: 'spell', name: '高级符咒', hp: 3, damage: 3, charm: 1 },
+      ];
+      player.hand.push(...testSpells);
+      this.addLog('🧪 [TEST2] 添加测试阴阳术：1+2+3+3=9点（可测试置换式神）');
+    }
+    // END TEST2
     
     // 翻出第一个鬼王（麒麟，无来袭效果）
     this.revealBoss();
@@ -1352,7 +1367,8 @@ export class SinglePlayerGame {
 
   private notifyChange(): void {
     this.state.lastUpdate = Date.now();
-    this.onStateChange({ ...this.state });
+    // 深拷贝确保 Vue 响应式能检测到嵌套变化
+    this.onStateChange(JSON.parse(JSON.stringify(this.state)));
   }
 
   // ============ 状态访问 ============
@@ -1537,11 +1553,11 @@ export class SinglePlayerGame {
     return true;
   }
 
-  /** 置换式神（需要1张高级符咒=3点） */
-  async replaceShikigami(spellInstanceIds: string[], oldShikigamiId: string): Promise<boolean> {
+  /** 准备置换式神：验证符咒，返回2个候选式神供选择 */
+  async prepareReplaceShikigami(spellInstanceIds: string[]): Promise<ShikigamiCard[] | null> {
     if (!this.canReplaceShikigami()) {
       this.addLog(`❌ 无法置换式神`);
-      return false;
+      return null;
     }
 
     const player = this.getPlayer();
@@ -1551,27 +1567,17 @@ export class SinglePlayerGame {
       .map(id => player.hand.find(c => c.instanceId === id))
       .filter((c): c is CardInstance => c !== undefined && c.cardType === 'spell');
     
-    // 必须恰好选择1张
     if (selectedSpells.length !== 1) {
       this.addLog(`❌ 置换需要恰好选择1张高级符咒`);
-      return false;
+      return null;
     }
     
-    // 必须是高级符咒
     if (!this.isAdvancedSpell(selectedSpells[0]!)) {
       this.addLog(`❌ 置换需要1张高级符咒或专属符咒`);
-      return false;
+      return null;
     }
 
-    // 验证要替换的式神
-    const oldShikigamiIndex = player.shikigami.findIndex(s => s.id === oldShikigamiId);
-    if (oldShikigamiIndex === -1) {
-      this.addLog(`❌ 未找到要替换的式神`);
-      return false;
-    }
-    const oldShikigami = player.shikigami[oldShikigamiIndex]!;
-
-    // 将选中的卡牌移入超度区
+    // 消耗符咒
     for (const spell of selectedSpells) {
       const idx = player.hand.findIndex(c => c.instanceId === spell.instanceId);
       if (idx !== -1) {
@@ -1579,48 +1585,83 @@ export class SinglePlayerGame {
         player.exiled.push(spell);
       }
     }
-    const replaceDamage = selectedSpells.reduce((sum, c) => sum + (c.damage || c.hp || 1), 0);
-    this.addLog(`📿 超度 ${selectedSpells.map(s => s.name).join('、')}（共${replaceDamage}点伤害）`);
+    this.addLog(`📿 超度 ${selectedSpells[0]!.name}（3点伤害）准备置换式神`);
 
-    // 将旧式神放回供应堆底部
-    const supply = this.state.field.shikigamiSupply!;
-    supply.push(oldShikigami);
-    this.addLog(`↩️ ${oldShikigami.name} 返回式神供应堆`);
+    // 保存选中的符咒ID（用于确认时）
+    this.pendingSpellIds = spellInstanceIds;
 
-    // 从供应堆抽取2张
-    const drawnShikigami = supply.splice(0, Math.min(2, supply.length));
+    // 从商店随机抽2个式神
+    const supply = this.state.field.shikigamiSupply || [];
+    if (supply.length === 0) {
+      this.addLog(`❌ 式神商店已空`);
+      return null;
+    }
     
-    if (drawnShikigami.length === 0) {
-      this.addLog(`❌ 式神供应堆已空`);
+    const shuffled = [...supply].sort(() => Math.random() - 0.5);
+    const candidates = shuffled.slice(0, Math.min(2, shuffled.length));
+    
+    this.pendingShikigamiCandidates = candidates;
+    this.addLog(`🎴 可选式神：${candidates.map(s => `${s.name}(${s.rarity})`).join('、')}`);
+    
+    this.notifyChange();
+    return candidates;
+  }
+
+  /** 执行置换式神：移除旧式神，添加新式神 */
+  async executeReplaceShikigami(oldShikigamiId: string, newShikigamiId: string, candidates: ShikigamiCard[]): Promise<boolean> {
+    const player = this.getPlayer();
+    const supply = this.state.field.shikigamiSupply!;
+
+    // 验证要替换的旧式神
+    const oldShikigamiIndex = player.shikigami.findIndex(s => s.id === oldShikigamiId);
+    if (oldShikigamiIndex === -1) {
+      this.addLog(`❌ 未找到要替换的式神`);
       return false;
     }
+    const oldShikigami = player.shikigami[oldShikigamiIndex]!;
 
-    // 让玩家选择1张
-    let selectedIndex = 0;
-    if (drawnShikigami.length > 1 && this.onChoiceRequired) {
-      const options = drawnShikigami.map(s => `${s.name}（${s.rarity}）`);
-      selectedIndex = await this.onChoiceRequired(options);
+    // 找到选中的新式神
+    const selectedShikigami = candidates.find(s => s.id === newShikigamiId);
+    if (!selectedShikigami) {
+      this.addLog(`❌ 无效的式神选择`);
+      return false;
     }
+    const notSelected = candidates.filter(s => s.id !== newShikigamiId);
 
-    const selectedShikigami = drawnShikigami[selectedIndex]!;
-    const notSelected = drawnShikigami.filter((_, i) => i !== selectedIndex);
-
-    // 替换式神
-    player.shikigami[oldShikigamiIndex] = selectedShikigami;
-    player.shikigamiState[oldShikigamiIndex] = {
+    // 1. 将旧式神放回供应堆底部
+    supply.push(oldShikigami);
+    
+    // 2. 从玩家式神列表中移除旧式神
+    player.shikigami.splice(oldShikigamiIndex, 1);
+    player.shikigamiState.splice(oldShikigamiIndex, 1);
+    
+    // 3. 将新式神加入玩家式神区
+    player.shikigami.push(selectedShikigami);
+    player.shikigamiState.push({
       cardId: selectedShikigami.id,
       isExhausted: false,
       markers: {}
-    };
+    });
 
-    // 将未选中的放回供应堆底部
+    // 4. 将未选中的式神放回供应堆底部
     supply.push(...notSelected);
 
+    // 5. 从供应堆中移除已选式神（避免重复）
+    const selectedIdx = supply.findIndex(s => s.id === newShikigamiId);
+    if (selectedIdx !== -1) {
+      supply.splice(selectedIdx, 1);
+    }
+
     this.addLog(`🔄 置换式神：${oldShikigami.name} → ${selectedShikigami.name}（${selectedShikigami.rarity}）`);
+    this.addLog(`📋 当前式神数量：${player.shikigami.length}/${GAME_CONSTANTS.MAX_SHIKIGAMI}`);
+    
+    // 清空临时状态
+    this.pendingShikigamiCandidates = [];
+    this.pendingSpellIds = [];
     
     this.notifyChange();
     return true;
-  }
+    }
 
   /** 通过地藏像获取式神（免费，不消耗阴阳术） */
   async acquireShikigamiFromJizo(): Promise<boolean> {

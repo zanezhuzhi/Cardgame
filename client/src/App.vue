@@ -374,30 +374,14 @@
             </div>
           </div>
 
-          <!-- 步骤2（置换时）：选择要替换的式神 -->
-          <div v-else-if="shikigamiModal.step === 2 && shikigamiModal.isReplace" class="shikigami-step">
-            <p class="step-hint">选择要替换的式神</p>
-            <div class="old-shiki-grid">
-              <div v-for="s in player?.shikigami" :key="s.id"
-                   class="old-shiki-card" @click="selectOldShikigami(s.id)">
-                <div class="s-name">{{s.name}}</div>
-                <div class="s-rarity">{{s.rarity}}</div>
-              </div>
-            </div>
-            <div class="modal-actions">
-              <button class="btn" @click="shikigamiModal.step = 1">返回</button>
-            </div>
-          </div>
-
-          <!-- 步骤3：独立的式神选择界面 -->
-          <template v-else-if="shikigamiModal.step === 3">
-            <!-- 关闭原有modal-box，使用独立全屏界面 -->
+          <!-- 步骤2、3在modal外独立显示 -->
+          <template v-else-if="shikigamiModal.step >= 2">
           </template>
         </div>
       </div>
 
-      <!-- 步骤3：独立的式神选择界面（不使用modal-box） -->
-      <div class="acquire-shikigami-overlay" v-if="shikigamiModal.show && shikigamiModal.step === 3">
+      <!-- 步骤2：选择新式神（2选1）- 独立全屏界面 -->
+      <div class="acquire-shikigami-overlay" v-if="shikigamiModal.show && shikigamiModal.step === 2">
         <div class="acquire-shikigami-panel">
           <h2 class="acquire-title">🦊 选择式神</h2>
           <p class="acquire-hint">从下列{{ shikigamiModal.candidates.length }}个式神中选择1个</p>
@@ -424,7 +408,40 @@
                   :class="{ ready: shikigamiModal.selectedNewId }"
                   :disabled="!shikigamiModal.selectedNewId"
                   @click="confirmNewShikigami">
-            {{ shikigamiModal.selectedNewId ? '确认获取' : '请选择一个式神' }}
+            {{ shikigamiModal.selectedNewId ? (shikigamiModal.isReplace ? '下一步：选择替换' : '确认获取') : '请选择一个式神' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- 步骤3（置换时）：选择要替换的旧式神 -->
+      <div class="acquire-shikigami-overlay" v-if="shikigamiModal.show && shikigamiModal.step === 3 && shikigamiModal.isReplace">
+        <div class="acquire-shikigami-panel">
+          <h2 class="acquire-title">🔄 选择替换</h2>
+          <p class="acquire-hint">选择要替换掉的式神</p>
+          
+          <div class="acquire-cards">
+            <div v-for="s in player?.shikigami" :key="s.id"
+                 class="shikigami-option"
+                 :class="{ selected: shikigamiModal.selectedOldId === s.id }"
+                 @click="shikigamiModal.selectedOldId = s.id"
+                 @mouseenter="showSelectShikigamiTooltip($event, s)"
+                 @mouseleave="hideTooltip">
+              <div class="shikigami-card-inner">
+                <img v-if="getCardImage(s)" :src="getCardImage(s)" class="shikigami-art" />
+                <div class="shikigami-overlay">
+                  <div class="shikigami-name">{{ s.name }}</div>
+                  <div class="shikigami-rarity" :class="'rarity-' + s.rarity?.toLowerCase()">{{ s.rarity }}</div>
+                </div>
+              </div>
+              <div class="select-badge" v-if="shikigamiModal.selectedOldId === s.id">✓</div>
+            </div>
+          </div>
+          
+          <button class="acquire-confirm-btn" 
+                  :class="{ ready: shikigamiModal.selectedOldId }"
+                  :disabled="!shikigamiModal.selectedOldId"
+                  @click="confirmReplaceShikigami">
+            {{ shikigamiModal.selectedOldId ? '确认替换' : '请选择要替换的式神' }}
           </button>
         </div>
       </div>
@@ -611,13 +628,14 @@ const targetModal = reactive<{
 const shikigamiModal = reactive<{
   show: boolean
   isReplace: boolean
-  step: number  // 1=选卡, 2=选旧式神(仅置换), 3=选新式神
+  step: number  // 1=选卡, 2=选新式神, 3=选旧式神(仅置换)
   selectedSpells: string[]
   selectedDamage: number
   oldShikigamiId: string
   candidates: any[]  // 抽到的式神
   selectingOld: boolean
   selectedNewId: string  // 选中的新式神ID
+  selectedOldId: string  // 选中的旧式神ID（置换时）
 }>({
   show: false,
   isReplace: false,
@@ -627,7 +645,8 @@ const shikigamiModal = reactive<{
   oldShikigamiId: '',
   candidates: [],
   selectingOld: false,
-  selectedNewId: ''
+  selectedNewId: '',
+  selectedOldId: ''
 })
 
 const player = computed(() => state.value?.players[0])
@@ -636,10 +655,25 @@ const boss = computed(() => state.value?.field.currentBoss)
 const logs = computed(() => (state.value?.log || []).slice(-6))
 const canSpell = computed(() => game?.canGainBasicSpell() ?? false)
 
-// 式神获取/置换相关
-const canAcquireShikigami = computed(() => game?.canAcquireShikigami() ?? false)
-const canReplaceShikigami = computed(() => game?.canReplaceShikigami() ?? false)
-const spellCardsInHand = computed(() => game?.getSpellCardsInHand() ?? [])
+// 式神获取/置换相关 - 依赖 state 触发响应式更新
+const canAcquireShikigami = computed(() => {
+  // 触发响应式依赖
+  const _ = state.value?.turnPhase
+  const __ = player.value?.hand?.length
+  return game?.canAcquireShikigami() ?? false
+})
+const canReplaceShikigami = computed(() => {
+  // 触发响应式依赖
+  const _ = state.value?.turnPhase
+  const __ = player.value?.hand?.length
+  const ___ = player.value?.shikigami?.length
+  return game?.canReplaceShikigami() ?? false
+})
+// 手牌中的符咒卡（直接从响应式状态获取）
+const spellCardsInHand = computed(() => {
+  const hand = player.value?.hand || []
+  return hand.filter(c => c.cardType === 'spell')
+})
 
 // 验证当前选择是否有效
 const isValidShikigamiSelection = computed(() => {
@@ -1079,10 +1113,26 @@ function handleShikigamiAction() {
       shikigamiModal.isReplace = true
       openShikigamiModal()
     } else {
-      showHint('⚠️ 无法置换式神', [
-        '条件：',
-        '• 弃置1张高级符咒（3点伤害）'
-      ])
+      // 检查具体不满足哪个条件
+      const reasons: string[] = []
+      const shikiCount = player.value?.shikigami?.length || 0
+      const phase = state.value?.turnPhase
+      const supplyLen = state.value?.field?.shikigamiSupply?.length || 0
+      const hasAdvanced = game?.hasAdvancedSpellInHand() ?? false
+      
+      if (phase !== 'action') {
+        reasons.push(`• 需要在行动阶段`)
+      }
+      if (shikiCount !== 3) {
+        reasons.push(`• 需要正好3个式神（当前：${shikiCount}个）`)
+      }
+      if (!hasAdvanced) {
+        reasons.push('• 需要1张高级符咒（3点伤害）')
+      }
+      if (supplyLen === 0) {
+        reasons.push('• 式神商店已空')
+      }
+      showHint('⚠️ 无法置换式神', reasons.length ? reasons : ['条件不满足'])
     }
   } else {
     // 获得式神
@@ -1152,34 +1202,24 @@ function toggleSpellForShikigami(card: CardInstance) {
 
 async function nextShikigamiStep() {
   if (shikigamiModal.isReplace) {
-    // 置换模式：进入步骤2选择旧式神
-    shikigamiModal.step = 2
-    shikigamiModal.selectingOld = true
+    // 置换模式：先抽取候选式神，然后进入步骤2选新式神
+    const candidates = await game?.prepareReplaceShikigami(shikigamiModal.selectedSpells)
+    if (candidates && candidates.length > 0) {
+      shikigamiModal.candidates = candidates
+      shikigamiModal.step = 2  // 进入选新式神步骤
+      shikigamiModal.selectedNewId = ''
+    } else {
+      // 调试：为什么返回null
+      console.error('prepareReplaceShikigami failed', shikigamiModal.selectedSpells)
+    }
   } else {
-    // 获取模式：先消耗符咒，然后进入步骤3选式神
+    // 获取模式：先消耗符咒，然后进入步骤2选式神
     const candidates = await game?.prepareAcquireShikigami(shikigamiModal.selectedSpells)
     if (candidates && candidates.length > 0) {
       shikigamiModal.candidates = candidates
-      shikigamiModal.step = 3  // 进入式神选择步骤
+      shikigamiModal.step = 2  // 进入式神选择步骤
+      shikigamiModal.selectedNewId = ''
     }
-  }
-}
-
-function selectOldShikigami(shikigamiId: string) {
-  if (!shikigamiModal.selectingOld) return
-  shikigamiModal.oldShikigamiId = shikigamiId
-  shikigamiModal.selectingOld = false
-  // 执行置换
-  executeReplaceShikigami()
-}
-
-async function executeReplaceShikigami() {
-  const success = await game?.replaceShikigami(
-    shikigamiModal.selectedSpells, 
-    shikigamiModal.oldShikigamiId
-  )
-  if (success) {
-    closeShikigamiModal()
   }
 }
 
@@ -1191,8 +1231,29 @@ async function selectNewShikigami(shikigami: any) {
 function confirmNewShikigami() {
   if (!shikigamiModal.selectedNewId) return
   
-  // 确认获取选中的式神
-  const success = game?.confirmAcquireShikigami(shikigamiModal.selectedNewId)
+  if (shikigamiModal.isReplace) {
+    // 置换模式：进入步骤3选择要替换的旧式神
+    shikigamiModal.step = 3
+    shikigamiModal.selectedOldId = ''
+  } else {
+    // 获取模式：直接确认
+    const success = game?.confirmAcquireShikigami(shikigamiModal.selectedNewId)
+    if (success) {
+      closeShikigamiModal()
+    }
+  }
+}
+
+async function confirmReplaceShikigami() {
+  if (!shikigamiModal.selectedNewId || !shikigamiModal.selectedOldId) return
+  
+  // 执行置换：移除旧式神，添加新式神
+  const success = await game?.executeReplaceShikigami(
+    shikigamiModal.selectedOldId,
+    shikigamiModal.selectedNewId,
+    shikigamiModal.candidates
+  )
+  
   if (success) {
     closeShikigamiModal()
   }

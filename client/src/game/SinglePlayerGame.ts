@@ -75,6 +75,8 @@ export class SinglePlayerGame {
   constructor(playerName: string, onStateChange: (state: GameState) => void) {
     this.onStateChange = onStateChange;
     this.state = this.createInitialState(playerName);
+    // 立即通知初始状态，让 Vue 进入式神选取阶段
+    this.notifyChange();
   }
 
   // ============ 初始化 ============
@@ -83,9 +85,13 @@ export class SinglePlayerGame {
     const player = this.createPlayer('player_1', playerName);
     const field = this.createField();
 
+    // 随机抽取4个式神供选择
+    const shuffledShikigami = shuffle([...cardsData.shikigami]) as ShikigamiCard[];
+    const shikigamiOptions = shuffledShikigami.slice(0, 4);
+
     return {
       roomId: 'single_player',
-      phase: 'setup',
+      phase: 'shikigamiSelect',  // 先进入式神选取阶段
       players: [player],
       currentPlayerIndex: 0,
       turnNumber: 0,
@@ -94,8 +100,11 @@ export class SinglePlayerGame {
       log: [],
       lastUpdate: Date.now(),
       lastPlayerKilledYokai: true,  // 首回合不触发刷新选项
-      pendingYokaiRefresh: false
-    };
+      pendingYokaiRefresh: false,
+      // 式神选取相关
+      shikigamiOptions,      // 可选的4个式神
+      selectedShikigami: []  // 已选的式神
+    } as GameState;
   }
 
   private createPlayer(id: string, name: string): PlayerState {
@@ -115,15 +124,12 @@ export class SinglePlayerGame {
       deck.push(this.createCardInstance(daruma, 'yokai'));
     }
 
-    // 随机选2个式神
-    const shuffledShikigami = shuffle([...cardsData.shikigami]);
-    const selectedShikigami = shuffledShikigami.slice(0, 2) as ShikigamiCard[];
-
+    // 式神在选取阶段确定，初始为空
     return {
       id,
       name,
       onmyoji: cardsData.onmyoji[0] as OnmyojiCard,
-      shikigami: selectedShikigami,
+      shikigami: [],  // 初始为空，在选取阶段填充
       maxShikigami: GAME_CONSTANTS.MAX_SHIKIGAMI,
       ghostFire: 0,
       maxGhostFire: GAME_CONSTANTS.MAX_GHOST_FIRE,
@@ -137,11 +143,7 @@ export class SinglePlayerGame {
       cardsPlayed: 0,
       isConnected: true,
       isReady: true,
-      shikigamiState: selectedShikigami.map(s => ({
-        cardId: s.id,
-        isExhausted: false,
-        markers: {}
-      })),
+      shikigamiState: [],  // 在选取阶段填充
       tempBuffs: []
     };
   }
@@ -242,6 +244,94 @@ export class SinglePlayerGame {
   }
 
   // ============ 游戏流程 ============
+
+  // ============ 式神选取阶段 ============
+
+  /** 选择式神（在选取阶段调用） */
+  selectShikigami(shikigamiId: string): void {
+    const state = this.state as any;
+    
+    // 检查是否在选取阶段
+    if (this.state.phase !== 'shikigamiSelect') {
+      this.addLog('⚠️ 当前不在式神选取阶段');
+      return;
+    }
+    
+    // 检查是否已选满2个
+    if ((state.selectedShikigami?.length || 0) >= 2) {
+      this.addLog('⚠️ 已选择2个式神');
+      return;
+    }
+    
+    // 检查是否在可选列表中
+    const options = state.shikigamiOptions as ShikigamiCard[];
+    const selected = options.find(s => s.id === shikigamiId);
+    if (!selected) {
+      this.addLog('⚠️ 无效的式神选择');
+      return;
+    }
+    
+    // 检查是否已选择过
+    if (state.selectedShikigami?.some((s: ShikigamiCard) => s.id === shikigamiId)) {
+      this.addLog('⚠️ 该式神已被选择');
+      return;
+    }
+    
+    // 添加到已选列表
+    if (!state.selectedShikigami) state.selectedShikigami = [];
+    state.selectedShikigami.push(selected);
+    this.addLog(`✅ 选择式神：${selected.name}（${state.selectedShikigami.length}/2）`);
+    
+    // 不再自动开始，等待玩家点击确认按钮
+    this.notifyChange();
+  }
+
+  /** 取消选择式神 */
+  deselectShikigami(shikigamiId: string): void {
+    const state = this.state as any;
+    
+    if (this.state.phase !== 'shikigamiSelect') return;
+    
+    const idx = state.selectedShikigami?.findIndex((s: ShikigamiCard) => s.id === shikigamiId);
+    if (idx !== undefined && idx >= 0) {
+      const removed = state.selectedShikigami.splice(idx, 1)[0];
+      this.addLog(`❌ 取消选择：${removed.name}`);
+      this.notifyChange();
+    }
+  }
+
+  /** 确认式神选择，开始游戏 */
+  confirmShikigamiSelection(): void {
+    const state = this.state as any;
+    
+    if (this.state.phase !== 'shikigamiSelect') {
+      this.addLog('⚠️ 当前不在式神选取阶段');
+      return;
+    }
+    
+    if ((state.selectedShikigami?.length || 0) < 2) {
+      this.addLog('⚠️ 请先选择2个式神');
+      return;
+    }
+    
+    // 将选择的式神设置给玩家
+    const player = this.getPlayer();
+    player.shikigami = state.selectedShikigami;
+    player.shikigamiState = player.shikigami.map(s => ({
+      cardId: s.id,
+      isExhausted: false,
+      markers: {}
+    }));
+    
+    this.addLog(`🎭 式神阵容确定：${player.shikigami.map(s => s.name).join('、')}`);
+    
+    // 清理选取状态
+    delete state.shikigamiOptions;
+    delete state.selectedShikigami;
+    
+    // 正式开始游戏
+    this.startGame();
+  }
 
   startGame(): void {
     // 抓5张起始手牌

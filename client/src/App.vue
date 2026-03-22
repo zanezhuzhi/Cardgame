@@ -11,6 +11,50 @@
       </div>
     </div>
 
+    <!-- 式神选取阶段 -->
+    <div v-else-if="state?.phase === 'shikigamiSelect'" class="shikigami-select-phase">
+      <div class="select-modal">
+        <h2>🎭 选择式神</h2>
+        <p class="select-hint">从下列4个式神中选择2个作为你的搭档</p>
+        
+        <div class="shikigami-options">
+          <div v-for="s in shikigamiOptions" :key="s.id"
+               class="shikigami-option"
+               :class="{ selected: isShikigamiSelected(s.id) }"
+               @click="toggleShikigamiSelection(s.id)"
+               @mouseenter="showSelectShikigamiTooltip($event, s)"
+               @mouseleave="hideTooltip">
+            <div class="shikigami-card-inner">
+              <img v-if="getCardImage(s)" :src="getCardImage(s)" class="shikigami-art" />
+              <div class="shikigami-overlay">
+                <div class="shikigami-name">{{ s.name }}</div>
+                <div class="shikigami-rarity" :class="'rarity-' + s.rarity?.toLowerCase()">{{ s.rarity }}</div>
+              </div>
+            </div>
+            <div class="select-badge" v-if="isShikigamiSelected(s.id)">✓</div>
+          </div>
+        </div>
+        
+        <div class="selected-preview">
+          <span class="preview-label">已选择：</span>
+          <template v-if="selectedShikigami.length > 0">
+            <span v-for="s in selectedShikigami" :key="s.id" class="selected-tag">
+              {{ s.name }}
+              <button class="remove-btn" @click.stop="deselectShikigami(s.id)">×</button>
+            </span>
+          </template>
+          <span v-else class="empty-hint">点击上方卡牌选择</span>
+        </div>
+        
+        <button class="confirm-btn" 
+                :class="{ ready: selectedShikigami.length >= 2 }"
+                :disabled="selectedShikigami.length < 2"
+                @click="confirmShikigamiSelection">
+          {{ selectedShikigami.length >= 2 ? '🎮 开始游戏' : `确认选择 (${selectedShikigami.length}/2)` }}
+        </button>
+      </div>
+    </div>
+
     <!-- 游戏界面 -->
     <div v-else class="game-board">
       <!-- 顶部栏 (height:150px) -->
@@ -349,35 +393,36 @@
         </div>
       </div>
 
-      <!-- 卡牌悬浮提示 -->
-      <Teleport to="body">
-        <div class="card-tooltip" v-if="tooltip.show" :style="tooltipStyle">
-          <div class="tooltip-header">
-            <span class="tooltip-name">{{tooltip.card?.name}}</span>
-            <span class="tooltip-type" :class="tooltip.typeClass">{{tooltip.typeLabel}}</span>
-          </div>
-          <div class="tooltip-stats" v-if="tooltip.stats">
-            <span v-for="(stat, key) in tooltip.stats" :key="key" class="stat-item">
-              {{stat.icon}}{{stat.value}}
-            </span>
-          </div>
-          <div class="tooltip-subtype" v-if="tooltip.card?.subtype">
-            {{tooltip.card.subtype}}
-          </div>
-          <div class="tooltip-effect" v-if="tooltip.effect">
-            {{tooltip.effect}}
-          </div>
-          <div class="tooltip-passive" v-if="tooltip.passive">
-            <span class="passive-label">【被动】{{tooltip.passive.name}}</span>
-            <p>{{tooltip.passive.effect}}</p>
-          </div>
-          <div class="tooltip-skill" v-if="tooltip.skill">
-            <span class="skill-label">【启】{{tooltip.skill.name}} (🔥{{tooltip.skill.cost}})</span>
-            <p>{{tooltip.skill.effect}}</p>
-          </div>
-        </div>
-      </Teleport>
     </div>
+
+    <!-- 卡牌悬浮提示（全局，始终可用） -->
+    <Teleport to="body">
+      <div class="card-tooltip" v-if="tooltip.show" :style="tooltipStyle">
+        <div class="tooltip-header">
+          <span class="tooltip-name">{{tooltip.card?.name}}</span>
+          <span class="tooltip-type" :class="tooltip.typeClass">{{tooltip.typeLabel}}</span>
+        </div>
+        <div class="tooltip-stats" v-if="tooltip.stats">
+          <span v-for="(stat, key) in tooltip.stats" :key="key" class="stat-item">
+            {{stat.icon}}{{stat.value}}
+          </span>
+        </div>
+        <div class="tooltip-subtype" v-if="tooltip.card?.subtype">
+          {{tooltip.card.subtype}}
+        </div>
+        <div class="tooltip-effect" v-if="tooltip.effect">
+          {{tooltip.effect}}
+        </div>
+        <div class="tooltip-passive" v-if="tooltip.passive">
+          <span class="passive-label">【被动】{{tooltip.passive.name}}</span>
+          <p>{{tooltip.passive.effect}}</p>
+        </div>
+        <div class="tooltip-skill" v-if="tooltip.skill">
+          <span class="skill-label">【{{tooltip.skill.name}} (🔥{{tooltip.skill.cost}})</span>
+          <p>{{tooltip.skill.effect}}</p>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -731,6 +776,82 @@ function hideTooltip() {
   tooltip.show = false
 }
 
+// ============ 式神选取阶段 ============
+
+// 可选的式神列表
+const shikigamiOptions = computed(() => {
+  return (state.value as any)?.shikigamiOptions || []
+})
+
+// 已选择的式神列表
+const selectedShikigami = computed(() => {
+  return (state.value as any)?.selectedShikigami || []
+})
+
+// 检查式神是否已被选中
+function isShikigamiSelected(shikigamiId: string): boolean {
+  return selectedShikigami.value.some((s: any) => s.id === shikigamiId)
+}
+
+// 切换式神选择
+function toggleShikigamiSelection(shikigamiId: string) {
+  if (!game) return
+  
+  if (isShikigamiSelected(shikigamiId)) {
+    game.deselectShikigami(shikigamiId)
+  } else {
+    game.selectShikigami(shikigamiId)
+  }
+}
+
+// 取消选择式神
+function deselectShikigami(shikigamiId: string) {
+  if (!game) return
+  game.deselectShikigami(shikigamiId)
+}
+
+// 确认式神选择
+function confirmShikigamiSelection() {
+  if (!game) return
+  game.confirmShikigamiSelection()
+}
+
+// 式神选取阶段的悬浮提示（详细技能展示）
+function showSelectShikigamiTooltip(event: MouseEvent, shikigami: any) {
+  tooltip.card = shikigami
+  tooltip.x = event.clientX
+  tooltip.y = event.clientY
+  
+  tooltip.typeLabel = shikigami.rarity || 'SR'
+  tooltip.typeClass = `rarity-${(shikigami.rarity || 'SR').toLowerCase()}`
+  tooltip.stats = {
+    charm: { icon: '👑', value: shikigami.charm || 2 }
+  }
+  
+  // 构建完整技能描述
+  if (shikigami.skill) {
+    const typeLabel = shikigami.skill.type === 'active' ? '启' : 
+                      shikigami.skill.type === 'trigger' ? '触' : '永'
+    tooltip.effect = ''
+    tooltip.passive = shikigami.passive || null
+    tooltip.skill = {
+      name: `${typeLabel}】${shikigami.skill.name}`,
+      cost: shikigami.skill.cost || 0,
+      effect: shikigami.skill.description || shikigami.skill.effect || ''
+    }
+  } else if (shikigami.passive) {
+    tooltip.effect = `【被动】${shikigami.passive.name}：${shikigami.passive.effect}`
+    tooltip.passive = null
+    tooltip.skill = null
+  } else {
+    tooltip.effect = shikigami.effect || ''
+    tooltip.passive = null
+    tooltip.skill = null
+  }
+  
+  tooltip.show = true
+}
+
 function startGame() {
   game = new SinglePlayerGame(playerName.value||'阴阳师', s => {
     state.value = s
@@ -765,7 +886,9 @@ function startGame() {
     })
   }
   
-  game.startGame()
+  // 不再直接调用 game.startGame()
+  // 玩家需要先在 shikigamiSelect 阶段选择式神
+  // 选择完成后由 confirmShikigamiSelection() 触发 game.startGame()
   inGame.value = true
 }
 
@@ -981,6 +1104,239 @@ async function selectNewShikigami(shikigami: any) {
 .btn.primary{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .tips{margin-top:20px;color:#666;font-size:13px}
+
+/* ══════════════════════════════════════════════
+   式神选取阶段
+══════════════════════════════════════════════ */
+.shikigami-select-phase {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #1a1a2e 0%, #2d1f47 100%);
+}
+
+.select-modal {
+  background: rgba(30, 30, 50, 0.95);
+  border: 2px solid #667eea;
+  border-radius: 16px;
+  padding: 30px 40px;
+  max-width: 1100px;
+  width: 95%;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.select-modal h2 {
+  text-align: center;
+  font-size: 28px;
+  margin-bottom: 10px;
+  background: linear-gradient(135deg, #ffd700, #ff8c00);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.select-hint {
+  text-align: center;
+  color: #aaa;
+  margin-bottom: 25px;
+}
+
+.shikigami-options {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 25px;
+}
+
+.shikigami-option {
+  background: rgba(40, 40, 70, 0.9);
+  border: 3px solid #333;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.shikigami-option:hover {
+  border-color: #667eea;
+  transform: translateY(-5px) scale(1.02);
+  box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+}
+
+.shikigami-option.selected {
+  border-color: #ffd700;
+  background: rgba(255, 215, 0, 0.1);
+  box-shadow: 0 0 25px rgba(255, 215, 0, 0.4);
+  transform: translateY(-3px);
+}
+
+/* 式神卡片内部容器 */
+.shikigami-card-inner {
+  position: relative;
+  width: 100%;
+}
+
+/* 式神图片 - 完整显示，匹配资源原始比例 */
+.shikigami-art {
+  width: 100%;
+  aspect-ratio: 3 / 4;  /* 竖版比例，匹配角色资源 */
+  object-fit: cover;
+  object-position: center top;
+  display: block;
+}
+
+/* 底部透明遮罩层 - 叠加在图片上 */
+.shikigami-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  text-align: center;
+  padding: 30px 8px 12px;
+  background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.5) 60%, transparent 100%);
+}
+
+.shikigami-name {
+  font-size: 18px;
+  font-weight: bold;
+  color: #fff;
+  margin-bottom: 4px;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+}
+
+.shikigami-rarity {
+  font-size: 13px;
+  font-weight: bold;
+  padding: 2px 12px;
+  border-radius: 10px;
+  display: inline-block;
+}
+
+.shikigami-rarity.rarity-ssr {
+  background: linear-gradient(135deg, #ffd700, #ff8c00);
+  color: #1a1a2e;
+}
+
+.shikigami-rarity.rarity-sr {
+  background: linear-gradient(135deg, #a855f7, #7c3aed);
+  color: #fff;
+}
+
+.shikigami-rarity.rarity-r {
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  color: #fff;
+}
+
+/* 选中徽章 */
+.select-badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: linear-gradient(135deg, #ffd700, #ff8c00);
+  color: #1a1a2e;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 16px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(255, 215, 0, 0.5);
+}
+
+/* 已选预览 */
+.selected-preview {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 10px;
+  padding: 15px 20px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-height: 50px;
+}
+
+.preview-label {
+  color: #888;
+  font-size: 15px;
+}
+
+.selected-tag {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: #fff;
+  padding: 6px 16px;
+  border-radius: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.remove-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: #fff;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.remove-btn:hover {
+  background: rgba(255, 100, 100, 0.6);
+}
+
+.empty-hint {
+  color: #666;
+  font-style: italic;
+}
+
+/* 确认按钮 */
+.confirm-btn {
+  display: block;
+  width: 100%;
+  padding: 16px;
+  background: #444;
+  border: none;
+  border-radius: 12px;
+  color: #888;
+  font-size: 18px;
+  cursor: not-allowed;
+  transition: all 0.3s;
+}
+
+.confirm-btn.ready {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  color: #fff;
+  cursor: pointer;
+  font-weight: bold;
+  box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);
+}
+
+.confirm-btn.ready:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 25px rgba(34, 197, 94, 0.5);
+}
+
+.confirm-btn:disabled {
+  opacity: 0.7;
+}
+
+/* 响应式：小屏幕时2列 */
+@media (max-width: 900px) {
+  .shikigami-options {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
 
 /* ══════════════════════════════════════════════
    游戏主布局 - 基于1920x1080设计稿

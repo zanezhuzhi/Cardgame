@@ -22,11 +22,11 @@ import type {
 // 导入卡牌数据（直接从JSON）
 import cardsData from '../../../shared/data/cards.json';
 
-// 暂时禁用效果引擎导入（类型系统重构中）
-// import { effectEngine } from '../../../shared/game/effects/EffectEngine';
-// import { executeYokaiEffect as executeYokaiEffectDirect } from '../../../shared/game/effects/YokaiEffects';
-// import { SHIKIGAMI_EFFECT_DEFS, getShikigamiEffectDefs } from '../../../shared/game/effects/ShikigamiEffects';
-// import type { EffectContext, CardEffect, TempBuffType } from '../../../shared/game/effects/types';
+// 导入御魂效果执行器
+import { executeYokaiEffect as executeYokaiEffectHandler } from '../../../shared/game/effects/YokaiEffects';
+
+// 导入式神技能执行器
+import { executeSkill as executeShikigamiSkill } from '../../../shared/game/effects/ShikigamiSkills';
 
 // ============ 常量 ============
 
@@ -584,8 +584,37 @@ export class SinglePlayerGame {
 
   /** 执行妖怪御魂效果 */
   private async executeYokaiEffect(card: CardInstance): Promise<void> {
-    // 暂时使用简化的默认逻辑（效果引擎重构中）
-    this.executeDefaultYokaiEffect(card);
+    const player = this.getPlayer();
+    const yokaiName = card.name;
+    
+    // 构建效果上下文
+    const effectContext = {
+      player,
+      gameState: this.state,
+      card,
+      onSelectCards: this.onSelectCardsRequired,
+      onChoice: this.onChoiceRequired,
+      onSelectTarget: this.onSelectTargetRequired
+    };
+    
+    try {
+      // 调用真正的御魂效果处理器
+      const result = await executeYokaiEffectHandler(yokaiName, effectContext);
+      
+      if (result.success) {
+        this.addLog(`✨ ${yokaiName}御魂: ${result.message}`);
+      } else {
+        // 效果未找到或执行失败，使用默认逻辑
+        this.addLog(`⚠️ ${result.message}`);
+        this.executeDefaultYokaiEffect(card);
+      }
+    } catch (error) {
+      // 发生错误时使用默认逻辑
+      console.error(`御魂效果执行错误: ${yokaiName}`, error);
+      this.executeDefaultYokaiEffect(card);
+    }
+    
+    this.notifyChange();
   }
 
   /** 默认御魂效果（用于未定义的卡牌） */
@@ -595,7 +624,7 @@ export class SinglePlayerGame {
     // 基础伤害
     if (card.damage && card.damage > 0) {
       player.damage += card.damage;
-      this.addLog(`⚔️ 伤害+${card.damage}`);
+      this.addLog(`⚔️ ${card.name}：伤害+${card.damage}`);
     }
   }
 

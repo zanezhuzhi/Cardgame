@@ -354,11 +354,14 @@
             </p>
             <div class="spell-select-grid">
               <div v-for="c in spellCardsInHand" :key="c.instanceId"
-                   class="spell-card" 
+                   class="spell-select-card" 
                    :class="{selected: shikigamiModal.selectedSpells.includes(c.instanceId)}"
                    @click="toggleSpellForShikigami(c)">
-                <div class="c-name">{{c.name}}</div>
-                <div class="c-stat">⚔️{{c.damage||c.hp||1}}</div>
+                <img v-if="getCardImage(c)" :src="getCardImage(c)" class="card-art" />
+                <div class="card-info">
+                  <div class="c-name">{{c.name}}</div>
+                  <div class="c-stat">⚔️{{c.damage||c.hp||1}}</div>
+                </div>
               </div>
             </div>
             <div class="modal-actions">
@@ -2097,21 +2100,21 @@ function confirmNewShikigami() {
 }
 .hand-cards{
   display:flex;
-  gap:0;  /* 无间隙，通过margin-left实现叠加 */
+  gap:0;
   overflow-x:auto;
   flex:1;
-  align-items:flex-end;
+  align-items:center;  /* 改为垂直居中 */
   justify-content:center;
-  padding:calc(var(--s) * 5) calc(var(--s) * 10);
+  padding:0 calc(var(--s) * 5);
 }
 .hand-cards::-webkit-scrollbar{height:3px}
 .hand-cards::-webkit-scrollbar-track{background:transparent}
 .hand-cards::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:2px}
 
-/* 手牌：200x280原始尺寸，横向叠加 */
+/* 手牌：保持3:4比例，自适应叠加 */
 .hand-card{
-  width:calc(var(--s) * 120);   /* 缩放后约120px */
-  height:calc(var(--s) * 168);  /* 保持200:280比例 */
+  width:calc(var(--s) * 150);
+  height:calc(var(--s) * 200);
   border-radius:calc(var(--s) * 6);
   text-align:center;cursor:pointer;flex-shrink:0;
   transition:all .18s;
@@ -2119,18 +2122,28 @@ function confirmNewShikigami() {
   position:relative;overflow:hidden;
   border:1px solid #D4A574;
   box-shadow:0 calc(var(--s) * 2) calc(var(--s) * 8) rgba(0,0,0,.4);
-  margin-left:calc(var(--s) * -40);  /* 负边距实现叠加 */
+  margin-left:calc(var(--s) * 8);  /* 默认正间距，牌少时展开 */
 }
 .hand-card:first-child{
-  margin-left:0;  /* 第一张不叠加 */
+  margin-left:0;
+}
+/* 牌多时自动叠加：6张以上开始负边距 */
+.hand-cards:has(.hand-card:nth-child(6)) .hand-card:not(:first-child){
+  margin-left:calc(var(--s) * -30);
+}
+.hand-cards:has(.hand-card:nth-child(8)) .hand-card:not(:first-child){
+  margin-left:calc(var(--s) * -50);
+}
+.hand-cards:has(.hand-card:nth-child(10)) .hand-card:not(:first-child){
+  margin-left:calc(var(--s) * -70);
 }
 .hand-card:hover:not(.unplayable){
-  transform:translateY(-15px);
+  transform:translateY(calc(var(--s) * -20));
   box-shadow:0 12px 25px rgba(0,0,0,.6);
   border-color:rgba(255,255,255,.5);
   z-index:10;
-  margin-left:calc(var(--s) * 10);  /* 悬浮时展开 */
-  margin-right:calc(var(--s) * 10);
+  margin-left:calc(var(--s) * 15);
+  margin-right:calc(var(--s) * 15);
 }
 .hand-card:first-child:hover:not(.unplayable){
   margin-left:0;
@@ -2245,12 +2258,36 @@ function confirmNewShikigami() {
 .shikigami-step{padding:8px 0;text-align:center}
 .step-hint{font-size:12px;color:#aaa;margin-bottom:8px}
 .step-info{font-size:14px;font-weight:bold;color:#4CAF50;margin-bottom:12px}
-.spell-select-grid{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-height:160px;overflow-y:auto;padding:8px}
-.spell-card{width:65px;padding:10px 6px;background:linear-gradient(135deg,#2196F3,#1976D2);border-radius:6px;text-align:center;cursor:pointer;transition:all .15s;border:2px solid transparent}
-.spell-card:hover{transform:scale(1.03);box-shadow:0 2px 8px rgba(33,150,243,.4)}
-.spell-card.selected{border-color:#4CAF50;box-shadow:0 0 12px rgba(76,175,80,.5)}
-.spell-card .c-name{font-size:9px;font-weight:bold}
-.spell-card .c-stat{font-size:11px;margin-top:3px}
+.spell-select-grid{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;max-height:320px;overflow-y:auto;padding:12px}
+/* 选卡界面卡片：与手牌样式一致 */
+.spell-select-card{
+  width:100px;
+  height:140px;
+  border-radius:6px;
+  cursor:pointer;
+  transition:all .15s;
+  border:2px solid #D4A574;
+  position:relative;
+  overflow:hidden;
+  display:flex;flex-direction:column;justify-content:flex-end;
+  background:linear-gradient(160deg,#0d2b5e,#1565C0);
+}
+.spell-select-card .card-art{
+  position:absolute;
+  top:0;left:0;
+  width:100%;height:100%;
+  object-fit:cover;
+}
+.spell-select-card .card-info{
+  position:relative;z-index:1;
+  background:linear-gradient(0deg,rgba(0,0,0,.9) 0%,rgba(0,0,0,.5) 70%,transparent 100%);
+  padding:18px 6px 8px;
+  text-align:center;
+}
+.spell-select-card .c-name{font-size:12px;font-weight:bold;color:#f0e6d3}
+.spell-select-card .c-stat{font-size:13px;margin-top:3px;color:#ddd}
+.spell-select-card:hover{transform:translateY(-5px);box-shadow:0 6px 15px rgba(0,0,0,.5);border-color:rgba(255,255,255,.5)}
+.spell-select-card.selected{border-color:#4CAF50;box-shadow:0 0 15px rgba(76,175,80,.6)}
 
 .old-shiki-grid{display:flex;gap:10px;justify-content:center}
 .old-shiki-card{width:80px;padding:12px 8px;background:linear-gradient(135deg,#ff9800,#f57c00);border-radius:6px;text-align:center;cursor:pointer;transition:all .15s}
@@ -2302,6 +2339,11 @@ function confirmNewShikigami() {
   justify-content: center;
   gap: 30px;
   margin-bottom: 30px;
+}
+/* 2选1时限制卡片宽度，与4选2保持一致 */
+.acquire-cards .shikigami-option {
+  width: 200px;
+  flex-shrink: 0;
 }
 
 .acquire-confirm-btn {

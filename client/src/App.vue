@@ -79,15 +79,28 @@
         <!-- 回合数 -->
         <div class="turn-display">第{{state?.turnNumber||1}}轮</div>
         
-        <!-- 6个玩家信息 -->
+        <!-- 玩家轮序（从左到右依次行动） -->
         <div class="player-panel">
-          <div class="player-info-slot" v-for="i in 6" :key="i">
-            <div class="player-avatar" :class="{active: i===1}">
-              <span v-if="i===1">{{player?.name?.charAt(0)||'P'}}</span>
+          <div class="player-info-slot" 
+               v-for="(p, idx) in allPlayers" 
+               :key="p.id"
+               :class="{ 'is-current': idx === state?.currentPlayerIndex }">
+            <!-- 自己标签（右上角） -->
+            <div v-if="p.id === myPlayerId" class="me-badge">自己</div>
+            <div class="player-avatar" :class="{ active: idx === state?.currentPlayerIndex }">
+              <span>{{ p.name?.charAt(0) || 'P' }}</span>
             </div>
             <div class="player-stats">
-              <div class="mini-stat"><span class="icon-hand-cards"></span>{{i===1 ? player?.hand?.length||0 : 0}}</div>
-              <div class="mini-stat"><span>👑</span>{{i===1 ? player?.totalCharm||0 : 0}}</div>
+              <div class="mini-stat"><span class="icon-hand-cards"></span>{{ p.hand?.length || 0 }}</div>
+              <div class="mini-stat"><span>👑</span>{{ p.totalCharm || 0 }}</div>
+            </div>
+          </div>
+          <!-- 空槽位（凑够6个） -->
+          <div class="player-info-slot empty-slot" v-for="i in (6 - allPlayers.length)" :key="'empty-' + i">
+            <div class="player-avatar empty"></div>
+            <div class="player-stats">
+              <div class="mini-stat empty-stat"></div>
+              <div class="mini-stat empty-stat"></div>
             </div>
           </div>
         </div>
@@ -762,6 +775,11 @@ const myPlayerId = computed(() => {
 const myPlayerIndex = computed(() => {
   if (!state.value) return 0
   return state.value.players.findIndex(p => p.id === myPlayerId.value)
+})
+
+// 所有玩家列表（按行动顺序）
+const allPlayers = computed(() => {
+  return state.value?.players || []
 })
 
 // 选择相关状态
@@ -2277,18 +2295,57 @@ async function confirmReplaceShikigami() {
 .player-info-slot{
   display:flex;
   gap:calc(var(--s) * 5);
+  position:relative;
+  padding:calc(var(--s) * 5);
+  border-radius:calc(var(--s) * 4);
+  transition:all .3s ease;
+}
+.player-info-slot.is-current{
+  background:rgba(255,215,0,.15);
+  box-shadow:0 0 calc(var(--s) * 15) rgba(255,215,0,.4);
+}
+.player-info-slot.empty-slot{
+  opacity:0.3;
+}
+/* 自己标签 - 类似推荐按钮样式 */
+.me-badge{
+  position:absolute;
+  top:calc(var(--s) * -5);
+  right:calc(var(--s) * -5);
+  background:linear-gradient(135deg,#4a9eff,#2d7cd6);
+  color:#fff;
+  font-size:calc(var(--s) * 12);
+  padding:calc(var(--s) * 2) calc(var(--s) * 6);
+  border-radius:calc(var(--s) * 3);
+  font-weight:bold;
+  z-index:10;
+  box-shadow:0 2px 6px rgba(74,158,255,.4);
 }
 .player-avatar{
   width:calc(var(--s) * 120);
   height:calc(var(--s) * 120);
-  background:#D9D9D9;
+  background:#1a1a2e;
+  border:2px solid #D4A574;
   display:flex;align-items:center;justify-content:center;
   font-size:calc(var(--s) * 32);
-  color:#333;
+  color:#fff;
+}
+.player-avatar.empty{
+  background:#151525;
+  border-color:#333;
 }
 .player-avatar.active{
-  border:2px solid #FFD700;
-  box-shadow:0 0 calc(var(--s) * 10) rgba(255,215,0,.5);
+  border:3px solid #FFD700;
+  box-shadow:0 0 calc(var(--s) * 15) rgba(255,215,0,.6);
+  animation:pulse-turn 1.5s infinite;
+}
+@keyframes pulse-turn{
+  0%,100%{box-shadow:0 0 calc(var(--s) * 15) rgba(255,215,0,.6);}
+  50%{box-shadow:0 0 calc(var(--s) * 25) rgba(255,215,0,.9);}
+}
+.mini-stat.empty-stat{
+  background:#151525;
+  border-color:#333;
 }
 .player-stats{
   display:flex;flex-direction:column;gap:0;

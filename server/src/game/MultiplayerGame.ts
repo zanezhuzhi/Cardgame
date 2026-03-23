@@ -318,9 +318,11 @@ export class MultiplayerGame {
     const stage2 = shuffle(bossCards.filter(b => b.stage === 2));
     const stage3 = shuffle(bossCards.filter(b => b.stage === 3));
     
+    // 麒麟必须是第一个鬼王，放在数组开头（shift取出）
     const qilin = stage1.find(b => b.name === '麒麟');
     const otherStage1 = stage1.filter(b => b.name !== '麒麟');
-    const bossDeck = [...stage3, ...stage2, ...otherStage1, qilin].filter(Boolean) as BossCard[];
+    // 顺序：麒麟 → 其他1阶段 → 2阶段 → 3阶段
+    const bossDeck = [qilin, ...otherStage1, ...stage2, ...stage3].filter(Boolean) as BossCard[];
     
     // 创建游荡妖怪牌库
     const yokaiDeck: CardInstance[] = [];
@@ -478,6 +480,10 @@ export class MultiplayerGame {
     // 清理选取状态
     delete (this.state as any).shikigamiOptions;
     this.shikigamiSelections.clear();
+    
+    // 🎲 随机打乱玩家行动顺序
+    this.state.players = shuffle([...this.state.players]);
+    this.addLog(`🎲 行动顺序：${this.state.players.map(p => p.name).join(' → ')}`);
     
     // 开始游戏
     this.startGame();

@@ -640,45 +640,96 @@
       </div>
     </Teleport>
     
-    <!-- 日志引用弹出框 -->
+    <!-- 日志引用弹出框（卡牌详情） -->
     <Teleport to="body">
       <div class="log-ref-popup" v-if="logRefPopup.show" 
            :style="{ left: logRefPopup.x + 'px', top: logRefPopup.y + 'px' }"
            @click.stop>
-        <div class="log-ref-close" @click="closeLogRefPopup">×</div>
         <template v-if="logRefPopup.ref">
-          <!-- 卡牌类型 -->
+          <!-- 卡牌类型（妖怪/阴阳术） -->
           <template v-if="logRefPopup.ref.type === 'card' && logRefPopup.ref.data">
-            <div class="log-ref-card">
-              <img v-if="getCardImage(logRefPopup.ref.data)" :src="getCardImage(logRefPopup.ref.data)" class="ref-card-img" />
-              <div class="ref-card-info">
-                <div class="ref-card-name">{{logRefPopup.ref.name}}</div>
-                <div class="ref-card-type">{{logRefPopup.ref.data.cardType}}</div>
-                <div class="ref-card-stats" v-if="logRefPopup.ref.data.hp">❤️{{logRefPopup.ref.data.hp}}</div>
-                <div class="ref-card-stats" v-if="logRefPopup.ref.data.damage">⚔️{{logRefPopup.ref.data.damage}}</div>
+            <!-- 上部：卡牌图片区 -->
+            <div class="ref-card-image-area">
+              <img v-if="getLogRefCardImage(logRefPopup.ref)" 
+                   :src="getLogRefCardImage(logRefPopup.ref)" 
+                   class="ref-card-img" />
+              <div class="ref-card-name-overlay">{{logRefPopup.ref.name}}</div>
+              <div class="ref-card-stats-overlay">
+                <span v-if="logRefPopup.ref.data.hp">❤️{{logRefPopup.ref.data.hp}}/{{logRefPopup.ref.data.hp}}</span>
+                <span v-if="logRefPopup.ref.data.charm"> 👑{{logRefPopup.ref.data.charm}}</span>
+              </div>
+            </div>
+            <!-- 下部：效果描述区 -->
+            <div class="ref-card-effect-area">
+              <div class="ref-effect-header">
+                <span class="ref-card-title">{{logRefPopup.ref.name}}</span>
+                <span class="ref-card-tag">御魂</span>
+              </div>
+              <div class="ref-effect-cost" v-if="logRefPopup.ref.data.damage">
+                <span class="ref-cost-icon">⚔️</span>
+                <span class="ref-cost-value">{{logRefPopup.ref.data.damage}}</span>
+              </div>
+              <div class="ref-effect-desc" v-if="logRefPopup.ref.data.effect">
+                {{logRefPopup.ref.data.effect}}
+              </div>
+              <div class="ref-effect-desc" v-else>
+                伤害+{{logRefPopup.ref.data.damage || 0}}
               </div>
             </div>
           </template>
           <!-- 式神类型 -->
           <template v-else-if="logRefPopup.ref.type === 'shikigami' && logRefPopup.ref.data">
-            <div class="log-ref-shikigami">
-              <div class="ref-shikigami-name">🦊 {{logRefPopup.ref.name}}</div>
-              <div class="ref-shikigami-skill" v-if="logRefPopup.ref.data.skill">
-                【{{logRefPopup.ref.data.skill.name}}】 🔥{{logRefPopup.ref.data.skill.cost}}
+            <div class="ref-card-image-area">
+              <img v-if="getLogRefCardImage(logRefPopup.ref)" 
+                   :src="getLogRefCardImage(logRefPopup.ref)" 
+                   class="ref-card-img" />
+              <div class="ref-card-name-overlay">{{logRefPopup.ref.name}}</div>
+              <div class="ref-card-stats-overlay">
+                <span v-if="logRefPopup.ref.data.hp">❤️{{logRefPopup.ref.data.hp}}/{{logRefPopup.ref.data.hp}}</span>
+                <span v-if="logRefPopup.ref.data.charm"> 👑{{logRefPopup.ref.data.charm}}</span>
+              </div>
+            </div>
+            <div class="ref-card-effect-area">
+              <div class="ref-effect-header">
+                <span class="ref-card-title">{{logRefPopup.ref.name}}</span>
+                <span class="ref-card-tag shikigami-tag">式神</span>
+              </div>
+              <div class="ref-effect-cost" v-if="logRefPopup.ref.data.skillCost">
+                <span class="ref-cost-icon">🔥</span>
+                <span class="ref-cost-value">{{logRefPopup.ref.data.skillCost}}</span>
+              </div>
+              <div class="ref-effect-desc" v-if="logRefPopup.ref.data.skill">
+                {{logRefPopup.ref.data.skill}}
               </div>
             </div>
           </template>
           <!-- 鬼王类型 -->
           <template v-else-if="logRefPopup.ref.type === 'boss' && logRefPopup.ref.data">
-            <div class="log-ref-boss">
-              <div class="ref-boss-name">👹 {{logRefPopup.ref.name}}</div>
-              <div class="ref-boss-hp">❤️{{logRefPopup.ref.data.hp}} ⭐{{logRefPopup.ref.data.charm}}</div>
+            <div class="ref-card-image-area boss-image-area">
+              <img v-if="getLogRefCardImage(logRefPopup.ref)" 
+                   :src="getLogRefCardImage(logRefPopup.ref)" 
+                   class="ref-card-img" />
+              <div class="ref-card-name-overlay">{{logRefPopup.ref.name}}</div>
+              <div class="ref-card-stats-overlay">
+                <span>❤️{{logRefPopup.ref.data.hp}}</span>
+                <span v-if="logRefPopup.ref.data.charm"> 👑{{logRefPopup.ref.data.charm}}</span>
+              </div>
+            </div>
+            <div class="ref-card-effect-area">
+              <div class="ref-effect-header">
+                <span class="ref-card-title">{{logRefPopup.ref.name}}</span>
+                <span class="ref-card-tag boss-tag">鬼王</span>
+              </div>
+              <div class="ref-effect-desc" v-if="logRefPopup.ref.data.effect">
+                {{logRefPopup.ref.data.effect}}
+              </div>
             </div>
           </template>
           <!-- 玩家类型 -->
           <template v-else-if="logRefPopup.ref.type === 'player'">
-            <div class="log-ref-player">
-              <div class="ref-player-name">👤 {{logRefPopup.ref.name}}</div>
+            <div class="ref-player-area">
+              <div class="ref-player-icon">👤</div>
+              <div class="ref-player-name">{{logRefPopup.ref.name}}</div>
             </div>
           </template>
           <!-- 默认：仅显示名称 -->
@@ -1068,6 +1119,30 @@ function showLogRefPopup(event: Event, ref: any) {
 // 关闭引用弹出框
 function closeLogRefPopup() {
   logRefPopup.value.show = false
+}
+
+// 获取日志引用卡牌的图片路径
+function getLogRefCardImage(ref: any): string {
+  if (!ref || !ref.data) return ''
+  
+  const data = ref.data
+  const image = data.image
+  
+  if (!image) return ''
+  
+  // 根据卡牌类型确定图片路径
+  if (ref.type === 'boss') {
+    return `/images/boss/${image}`
+  } else if (ref.type === 'shikigami') {
+    return `/images/cards/${image}`
+  } else if (data.cardType === 'yokai' || ref.id?.startsWith('yokai')) {
+    return `/images/yokai/${image}`
+  } else if (data.cardType === 'spell' || ref.id?.startsWith('spell')) {
+    return `/images/spells/${image}`
+  }
+  
+  // 默认尝试yokai
+  return `/images/yokai/${image}`
 }
 
 const canSpell = computed(() => {
@@ -2926,7 +3001,7 @@ async function confirmReplaceShikigami() {
 .log-link{
   color:#4FC3F7;
   cursor:pointer;
-  text-decoration:none;
+  text-decoration:underline;
   transition:all 0.15s;
 }
 .log-link:hover{
@@ -2945,41 +3020,103 @@ async function confirmReplaceShikigami() {
   background:linear-gradient(135deg, #2D1F3D 0%, #1A1A2E 100%);
   border:2px solid #D4A574;
   border-radius:8px;
-  padding:12px;
-  min-width:180px;
-  max-width:280px;
+  overflow:hidden;
+  width:180px;
   box-shadow:0 4px 20px rgba(0,0,0,0.5);
 }
-.log-ref-close{
-  position:absolute;
-  top:4px;right:8px;
-  color:#888;
-  cursor:pointer;
-  font-size:18px;
-  line-height:1;
+/* 卡牌图片区 */
+.ref-card-image-area{
+  position:relative;
+  width:100%;
+  height:140px;
+  overflow:hidden;
+  background:#1A1A2E;
 }
-.log-ref-close:hover{color:#fff}
-.log-ref-card{
-  display:flex;gap:10px;align-items:flex-start;
+.ref-card-image-area.boss-image-area{
+  height:160px;
 }
 .ref-card-img{
-  width:60px;height:84px;
+  width:100%;
+  height:100%;
   object-fit:cover;
-  border-radius:4px;
-  border:1px solid #D4A574;
 }
-.ref-card-info{display:flex;flex-direction:column;gap:4px}
-.ref-card-name{font-size:14px;font-weight:bold;color:#FFD700}
-.ref-card-type{font-size:11px;color:#aaa}
-.ref-card-stats{font-size:12px;color:#fff}
-.log-ref-shikigami,.log-ref-boss,.log-ref-player,.log-ref-default{
-  padding:4px 0;
+.ref-card-name-overlay{
+  position:absolute;
+  bottom:24px;left:8px;
+  color:#fff;
+  font-size:14px;
+  font-weight:bold;
+  text-shadow:0 1px 3px rgba(0,0,0,0.8);
 }
-.ref-shikigami-name,.ref-boss-name,.ref-player-name{
-  font-size:14px;font-weight:bold;color:#FFD700;margin-bottom:4px;
+.ref-card-stats-overlay{
+  position:absolute;
+  bottom:6px;left:8px;
+  color:#fff;
+  font-size:12px;
+  text-shadow:0 1px 3px rgba(0,0,0,0.8);
 }
-.ref-shikigami-skill{font-size:12px;color:#4FC3F7}
-.ref-boss-hp{font-size:12px;color:#fff}
+/* 效果描述区 */
+.ref-card-effect-area{
+  padding:10px;
+  background:linear-gradient(180deg, #1E1E3F 0%, #16162B 100%);
+  border-top:1px solid #D4A574;
+}
+.ref-effect-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:8px;
+}
+.ref-card-title{
+  color:#fff;
+  font-size:14px;
+  font-weight:bold;
+}
+.ref-card-tag{
+  background:#5C4A8A;
+  color:#fff;
+  font-size:10px;
+  padding:2px 6px;
+  border-radius:3px;
+}
+.ref-card-tag.shikigami-tag{
+  background:#8B4513;
+}
+.ref-card-tag.boss-tag{
+  background:#8B0000;
+}
+.ref-effect-cost{
+  display:flex;
+  align-items:center;
+  gap:4px;
+  margin-bottom:6px;
+  color:#FFD700;
+  font-size:12px;
+}
+.ref-effect-desc{
+  color:#ccc;
+  font-size:12px;
+  line-height:1.5;
+}
+/* 玩家区 */
+.ref-player-area{
+  padding:12px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.ref-player-icon{
+  font-size:24px;
+}
+.ref-player-name{
+  color:#fff;
+  font-size:14px;
+}
+.log-ref-default{
+  padding:12px;
+  color:#fff;
+  font-size:14px;
+}
 .action-buttons{
   display:flex;
   gap:calc(var(--s) * 20);

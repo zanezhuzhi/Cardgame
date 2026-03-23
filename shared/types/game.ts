@@ -156,6 +156,20 @@ export type GameLogType =
   | 'penalty'
   | 'game_end';
 
+/** 日志引用对象类型 */
+export type LogRefType = 'card' | 'shikigami' | 'boss' | 'player';
+
+/** 日志引用对象 */
+export interface LogRef {
+  type: LogRefType;
+  id: string;           // 对象ID（卡牌instanceId、式神id等）
+  name: string;         // 显示名称
+  data?: any;           // 可选：完整对象数据（用于离线展示）
+}
+
+/** 日志可见性 */
+export type LogVisibility = 'public' | 'private';
+
 export interface GameLogEntry {
   type: GameLogType;
   playerId?: string;
@@ -165,6 +179,9 @@ export interface GameLogEntry {
   value?: number;
   message: string;
   timestamp: number;
+  // 新增字段 - 消息同步控制
+  visibility?: LogVisibility;           // 可见性：public=所有人，private=仅自己
+  refs?: Record<string, LogRef>;        // 引用对象映射 {占位符: 对象信息}
 }
 
 // ============ 游戏动作 ============

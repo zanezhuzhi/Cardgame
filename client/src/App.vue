@@ -188,8 +188,8 @@
         
         <!-- 右侧信息区 -->
         <div class="info-side-panel">
-          <div class="info-box">
-            <div v-for="(l,i) in logs.slice(-8)" :key="i" class="info-line">{{l.message}}</div>
+          <div class="info-box" @click="handleLogLinkClick">
+            <div v-for="(l,i) in logs.slice(-8)" :key="i" class="info-line" v-html="renderLogMessage(l)"></div>
           </div>
           <div class="action-buttons">
             <button class="side-btn" :class="{ disabled: !canGetAnySpell }" @click="handleGetSpell">
@@ -639,6 +639,57 @@
         </div>
       </div>
     </Teleport>
+    
+    <!-- 日志引用弹出框 -->
+    <Teleport to="body">
+      <div class="log-ref-popup" v-if="logRefPopup.show" 
+           :style="{ left: logRefPopup.x + 'px', top: logRefPopup.y + 'px' }"
+           @click.stop>
+        <div class="log-ref-close" @click="closeLogRefPopup">×</div>
+        <template v-if="logRefPopup.ref">
+          <!-- 卡牌类型 -->
+          <template v-if="logRefPopup.ref.type === 'card' && logRefPopup.ref.data">
+            <div class="log-ref-card">
+              <img v-if="getCardImage(logRefPopup.ref.data)" :src="getCardImage(logRefPopup.ref.data)" class="ref-card-img" />
+              <div class="ref-card-info">
+                <div class="ref-card-name">{{logRefPopup.ref.name}}</div>
+                <div class="ref-card-type">{{logRefPopup.ref.data.cardType}}</div>
+                <div class="ref-card-stats" v-if="logRefPopup.ref.data.hp">❤️{{logRefPopup.ref.data.hp}}</div>
+                <div class="ref-card-stats" v-if="logRefPopup.ref.data.damage">⚔️{{logRefPopup.ref.data.damage}}</div>
+              </div>
+            </div>
+          </template>
+          <!-- 式神类型 -->
+          <template v-else-if="logRefPopup.ref.type === 'shikigami' && logRefPopup.ref.data">
+            <div class="log-ref-shikigami">
+              <div class="ref-shikigami-name">🦊 {{logRefPopup.ref.name}}</div>
+              <div class="ref-shikigami-skill" v-if="logRefPopup.ref.data.skill">
+                【{{logRefPopup.ref.data.skill.name}}】 🔥{{logRefPopup.ref.data.skill.cost}}
+              </div>
+            </div>
+          </template>
+          <!-- 鬼王类型 -->
+          <template v-else-if="logRefPopup.ref.type === 'boss' && logRefPopup.ref.data">
+            <div class="log-ref-boss">
+              <div class="ref-boss-name">👹 {{logRefPopup.ref.name}}</div>
+              <div class="ref-boss-hp">❤️{{logRefPopup.ref.data.hp}} ⭐{{logRefPopup.ref.data.charm}}</div>
+            </div>
+          </template>
+          <!-- 玩家类型 -->
+          <template v-else-if="logRefPopup.ref.type === 'player'">
+            <div class="log-ref-player">
+              <div class="ref-player-name">👤 {{logRefPopup.ref.name}}</div>
+            </div>
+          </template>
+          <!-- 默认：仅显示名称 -->
+          <template v-else>
+            <div class="log-ref-default">{{logRefPopup.ref.name}}</div>
+          </template>
+        </template>
+      </div>
+      <!-- 点击遮罩关闭弹出框 -->
+      <div class="log-ref-overlay" v-if="logRefPopup.show" @click="closeLogRefPopup"></div>
+    </Teleport>
   </div>
 </template>
 
@@ -932,6 +983,93 @@ const isMyTurn = computed(() => {
 const yokai = computed(() => state.value?.field.yokaiSlots || [])
 const boss = computed(() => state.value?.field.currentBoss)
 const logs = computed(() => (state.value?.log || []).slice(-6))
+
+// 日志引用对象点击状态
+const logRefPopup = ref<{
+  show: boolean;
+  ref: any;
+  x: number;
+  y: number;
+}>({ show: false, ref: null, x: 0, y: 0 })
+
+// 渲染日志消息（解析超链接）
+function renderLogMessage(log: any): string {
+  if (!log.refs || Object.keys(log.refs).length === 0) {
+    // 没有引用，直接返回纯文本（转义HTML）
+    return escapeHtml(log.message)
+  }
+  
+  // 解析 {type:name} 格式的占位符
+  let html = escapeHtml(log.message)
+  for (const [placeholder, ref] of Object.entries(log.refs as Record<string, any>)) {
+    const pattern = `{${placeholder}}`
+    const escapedPattern = escapeHtml(pattern)
+    const link = `<span class="log-link" data-ref-key="${placeholder}">${escapeHtml(ref.name)}</span>`
+    html = html.replace(escapedPattern, link)
+  }
+  
+  return html
+}
+
+// 转义HTML特殊字符
+function escapeHtml(text: string): string {
+  const div = document.createElement('div')
+  div.textContent = text
+  return div.innerHTML
+}
+
+// 处理日志超链接点击
+function handleLogLinkClick(event: Event) {
+  const target = event.target as HTMLElement
+  if (!target.classList.contains('log-link')) return
+  
+  const refKey = target.dataset.refKey
+  if (!refKey) return
+  
+  // 从最近的日志中查找引用对象
+  const recentLogs = logs.value
+  for (const log of recentLogs) {
+    if (log.refs && log.refs[refKey]) {
+      const ref = log.refs[refKey]
+      showLogRefPopup(event, ref)
+      return
+    }
+  }
+}
+
+// 显示引用对象弹出框
+function showLogRefPopup(event: Event, ref: any) {
+  const target = event.target as HTMLElement
+  const rect = target.getBoundingClientRect()
+  
+  // 计算弹出位置（在点击位置附近，考虑边界）
+  let x = rect.left
+  let y = rect.bottom + 5
+  
+  // 边界检测（假设弹出框宽度200，高度150）
+  const popupWidth = 200
+  const popupHeight = 150
+  
+  if (x + popupWidth > window.innerWidth) {
+    x = window.innerWidth - popupWidth - 10
+  }
+  if (y + popupHeight > window.innerHeight) {
+    y = rect.top - popupHeight - 5
+  }
+  
+  logRefPopup.value = {
+    show: true,
+    ref,
+    x,
+    y
+  }
+}
+
+// 关闭引用弹出框
+function closeLogRefPopup() {
+  logRefPopup.value.show = false
+}
+
 const canSpell = computed(() => {
   // 多人模式下检查远程状态
   if (isMultiMode.value && state.value) {
@@ -2784,6 +2922,64 @@ async function confirmReplaceShikigami() {
   line-height:1.4;
   flex-shrink:0;
 }
+/* 日志超链接样式 */
+.log-link{
+  color:#4FC3F7;
+  cursor:pointer;
+  text-decoration:none;
+  transition:all 0.15s;
+}
+.log-link:hover{
+  color:#FFD700;
+  text-decoration:underline;
+}
+/* 日志引用弹出框 */
+.log-ref-overlay{
+  position:fixed;
+  top:0;left:0;right:0;bottom:0;
+  z-index:9998;
+}
+.log-ref-popup{
+  position:fixed;
+  z-index:9999;
+  background:linear-gradient(135deg, #2D1F3D 0%, #1A1A2E 100%);
+  border:2px solid #D4A574;
+  border-radius:8px;
+  padding:12px;
+  min-width:180px;
+  max-width:280px;
+  box-shadow:0 4px 20px rgba(0,0,0,0.5);
+}
+.log-ref-close{
+  position:absolute;
+  top:4px;right:8px;
+  color:#888;
+  cursor:pointer;
+  font-size:18px;
+  line-height:1;
+}
+.log-ref-close:hover{color:#fff}
+.log-ref-card{
+  display:flex;gap:10px;align-items:flex-start;
+}
+.ref-card-img{
+  width:60px;height:84px;
+  object-fit:cover;
+  border-radius:4px;
+  border:1px solid #D4A574;
+}
+.ref-card-info{display:flex;flex-direction:column;gap:4px}
+.ref-card-name{font-size:14px;font-weight:bold;color:#FFD700}
+.ref-card-type{font-size:11px;color:#aaa}
+.ref-card-stats{font-size:12px;color:#fff}
+.log-ref-shikigami,.log-ref-boss,.log-ref-player,.log-ref-default{
+  padding:4px 0;
+}
+.ref-shikigami-name,.ref-boss-name,.ref-player-name{
+  font-size:14px;font-weight:bold;color:#FFD700;margin-bottom:4px;
+}
+.ref-shikigami-skill{font-size:12px;color:#4FC3F7}
+.ref-boss-hp{font-size:12px;color:#fff}
 .action-buttons{
   display:flex;
   gap:calc(var(--s) * 20);

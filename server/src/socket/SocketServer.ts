@@ -372,7 +372,7 @@ export class SocketServer {
   }
 
   /**
-   * 广播游戏状态
+   * 广播游戏状态（按玩家过滤私有消息）
    */
   private broadcastGameState(roomId: string, state: GameState, event?: GameEvent): void {
     const room = this.roomManager.getRoom(roomId);
@@ -380,10 +380,44 @@ export class SocketServer {
     
     const seq = room.game.getStateSeq();
     
-    // 广播状态给所有人（客户端根据自己的 playerIndex 取对应数据）
-    this.io.to(roomId).emit('game:stateSync', state, seq);
+    // 获取房间内所有socket
+    const roomSockets = this.io.sockets.adapter.rooms.get(roomId);
+    if (!roomSockets) {
+      // 降级：无法获取房间socket时，使用原有广播方式
+      this.io.to(roomId).emit('game:stateSync', state, seq);
+      if (event) {
+        this.io.to(roomId).emit('game:event', event);
+      }
+      return;
+    }
     
-    // 如果有事件，也广播事件
+    // 为每个玩家生成过滤后的状态
+    for (const socketId of roomSockets) {
+      const socket = this.io.sockets.sockets.get(socketId);
+      if (!socket) continue;
+      
+      const playerId = socket.data.playerId || socketId;
+      
+      // 过滤日志：保留公开消息 + 属于该玩家的私有消息
+      const filteredLog = state.log.filter(entry => {
+        // 没有visibility字段的默认为public（兼容旧消息）
+        if (!entry.visibility || entry.visibility === 'public') {
+          return true;
+        }
+        // 私有消息只发给对应玩家
+        return entry.playerId === playerId;
+      });
+      
+      // 创建该玩家专属的状态副本
+      const playerState: GameState = {
+        ...state,
+        log: filteredLog
+      };
+      
+      socket.emit('game:stateSync', playerState, seq);
+    }
+    
+    // 如果有事件，广播给所有人
     if (event) {
       this.io.to(roomId).emit('game:event', event);
     }

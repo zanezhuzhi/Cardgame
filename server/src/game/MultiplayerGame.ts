@@ -773,12 +773,17 @@ export class MultiplayerGame {
       GAME_CONSTANTS.MAX_GHOST_FIRE
     );
     
-    this.addLog(`🔥 ${player.name} 鬼火+1（当前:${player.ghostFire}）`);
+    // 鬼火消息 - 仅自己可见
+    this.addLog(`🔥 鬼火+1（当前:${player.ghostFire}）`, {
+      visibility: 'private',
+      playerId: player.id
+    });
     
     // 检查妖怪刷新选项
     console.log(`[enterGhostFirePhase] lastPlayerKilledYokai=${this.state.lastPlayerKilledYokai}`);
     if (this.state.lastPlayerKilledYokai === false) {
       this.state.pendingYokaiRefresh = true;
+      // 妖怪刷新选项 - 公开消息
       this.addLog(`⚠️ 上一玩家未击败妖怪，${player.name}可选择刷新场上的妖怪`);
       this.notifyStateChange();
       return;
@@ -3020,12 +3025,24 @@ export class MultiplayerGame {
 
   /**
    * 添加日志
+   * @param message 消息内容（可包含 {type:name} 格式的引用占位符）
+   * @param options 可选参数：visibility(可见性), playerId(私有消息所属玩家), refs(引用对象)
    */
-  private addLog(message: string): void {
+  private addLog(
+    message: string, 
+    options?: {
+      visibility?: 'public' | 'private';
+      playerId?: string;
+      refs?: Record<string, { type: 'card' | 'shikigami' | 'boss' | 'player'; id: string; name: string; data?: any }>;
+    }
+  ): void {
     this.state.log.push({
       type: 'game_start',
       message,
       timestamp: Date.now(),
+      visibility: options?.visibility || 'public',
+      playerId: options?.playerId,
+      refs: options?.refs,
     });
     
     // 保留最近100条日志

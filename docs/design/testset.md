@@ -91,3 +91,93 @@
 ## 已关闭的测试条件
 
 （暂无）
+
+---
+
+## 🎮 GM 指令 API
+
+> **使用流程**：
+> 1. 用户截图告诉开发者当前 `房间ID` 和 `玩家ID`（显示在游戏界面左上角）
+> 2. 开发者使用以下 HTTP API 创建测试环境
+
+### 基础信息
+
+- **服务器地址**: `http://localhost:3001`
+- **请求方式**: 全部为 `GET` 请求，可直接在浏览器地址栏执行
+
+### 指令列表
+
+| 指令 | 功能 | API 格式 |
+|------|------|----------|
+| GM1 | 添加测试卡牌(1+2+3+3) | `/api/gm/addcards/:roomId/:playerId` |
+| GM2 | 添加指定卡牌到手牌 | `/api/gm/addcard/:roomId/:playerId/:cardName/:count` |
+| GM3 | 替换玩家式神 | `/api/gm/setshikigami/:roomId/:playerId/:slotIndex/:shikigamiName` |
+| GM4 | 替换场上妖怪 | `/api/gm/setyokai/:roomId/:slotIndex/:yokaiName` |
+| GM5 | 添加卡牌到弃牌堆 | `/api/gm/discard/:roomId/:playerId/:cardName/:count` |
+| GM6 | 给玩家添加伤害值 | `/api/gm/adddamage/:roomId/:playerId/:damage` |
+| GM7 | 替换当前鬼王 | `/api/gm/setboss/:roomId/:bossName` |
+
+### 使用示例
+
+假设房间ID为 `ABC123`，玩家ID为 `player_xxx`：
+
+```bash
+# GM1: 添加测试卡牌(1+2+3+3=9点伤害)
+http://localhost:3001/api/gm/addcards/ABC123/player_xxx
+
+# GM2: 添加3张高级符咒到手牌
+http://localhost:3001/api/gm/addcard/ABC123/player_xxx/高级符咒/3
+
+# GM3: 将0号槽位式神替换为茨木童子
+http://localhost:3001/api/gm/setshikigami/ABC123/player_xxx/0/茨木童子
+
+# GM4: 将0号槽位妖怪替换为灯笼鬼
+http://localhost:3001/api/gm/setyokai/ABC123/0/灯笼鬼
+
+# GM5: 添加1张灯笼鬼到弃牌堆
+http://localhost:3001/api/gm/discard/ABC123/player_xxx/灯笼鬼/1
+
+# GM6: 给玩家添加100点伤害
+http://localhost:3001/api/gm/adddamage/ABC123/player_xxx/100
+
+# GM7: 将当前鬼王替换为八岐大蛇
+http://localhost:3001/api/gm/setboss/ABC123/八岐大蛇
+```
+
+### 常用测试场景
+
+#### 场景1：测试获得式神
+```bash
+# 给玩家添加足够的阴阳术
+http://localhost:3001/api/gm/addcards/{roomId}/{playerId}
+# 或直接添加高级符咒
+http://localhost:3001/api/gm/addcard/{roomId}/{playerId}/高级符咒/2
+```
+
+#### 场景2：测试中级符咒兑换
+```bash
+# 1. 添加基础术式到手牌
+http://localhost:3001/api/gm/addcard/{roomId}/{playerId}/基础术式/1
+# 2. 添加生命≥2的妖怪到弃牌堆
+http://localhost:3001/api/gm/discard/{roomId}/{playerId}/灯笼鬼/1
+```
+
+#### 场景3：测试鬼王击杀
+```bash
+# 给玩家添加大量伤害
+http://localhost:3001/api/gm/adddamage/{roomId}/{playerId}/100
+```
+
+---
+
+## 返回格式
+
+所有 GM API 返回 JSON 格式：
+
+```json
+// 成功
+{ "success": true }
+
+// 失败
+{ "success": false, "error": "错误原因" }
+```

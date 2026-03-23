@@ -194,6 +194,8 @@ cd client && npm run dev          # 重启客户端
 |------|------|----------|
 | **开发进度** | `PROGRESS.md` | 模块完成度、待办事项、版本历史 |
 | 多人架构设计 | `docs/MULTIPLAYER_ARCHITECTURE.md` | 服务端架构、网络协议、房间管理 |
+| **测试条件集** | `docs/design/testset.md` | 测试开关、GM指令API、测试场景 |
+| 信息交互规范 | `策划文档/界面ass/信息交互.md` | 日志可见性、超链接引用规则 |
 
 ### 关键代码位置
 

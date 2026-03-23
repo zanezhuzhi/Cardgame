@@ -120,10 +120,10 @@ export class SinglePlayerGame {
       deck.push(this.createCardInstance(defaultSpell, 'spell'));
     }
     
-    // 招福达摩（初始卡，3张）
-    const daruma = (cardsData.yokai as any[]).find((y: any) => y.name === '招福达摩') || cardsData.token[0];
+    // 招福达摩（初始卡，3张）- token类型，不能打出
+    const daruma = cardsData.token[0];  // 直接从token数组获取
     for (let i = 0; i < 3; i++) {
-      deck.push(this.createCardInstance(daruma, 'yokai'));
+      deck.push(this.createCardInstance(daruma, 'token'));
     }
 
     // 式神在选取阶段确定，初始为空
@@ -540,8 +540,8 @@ export class SinglePlayerGame {
       return { canPlay: false, reason: '式神卡不能直接打出' };
     }
     
-    // 御魂卡：检查是否有合法目标
-    if (card.cardType === 'yokai') {
+    // 御魂卡（妖怪/鬼王）：检查是否有合法目标
+    if (card.cardType === 'yokai' || card.cardType === 'boss') {
       const targetCheck = this.checkYokaiEffectTargets(card);
       if (!targetCheck.hasValidTarget) {
         return { canPlay: false, reason: targetCheck.reason };
@@ -551,11 +551,6 @@ export class SinglePlayerGame {
     
     // 阴阳术可以打出
     if (card.cardType === 'spell') {
-      return { canPlay: true };
-    }
-    
-    // 鬼王御魂也可以打出（暂不检查目标）
-    if (card.cardType === 'boss') {
       return { canPlay: true };
     }
     
@@ -661,6 +656,19 @@ export class SinglePlayerGame {
           return { hasValidTarget: false, reason: '牌库为空' };
         }
         break;
+      
+      // ============ 鬼王御魂 ============
+      
+      // 贪嗔痴：需要超度1张手牌（手牌数>1，因为这张牌本身也在手牌中）
+      case '贪嗔痴':
+        if (!hasOtherHandCards()) {
+          return { hasValidTarget: false, reason: '没有其他手牌可超度' };
+        }
+        break;
+      
+      // 其他鬼王御魂都有"必定成功"的效果（伤害+N、抓牌+N、鬼火+N等）
+      // 麒麟、石距、土蜘蛛、胧车、蜃气楼、荒骷髅、八岐大蛇：无需检查
+      // 鬼灵歌伎、地震鲶：多人模式专用，暂不检查
     }
     
     return { hasValidTarget: true };
@@ -1270,11 +1278,7 @@ export class SinglePlayerGame {
       this.addLog(`👹 迁怒加成：伤害+${yokaiKillBonus}`);
     }
 
-    // 更新声誉
-    if (yokai.charm) {
-      player.totalCharm += yokai.charm;
-    }
-
+    // 声誉由 updateTotalCharm() 实时计算（卡牌进入弃牌堆后自动计入）
     this.addLog(`✨ 退治了【${yokai.name}】！声誉+${yokai.charm || 0}`);
   }
 
@@ -1287,7 +1291,7 @@ export class SinglePlayerGame {
     const retireLabel = boss.retireEffect
       ? `退治【${boss.name}】（⚠️ ${boss.retireEffect}）`
       : `退治【${boss.name}】（进入弃牌堆，可作为御魂使用）`;
-    const transcendLabel = `超度【${boss.name}】（移出游戏，获得声誉+${boss.charm || 0}）`;
+    const transcendLabel = `超度【${boss.name}】（移出游戏，不计入声誉）`;
 
     const choice = this.onChoiceRequired
       ? await this.onChoiceRequired([retireLabel, transcendLabel])
@@ -1341,7 +1345,7 @@ export class SinglePlayerGame {
       }
     }
 
-    player.totalCharm += boss.charm || 0;
+    // 声誉由 updateTotalCharm() 实时计算（御魂进入弃牌堆后自动计入）
     this.addLog(`⛩️ 退治鬼王【${boss.name}】！声誉+${boss.charm || 0}，御魂进入弃牌堆`);
 
     this.state.field.currentBoss = null;
@@ -1355,8 +1359,8 @@ export class SinglePlayerGame {
     const boss = this.state.field.currentBoss;
     if (!boss) return;
 
-    player.totalCharm += boss.charm || 0;
-    this.addLog(`✨ 超度鬼王【${boss.name}】！声誉+${boss.charm || 0}，移出游戏`);
+    // 超度移出游戏，不计入声誉
+    this.addLog(`✨ 超度鬼王【${boss.name}】！移出游戏（不计入声誉）`);
 
     this.state.field.currentBoss = null;
     this.state.field.bossCurrentHp = 0;
@@ -1521,9 +1525,25 @@ export class SinglePlayerGame {
   }
 
   private notifyChange(): void {
+    // 实时更新声誉
+    this.updateTotalCharm();
+    
     this.state.lastUpdate = Date.now();
     // 深拷贝确保 Vue 响应式能检测到嵌套变化
     this.onStateChange(JSON.parse(JSON.stringify(this.state)));
+  }
+  
+  /**
+   * 实时计算并更新玩家声誉
+   * 声誉来源：牌库+手牌+弃牌堆中卡牌的charm + 式神的charm
+   * 不包括：超度区（已移出游戏）
+   */
+  private updateTotalCharm(): void {
+    const player = this.getPlayer();
+    const allCards = [...player.deck, ...player.hand, ...player.discard];
+    const cardCharm = allCards.reduce((sum, card) => sum + (card.charm || 0), 0);
+    const shikigamiCharm = player.shikigami.reduce((sum, s) => sum + (s.charm || 0), 0);
+    player.totalCharm = cardCharm + shikigamiCharm;
   }
 
   // ============ 状态访问 ============

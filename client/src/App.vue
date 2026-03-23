@@ -69,7 +69,7 @@
               <span v-if="i===1">{{player?.name?.charAt(0)||'P'}}</span>
             </div>
             <div class="player-stats">
-              <div class="mini-stat"><span>🃏</span>{{i===1 ? player?.hand?.length||0 : 0}}</div>
+              <div class="mini-stat"><span class="icon-hand-cards"></span>{{i===1 ? player?.hand?.length||0 : 0}}</div>
               <div class="mini-stat"><span>👑</span>{{i===1 ? player?.totalCharm||0 : 0}}</div>
             </div>
           </div>
@@ -179,7 +179,7 @@
           <div class="avatar-box"></div>
           <div class="stat-box">
             <div class="stat-item"><span>👑</span><b>{{player?.totalCharm||0}}</b></div>
-            <div class="stat-item"><span>🃏</span><b>{{(player?.deck?.length||0)+(player?.hand?.length||0)+(player?.discard?.length||0)}}</b></div>
+            <div class="stat-item"><span>📚</span><b>{{(player?.deck?.length||0)+(player?.hand?.length||0)+(player?.discard?.length||0)}}</b></div>
           </div>
         </div>
         <div class="deck-discard-area">
@@ -1955,8 +1955,9 @@ async function confirmReplaceShikigami() {
 /* 回合数显示 */
 .turn-display{
   position:absolute;
-  left:calc(var(--s) * 52);
-  top:calc(var(--s) * 51);
+  left:calc(var(--s) * 22);
+  top:50%;
+  transform:translateY(-50%);
   font-size:calc(var(--s) * 42);
   color:#FFD700;
   font-weight:bold;
@@ -1999,6 +2000,31 @@ async function confirmReplaceShikigami() {
   color:#fff;
 }
 .mini-stat span{font-size:calc(var(--s) * 22)}
+
+/* 手牌图标 - 粉色叠牌样式 */
+.icon-hand-cards{
+  position:relative;
+  width:calc(var(--s) * 20);
+  height:calc(var(--s) * 26);
+}
+.icon-hand-cards::before,
+.icon-hand-cards::after{
+  content:'';
+  position:absolute;
+  width:calc(var(--s) * 16);
+  height:calc(var(--s) * 22);
+  border-radius:2px;
+  border:1px solid rgba(255,255,255,.5);
+}
+.icon-hand-cards::before{
+  background:linear-gradient(135deg,#e06090,#c04070);
+  top:0;left:0;
+}
+.icon-hand-cards::after{
+  background:linear-gradient(135deg,#ff80b0,#e06090);
+  top:calc(var(--s) * 4);
+  left:calc(var(--s) * 4);
+}
 
 /* LOGO面板 - 右侧 "百鬼夜行" */
 .logo-panel{

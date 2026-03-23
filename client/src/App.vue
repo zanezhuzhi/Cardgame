@@ -695,12 +695,17 @@
                 <span class="ref-card-title">{{logRefPopup.ref.name}}</span>
                 <span class="ref-card-tag shikigami-tag">式神</span>
               </div>
-              <div class="ref-effect-cost" v-if="logRefPopup.ref.data.skillCost">
+              <div class="ref-effect-cost" v-if="logRefPopup.ref.data.skill?.cost || logRefPopup.ref.data.skillCost">
                 <span class="ref-cost-icon">🔥</span>
-                <span class="ref-cost-value">{{logRefPopup.ref.data.skillCost}}</span>
+                <span class="ref-cost-value">{{logRefPopup.ref.data.skill?.cost || logRefPopup.ref.data.skillCost}}</span>
               </div>
               <div class="ref-effect-desc" v-if="logRefPopup.ref.data.skill">
-                {{logRefPopup.ref.data.skill}}
+                <template v-if="typeof logRefPopup.ref.data.skill === 'object'">
+                  【{{logRefPopup.ref.data.skill.name}}】{{logRefPopup.ref.data.skill.effect}}
+                </template>
+                <template v-else>
+                  {{logRefPopup.ref.data.skill}}
+                </template>
               </div>
             </div>
           </template>
@@ -1047,7 +1052,6 @@ const logRefPopup = ref<{
 // 渲染日志消息（解析超链接）
 function renderLogMessage(log: any): string {
   if (!log.refs || Object.keys(log.refs).length === 0) {
-    // 没有引用，直接返回纯文本（转义HTML）
     return escapeHtml(log.message)
   }
   
@@ -3005,14 +3009,14 @@ async function confirmReplaceShikigami() {
   line-height:1.4;
   flex-shrink:0;
 }
-/* 日志超链接样式 */
-.log-link{
+/* 日志超链接样式（使用:deep()穿透scoped限制，应用到v-html内容） */
+.info-line :deep(.log-link){
   color:#4FC3F7;
   cursor:pointer;
   text-decoration:underline;
   transition:all 0.15s;
 }
-.log-link:hover{
+.info-line :deep(.log-link:hover){
   color:#FFD700;
   text-decoration:underline;
 }

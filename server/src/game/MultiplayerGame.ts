@@ -3043,14 +3043,10 @@ export class MultiplayerGame {
     // 替换消息中的实体名称为占位符格式
     let processedMessage = message;
     for (const [key, ref] of Object.entries(finalRefs)) {
-      // 只替换未被占位符包围的实体名称
       const name = ref.name;
-      if (!processedMessage.includes(`{${key}}`)) {
-        // 使用正则避免重复替换
-        processedMessage = processedMessage.replace(
-          new RegExp(`(?<!\\{[^}]*)${this.escapeRegex(name)}(?![^{]*\\})`, 'g'),
-          `{${key}}`
-        );
+      // 简单替换：直接将名称替换为占位符
+      if (processedMessage.includes(name)) {
+        processedMessage = processedMessage.split(name).join(`{${key}}`);
       }
     }
     

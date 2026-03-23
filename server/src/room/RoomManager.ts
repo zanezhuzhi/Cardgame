@@ -204,6 +204,11 @@ export class RoomManager {
     return this._rooms.size;
   }
 
+  /** 获取所有房间（包括游戏中的） */
+  getAllRooms(): Map<string, Room> {
+    return this._rooms;
+  }
+
   getOnlinePlayerCount(): number {
     return this._playerRooms.size;
   }

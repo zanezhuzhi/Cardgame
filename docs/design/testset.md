@@ -6,11 +6,21 @@
 
 ## 当前启用的测试条件
 
+### 单人模式 (SinglePlayerGame.ts)
+
 | ID | 描述 | 状态 | 代码位置 |
 |----|------|------|----------|
 | test1 | 初始手牌增加1/2/3阶阴阳术 | ❌ 关闭 | SinglePlayerGame.ts |
 | test2 | 初始手牌增加1/2/3/3阶阴阳术 | ❌ 关闭 | SinglePlayerGame.ts |
-| test3 | 测试中级/高级符咒获取条件 | ✅ 启用 | SinglePlayerGame.ts |
+| test3 | 测试中级/高级符咒获取条件 | ❌ 关闭 | SinglePlayerGame.ts |
+
+### 多人模式 (MultiplayerGame.ts)
+
+| ID | 描述 | 状态 | 代码位置 |
+|----|------|------|----------|
+| test2-1 | 初始手牌增加1/2/3阶阴阳术 | ✅ 启用 | server/src/game/MultiplayerGame.ts |
+| test2-2 | 初始手牌增加1/2/3/3阶阴阳术 | ❌ 关闭 | server/src/game/MultiplayerGame.ts |
+| test2-3 | 测试中级/高级符咒获取条件 | ❌ 关闭 | server/src/game/MultiplayerGame.ts |
 
 ---
 

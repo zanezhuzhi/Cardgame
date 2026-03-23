@@ -108,6 +108,10 @@
         <!-- LOGO -->
         <div class="logo-panel">
           <div class="logo">百鬼夜行</div>
+          <!-- 调试信息：房间ID和玩家ID -->
+          <div v-if="isMultiMode && currentRoomId" class="debug-info" style="font-size: 10px; color: #888; margin-top: 4px; user-select: all;">
+            🏠 {{ currentRoomId }} | 👤 {{ myPlayerId }}
+          </div>
         </div>
       </div>
 
@@ -292,8 +296,8 @@
         </div>
       </div>
 
-      <!-- 弹窗：妖怪刷新确认（只有当前回合玩家可见） -->
-      <div class="modal" v-if="state?.pendingYokaiRefresh && isMyTurn">
+      <!-- 弹窗：妖怪刷新确认（只有当前回合玩家可见，且不在式神操作中） -->
+      <div class="modal" v-if="state?.pendingYokaiRefresh && isMyTurn && !shikigamiModal.show">
         <div class="modal-box">
           <p>⚠️ 上一玩家未击败妖怪，是否刷新场上妖怪？</p>
           <button class="btn primary" @click="refresh(true)">刷新</button>
@@ -771,6 +775,11 @@ const myPlayerId = computed(() => {
   return 'player_0' // 单人模式固定玩家ID
 })
 
+// 当前房间ID（用于调试显示）
+const currentRoomId = computed(() => {
+  return socketClient.currentRoom.value?.id || ''
+})
+
 // 当前玩家在数组中的索引
 const myPlayerIndex = computed(() => {
   if (!state.value) return 0
@@ -957,6 +966,8 @@ const recommendSpell = computed(() => {
 })
 
 // 式神获取/置换相关 - 依赖 state 触发响应式更新
+// 规则：获取式神需要≥5点符咒伤害，且至少有1张高级符咒（伤害=3）
+// 规则：置换式神需要恰好1张高级符咒（伤害=3），且已有3个式神
 const canAcquireShikigami = computed(() => {
   // 多人模式
   if (isMultiMode.value) {
@@ -964,13 +975,14 @@ const canAcquireShikigami = computed(() => {
     if (state.value?.turnPhase !== 'action') return false
     const p = player.value
     if (!p) return false
-    // 检查是否已有2只式神
-    if ((p.shikigami?.length || 0) >= 2) return false
-    // 检查手牌中是否有阴阳术（总伤害>=3）
-    const spellDamage = (p.hand || [])
-      .filter(c => c.cardType === 'spell')
-      .reduce((sum, c) => sum + (c.damage || 1), 0)
-    return spellDamage >= 3
+    // 检查是否已有3只式神（达到上限）
+    if ((p.shikigami?.length || 0) >= 3) return false
+    // 检查手牌中的符咒
+    const spells = (p.hand || []).filter(c => c.cardType === 'spell')
+    const spellDamage = spells.reduce((sum, c) => sum + (c.damage || 1), 0)
+    const hasAdvanced = spells.some(c => c.damage === 3)
+    // 需要≥5点伤害 且 包含高级符咒
+    return spellDamage >= 5 && hasAdvanced
   }
   // 单人模式
   return game?.canAcquireShikigami() ?? false
@@ -982,8 +994,8 @@ const canReplaceShikigami = computed(() => {
     if (state.value?.turnPhase !== 'action') return false
     const p = player.value
     if (!p) return false
-    // 检查是否有式神可置换
-    if ((p.shikigami?.length || 0) === 0) return false
+    // 检查是否有3个式神（只有满了才能置换）
+    if ((p.shikigami?.length || 0) !== 3) return false
     // 检查手牌中是否有高级符咒（伤害=3）
     const hasAdvanced = (p.hand || []).some(c => c.cardType === 'spell' && c.damage === 3)
     return hasAdvanced
@@ -1698,6 +1710,14 @@ const spellOptions = computed(() => [
   }
 ])
 
+// GM指令：添加测试卡牌
+function gmAddTestCards() {
+  if (isMultiMode.value) {
+    socketClient.sendAction({ type: 'gmAddTestCards' })
+    console.log('[GM] 发送添加测试卡牌指令')
+  }
+}
+
 function handleGetSpell() {
   // 打开阴阳术选择弹窗
   spellSelectModal.show = true
@@ -1961,15 +1981,17 @@ async function nextShikigamiStep() {
     // 服务器会返回候选列表，监听响应
     const response = await new Promise<any>((resolve) => {
       const handler = (data: any) => {
+        console.log('[nextShikigamiStep] 收到gameEvent:', data)
         if (data.type === 'shikigamiCandidates') {
-          socketClient.socket?.off('gameEvent', handler)
+          socketClient.off('gameEvent', handler)
           resolve(data)
         }
       }
-      socketClient.socket?.on('gameEvent', handler)
+      socketClient.on('gameEvent', handler)
       // 超时处理
       setTimeout(() => {
-        socketClient.socket?.off('gameEvent', handler)
+        socketClient.off('gameEvent', handler)
+        console.log('[nextShikigamiStep] 超时，未收到候选')
         resolve({ candidates: [] })
       }, 5000)
     })
@@ -2038,10 +2060,12 @@ async function confirmReplaceShikigami() {
   if (!shikigamiModal.selectedNewId || !shikigamiModal.selectedOldId) return
   
   if (isMultiMode.value) {
+    // 找到旧式神的槽位索引
+    const oldSlotIndex = player.value?.shikigami?.findIndex(s => s.id === shikigamiModal.selectedOldId) ?? 0
     socketClient.sendAction({
       type: 'replaceShikigami',
-      oldShikigamiId: shikigamiModal.selectedOldId,
-      newShikigamiId: shikigamiModal.selectedNewId,
+      shikigamiId: shikigamiModal.selectedNewId,
+      slotIndex: oldSlotIndex,
       spellIds: shikigamiModal.selectedSpells
     })
     closeShikigamiModal()

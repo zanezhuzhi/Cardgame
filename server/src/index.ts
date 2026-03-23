@@ -111,6 +111,169 @@ async function main(): Promise<void> {
     });
   });
   
+  // API 端点：获取所有房间（包括游戏中的）
+  app.get('/api/allrooms', (req, res) => {
+    const roomManager = RoomManager.getInstance();
+    // 使用私有字段获取所有房间
+    const rooms = (roomManager as any)._rooms as Map<string, any>;
+    const roomList: any[] = [];
+    if (rooms) {
+      rooms.forEach((room, id) => {
+        const info = room.getInfo();
+        roomList.push({
+          id,
+          ...info,
+          playerIds: info.players?.map((p: any) => p.id) || []
+        });
+      });
+    }
+    res.json({ rooms: roomList });
+  });
+  
+  // ============ GM API 指令集 ============
+  
+  // GM0: 查看所有房间（包括playing状态）
+  app.get('/api/gm/debug', (req, res) => {
+    const roomManager = RoomManager.getInstance();
+    const rooms = roomManager.getAllRooms();
+    const result: any[] = [];
+    rooms.forEach((room, id) => {
+      const game = room.getGame();
+      const state = game?.getState();
+      result.push({
+        roomId: id,
+        status: room.status,
+        players: state?.players?.map((p: any) => ({ id: p.id, name: p.name })) || room.players?.map(p => ({ id: p.id, name: p.name })) || []
+      });
+    });
+    res.json(result);
+  });
+  
+  // GM1: 添加测试卡牌 (1+2+3+3)
+  // GET /api/gm/addcards/:roomId/:playerId
+  app.get('/api/gm/addcards/:roomId/:playerId', (req, res) => {
+    const roomManager = RoomManager.getInstance();
+    const room = roomManager.getRoom(req.params.roomId);
+    if (!room) return res.status(404).json({ error: '房间不存在' });
+    const game = room.getGame();
+    if (!game) return res.status(400).json({ error: '游戏未开始' });
+    
+    const result = game.handleAction(req.params.playerId, { type: 'gmAddTestCards' } as any);
+    res.json({ success: result.success, error: result.error });
+  });
+  
+  // GM2: 添加指定卡牌
+  // GET /api/gm/addcard/:roomId/:playerId/:cardName/:count
+  // 例: /api/gm/addcard/ABC123/player_xxx/高级符咒/3
+  app.get('/api/gm/addcard/:roomId/:playerId/:cardName/:count', (req, res) => {
+    const roomManager = RoomManager.getInstance();
+    const room = roomManager.getRoom(req.params.roomId);
+    if (!room) return res.status(404).json({ error: '房间不存在' });
+    const game = room.getGame();
+    if (!game) return res.status(400).json({ error: '游戏未开始' });
+    
+    const cardName = decodeURIComponent(req.params.cardName);
+    const count = parseInt(req.params.count) || 1;
+    const result = game.handleAction(req.params.playerId, { 
+      type: 'gmAddCard', 
+      cardName, 
+      count 
+    } as any);
+    res.json({ success: result.success, error: result.error, cardName, count });
+  });
+  
+  // GM3: 替换式神
+  // GET /api/gm/setshikigami/:roomId/:playerId/:slotIndex/:shikigamiName
+  // 例: /api/gm/setshikigami/ABC123/player_xxx/0/茨木童子
+  app.get('/api/gm/setshikigami/:roomId/:playerId/:slotIndex/:shikigamiName', (req, res) => {
+    const roomManager = RoomManager.getInstance();
+    const room = roomManager.getRoom(req.params.roomId);
+    if (!room) return res.status(404).json({ error: '房间不存在' });
+    const game = room.getGame();
+    if (!game) return res.status(400).json({ error: '游戏未开始' });
+    
+    const shikigamiName = decodeURIComponent(req.params.shikigamiName);
+    const slotIndex = parseInt(req.params.slotIndex) || 0;
+    const result = game.handleAction(req.params.playerId, { 
+      type: 'gmSetShikigami', 
+      slotIndex,
+      shikigamiName 
+    } as any);
+    res.json({ success: result.success, error: result.error, slotIndex, shikigamiName });
+  });
+  
+  // GM4: 替换妖怪
+  // GET /api/gm/setyokai/:roomId/:slotIndex/:yokaiName
+  // 例: /api/gm/setyokai/ABC123/0/灯笼鬼
+  app.get('/api/gm/setyokai/:roomId/:slotIndex/:yokaiName', (req, res) => {
+    const roomManager = RoomManager.getInstance();
+    const room = roomManager.getRoom(req.params.roomId);
+    if (!room) return res.status(404).json({ error: '房间不存在' });
+    const game = room.getGame();
+    if (!game) return res.status(400).json({ error: '游戏未开始' });
+    
+    const yokaiName = decodeURIComponent(req.params.yokaiName);
+    const slotIndex = parseInt(req.params.slotIndex) || 0;
+    // GM操作不需要playerId
+    const result = game.gmSetYokai(slotIndex, yokaiName);
+    res.json({ success: result.success, error: result.error, slotIndex, yokaiName });
+  });
+  
+  // GM5: 添加卡牌到弃牌堆
+  // GET /api/gm/discard/:roomId/:playerId/:cardName/:count
+  // 例: /api/gm/discard/ABC123/player_xxx/灯笼鬼/1
+  app.get('/api/gm/discard/:roomId/:playerId/:cardName/:count', (req, res) => {
+    const roomManager = RoomManager.getInstance();
+    const room = roomManager.getRoom(req.params.roomId);
+    if (!room) return res.status(404).json({ error: '房间不存在' });
+    const game = room.getGame();
+    if (!game) return res.status(400).json({ error: '游戏未开始' });
+    
+    const cardName = decodeURIComponent(req.params.cardName);
+    const count = parseInt(req.params.count) || 1;
+    const result = game.handleAction(req.params.playerId, { 
+      type: 'gmAddToDiscard', 
+      cardName, 
+      count 
+    } as any);
+    res.json({ success: result.success, error: result.error, cardName, count });
+  });
+  
+  // GM6: 给玩家添加伤害
+  // GET /api/gm/adddamage/:roomId/:playerId/:damage
+  // 例: /api/gm/adddamage/ABC123/player_xxx/100
+  app.get('/api/gm/adddamage/:roomId/:playerId/:damage', (req, res) => {
+    const roomManager = RoomManager.getInstance();
+    const room = roomManager.getRoom(req.params.roomId);
+    if (!room) return res.status(404).json({ error: '房间不存在' });
+    const game = room.getGame();
+    if (!game) return res.status(400).json({ error: '游戏未开始' });
+    
+    const damage = parseInt(req.params.damage) || 100;
+    const result = game.handleAction(req.params.playerId, { 
+      type: 'gmAddDamage', 
+      damage 
+    } as any);
+    res.json({ success: result.success, error: result.error, damage });
+  });
+  
+  // GM6: 替换鬼王
+  // GET /api/gm/setboss/:roomId/:bossName
+  // 例: /api/gm/setboss/ABC123/八岐大蛇
+  app.get('/api/gm/setboss/:roomId/:bossName', (req, res) => {
+    const roomManager = RoomManager.getInstance();
+    const room = roomManager.getRoom(req.params.roomId);
+    if (!room) return res.status(404).json({ error: '房间不存在' });
+    const game = room.getGame();
+    if (!game) return res.status(400).json({ error: '游戏未开始' });
+    
+    const bossName = decodeURIComponent(req.params.bossName);
+    const result = game.gmSetBoss(bossName);
+    res.json({ success: result.success, error: result.error, bossName });
+  });
+  
+  // ============ GM API 指令集结束 ============
+  
   // 创建 HTTP 服务器
   const httpServer = createServer(app);
   

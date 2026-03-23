@@ -1,0 +1,417 @@
+/**
+ * 御魂传说 - 服务端类型定义
+ * @file server/src/types/index.ts
+ */
+
+// ============ 玩家信息 ============
+
+/** 连接的玩家信息 */
+export interface ConnectedPlayer {
+  id: string;           // Socket ID
+  name: string;         // 玩家昵称
+  roomId: string | null; // 当前所在房间
+  joinedAt: number;     // 加入时间
+}
+
+// ============ 房间相关 ============
+
+/** 房间状态 */
+export type RoomStatus = 'waiting' | 'starting' | 'playing' | 'finished';
+
+/** 房间内玩家 */
+export interface RoomPlayer {
+  id: string;           // 玩家ID（Socket ID）
+  name: string;         // 玩家昵称
+  isHost: boolean;      // 是否房主
+  isReady: boolean;     // 是否准备
+  isConnected: boolean; // 是否在线
+  playerIndex: number;  // 游戏中的玩家索引
+}
+
+/** 房间配置 */
+export interface RoomConfig {
+  maxPlayers: number;   // 最大玩家数（3-6）
+  minPlayers: number;   // 最小玩家数（默认3）
+  isPrivate: boolean;   // 是否私有房间
+  password?: string;    // 房间密码（私有房间）
+}
+
+/** 房间信息 */
+export interface RoomInfo {
+  id: string;           // 房间码（6位）
+  hostId: string;       // 房主ID
+  status: RoomStatus;   // 房间状态
+  config: RoomConfig;   // 房间配置
+  players: RoomPlayer[]; // 玩家列表
+  createdAt: number;    // 创建时间
+  lastActivity: number; // 最后活动时间
+}
+
+// ============ 游戏相关类型（本地定义，避免跨项目导入问题）============
+
+/** 游戏阶段 */
+export type GamePhase = 'waiting' | 'setup' | 'shikigamiSelect' | 'playing' | 'ended';
+
+/** 回合阶段 */
+export type TurnPhase = 'ghostFire' | 'shikigami' | 'action' | 'cleanup';
+
+/** 卡牌类型 */
+export type CardType = 'onmyoji' | 'shikigami' | 'boss' | 'yokai' | 'spell' | 'penalty' | 'token';
+
+/** 卡牌实例 */
+export interface CardInstance {
+  instanceId: string;
+  cardId: string;
+  cardType: CardType;
+  name: string;
+  hp?: number;
+  maxHp?: number;
+  charm?: number;
+  damage?: number;
+  effect?: string;
+  image?: string;
+}
+
+/** 式神卡 */
+export interface ShikigamiCard {
+  id: string;
+  name: string;
+  type: 'shikigami';
+  rarity?: string;
+  skill?: {
+    name: string;
+    cost: number;
+    description: string;
+    effect?: string;
+  };
+  image?: string;
+}
+
+/** 鬼王卡 */
+export interface BossCard {
+  id: string;
+  name: string;
+  type: 'boss';
+  stage: number;
+  hp: number;
+  charm?: number;
+  effect?: string;
+  image?: string;
+}
+
+/** 阴阳师卡 */
+export interface OnmyojiCard {
+  id: string;
+  name: string;
+  type: 'onmyoji';
+  ability?: string;
+  image?: string;
+}
+
+/** 游戏日志条目 */
+export interface GameLogEntry {
+  type: string;
+  playerId?: string;
+  playerName?: string;
+  cardName?: string;
+  targetName?: string;
+  value?: number;
+  message: string;
+  timestamp: number;
+}
+
+/** 式神状态 */
+export interface ShikigamiState {
+  cardId: string;
+  isExhausted: boolean;
+  markers: Record<string, number>;
+}
+
+/** 临时增益 */
+export interface TempBuff {
+  type: string;
+  value: number;
+  source: string;
+}
+
+/** 玩家状态 */
+export interface PlayerState {
+  id: string;
+  name: string;
+  onmyoji: OnmyojiCard | null;
+  shikigami: ShikigamiCard[];
+  maxShikigami: number;
+  ghostFire: number;
+  maxGhostFire: number;
+  damage: number;
+  hand: CardInstance[];
+  deck: CardInstance[];
+  discard: CardInstance[];
+  played: CardInstance[];
+  exiled: CardInstance[];
+  totalCharm: number;
+  cardsPlayed: number;
+  isConnected: boolean;
+  isReady: boolean;
+  shikigamiState: ShikigamiState[];
+  tempBuffs: TempBuff[];
+}
+
+/** 战场状态 */
+export interface FieldState {
+  yokaiSlots: (CardInstance | null)[];
+  currentBoss: BossCard | null;
+  bossCurrentHp: number;
+  bossDeck: BossCard[];
+  spellSupply: {
+    basic: CardInstance | null;
+    medium: CardInstance | null;
+    advanced: CardInstance | null;
+  };
+  spellCounts: {
+    basic: number;
+    medium: number;
+    advanced: number;
+  };
+  tokenShop: number;
+  penaltyPile: CardInstance[];
+  yokaiDeck: CardInstance[];
+  shikigamiSupply?: ShikigamiCard[];
+  exileZone: CardInstance[];
+}
+
+/** 游戏状态 */
+export interface GameState {
+  roomId: string;
+  phase: GamePhase;
+  playerCount?: number;
+  players: PlayerState[];
+  currentPlayerIndex: number;
+  turnNumber: number;
+  turnPhase: TurnPhase | 'start';
+  field: FieldState;
+  shikigamiDeck?: ShikigamiCard[];
+  shikigamiOptions?: ShikigamiCard[];
+  log: GameLogEntry[];
+  lastUpdate: number;
+  lastPlayerKilledYokai?: boolean;
+  pendingYokaiRefresh?: boolean;
+}
+
+/** 游戏动作 */
+export type GameAction = 
+  | { type: 'PLAY_CARD'; cardInstanceId: string }
+  | { type: 'USE_SKILL'; shikigamiId: string; targetId?: string }
+  | { type: 'ATTACK'; targetId: string; damage: number }
+  | { type: 'BUY_SPELL'; spellId: string; exileCardIds: string[] }
+  | { type: 'CONFIRM_SHIKIGAMI' }
+  | { type: 'REPLACE_SHIKIGAMI'; oldId: string; newId: string }
+  | { type: 'DECIDE_YOKAI_REFRESH'; refresh: boolean }
+  | { type: 'SELECT_SHIKIGAMI'; selectedIds: string[] }
+  | { type: 'END_TURN' };
+
+/** 游戏事件 */
+export type GameEvent =
+  | { type: 'GAME_STARTED'; state: GameState }
+  | { type: 'STATE_UPDATE'; state: GameState }
+  | { type: 'TURN_CHANGED'; playerId: string }
+  | { type: 'PHASE_CHANGED'; phase: TurnPhase }
+  | { type: 'CARD_PLAYED'; playerId: string; card: CardInstance }
+  | { type: 'CARD_DRAWN'; playerId: string; count: number }
+  | { type: 'DAMAGE_ALLOCATED'; results: { targetId: string; damage: number; defeated: boolean }[] }
+  | { type: 'YOKAI_DEFEATED'; card: CardInstance; playerId: string }
+  | { type: 'BOSS_ARRIVAL'; boss: BossCard }
+  | { type: 'BOSS_DEFEATED'; boss: BossCard; playerId: string }
+  | { type: 'GAME_ENDED'; winner: string; scores: Record<string, number> };
+
+// ============ Socket 事件类型 ============
+
+/** 服务端 → 客户端 事件 */
+export interface ServerToClientEvents {
+  // 连接相关
+  'connect:success': (playerId: string) => void;
+  
+  // 房间相关
+  'room:created': (room: RoomInfo) => void;
+  'room:joined': (room: RoomInfo, playerId: string) => void;
+  'room:updated': (room: RoomInfo) => void;
+  'room:playerJoined': (player: RoomPlayer) => void;
+  'room:playerLeft': (playerId: string) => void;
+  'room:playerReady': (playerId: string, isReady: boolean) => void;
+  'room:hostChanged': (newHostId: string) => void;
+  'room:left': () => void;
+  'room:error': (code: string, message: string) => void;
+  'room:list': (rooms: RoomInfo[]) => void;
+  
+  // 游戏相关
+  'game:starting': (countdown: number) => void;
+  'game:started': (state: GameState) => void;
+  'game:stateSync': (state: GameState, seq: number) => void;
+  'game:event': (event: GameEvent) => void;
+  'game:turnChange': (playerId: string, turnNumber: number) => void;
+  'game:phaseChange': (phase: TurnPhase) => void;
+  'game:actionResult': (seq: number, success: boolean, error?: string) => void;
+  'game:ended': (winners: string[], scores: Record<string, number>) => void;
+  'game:error': (code: string, message: string) => void;
+  
+  // 交互请求
+  'interact:request': (request: InteractRequest) => void;
+  
+  // 玩家状态
+  'player:disconnected': (playerId: string, timeout: number) => void;
+  'player:reconnected': (playerId: string) => void;
+  
+  // 心跳
+  'pong': (timestamp: number, serverTime: number) => void;
+}
+
+/** 客户端 → 服务端 事件 */
+export interface ClientToServerEvents {
+  // 玩家信息
+  'player:setName': (name: string, callback: (success: boolean) => void) => void;
+  
+  // 房间相关
+  'room:create': (config: Partial<RoomConfig>, callback: (room: RoomInfo | null, error?: string) => void) => void;
+  'room:join': (roomId: string, password?: string, callback?: (success: boolean, error?: string) => void) => void;
+  'room:leave': (callback?: (success: boolean) => void) => void;
+  'room:ready': (isReady: boolean, callback?: (success: boolean) => void) => void;
+  'room:kick': (playerId: string, callback?: (success: boolean, error?: string) => void) => void;
+  'room:list': (callback: (rooms: RoomInfo[]) => void) => void;
+  
+  // 游戏相关
+  'game:start': (callback?: (success: boolean, error?: string) => void) => void;
+  'game:action': (action: GameAction, seq: number, callback?: (success: boolean, error?: string) => void) => void;
+  
+  // 交互响应
+  'interact:response': (response: InteractResponse) => void;
+  
+  // 心跳
+  'ping': (timestamp: number) => void;
+}
+
+/** Socket 中间数据 */
+export interface InterServerEvents {
+  // 暂时为空，用于服务端之间通信
+}
+
+/** Socket 数据 */
+export interface SocketData {
+  playerId: string;
+  playerName: string;
+  roomId: string | null;
+}
+
+// ============ 交互系统 ============
+
+/** 交互请求类型 */
+export type InteractType = 
+  | 'CHOICE'
+  | 'SELECT_CARDS'
+  | 'SELECT_TARGET'
+  | 'SELECT_SHIKIGAMI';
+
+/** 交互请求 */
+export interface InteractRequest {
+  requestId: string;
+  playerId: string;
+  type: InteractType;
+  timeout: number;
+  data: ChoiceData | SelectCardsData | SelectTargetData | SelectShikigamiData;
+}
+
+/** 选择选项数据 */
+export interface ChoiceData {
+  type: 'CHOICE';
+  options: string[];
+  title?: string;
+}
+
+/** 选择卡牌数据 */
+export interface SelectCardsData {
+  type: 'SELECT_CARDS';
+  candidates: CardInstance[];
+  count: number;
+  minCount?: number;
+  title?: string;
+}
+
+/** 选择目标数据 */
+export interface SelectTargetData {
+  type: 'SELECT_TARGET';
+  candidates: CardInstance[];
+  title?: string;
+}
+
+/** 选择式神数据 */
+export interface SelectShikigamiData {
+  type: 'SELECT_SHIKIGAMI';
+  candidates: ShikigamiCard[];
+  count: number;
+  title?: string;
+}
+
+/** 交互响应 */
+export interface InteractResponse {
+  requestId: string;
+  choiceIndex?: number;
+  selectedCardIds?: string[];
+  targetId?: string;
+  selectedShikigamiIds?: string[];
+}
+
+// ============ 错误码 ============
+
+export const ErrorCodes = {
+  // 房间错误
+  ROOM_NOT_FOUND: 'ROOM_NOT_FOUND',
+  ROOM_FULL: 'ROOM_FULL',
+  ROOM_ALREADY_STARTED: 'ROOM_ALREADY_STARTED',
+  ROOM_WRONG_PASSWORD: 'ROOM_WRONG_PASSWORD',
+  ROOM_ALREADY_IN_ROOM: 'ROOM_ALREADY_IN_ROOM',
+  ROOM_NOT_IN_ROOM: 'ROOM_NOT_IN_ROOM',
+  ROOM_NOT_HOST: 'ROOM_NOT_HOST',
+  ROOM_NOT_ENOUGH_PLAYERS: 'ROOM_NOT_ENOUGH_PLAYERS',
+  ROOM_PLAYERS_NOT_READY: 'ROOM_PLAYERS_NOT_READY',
+  
+  // 游戏错误
+  GAME_NOT_STARTED: 'GAME_NOT_STARTED',
+  GAME_NOT_YOUR_TURN: 'GAME_NOT_YOUR_TURN',
+  GAME_INVALID_ACTION: 'GAME_INVALID_ACTION',
+  GAME_INVALID_PHASE: 'GAME_INVALID_PHASE',
+  
+  // 通用错误
+  INVALID_PARAMS: 'INVALID_PARAMS',
+  UNKNOWN_ERROR: 'UNKNOWN_ERROR',
+} as const;
+
+export type ErrorCode = typeof ErrorCodes[keyof typeof ErrorCodes];
+
+// ============ 游戏配置 ============
+
+export interface MultiplayerGameConfig {
+  minPlayers: number;      // 最小玩家数（3）
+  maxPlayers: number;      // 最大玩家数（6）
+  turnTimeout: number;     // 回合超时（毫秒）
+  interactTimeout: number; // 交互超时（毫秒）
+  reconnectTimeout: number; // 重连超时（毫秒）
+}
+
+export const DEFAULT_MULTIPLAYER_CONFIG: MultiplayerGameConfig = {
+  minPlayers: 3,
+  maxPlayers: 6,
+  turnTimeout: 120000,      // 2分钟
+  interactTimeout: 30000,   // 30秒
+  reconnectTimeout: 60000,  // 1分钟
+};
+
+// ============ 工具类型 ============
+
+/** 深度只读 */
+export type DeepReadonly<T> = {
+  readonly [P in keyof T]: T[P] extends object ? DeepReadonly<T[P]> : T[P];
+};
+
+/** 可选深度部分 */
+export type DeepPartial<T> = {
+  [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];
+};

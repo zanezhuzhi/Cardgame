@@ -1,121 +1,127 @@
-import express from 'express'
-import { createServer } from 'http'
-import { Server } from 'socket.io'
-import cors from 'cors'
+/**
+ * 御魂传说 - 多人联机服务端入口
+ * @file server/src/index.ts
+ * 
+ * 启动 HTTP 服务器和 Socket.io 服务
+ */
 
-const app = express()
-app.use(cors())
+import express from 'express';
+import cors from 'cors';
+import { createServer } from 'http';
+import { SocketServer } from './socket/SocketServer';
+import { RoomManager } from './room/RoomManager';
 
-const httpServer = createServer(app)
-const io = new Server(httpServer, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
-  }
-})
+// 配置
+const PORT = parseInt(process.env.PORT || '3002');
+const HOST = process.env.HOST || '0.0.0.0';
 
-// 简化的类型定义
-interface Player {
-  id: string
-  name: string
-  isOnline: boolean
-}
-
-interface Room {
-  id: string
-  name: string
-  hostId: string
-  players: Player[]
-  maxPlayers: number
-  status: 'waiting' | 'playing' | 'finished'
-}
-
-// 内存存储
-const rooms = new Map<string, Room>()
-const players = new Map<string, Player>()
-
-io.on('connection', (socket) => {
-  console.log(`玩家连接: ${socket.id}`)
-
-  // 创建房间
-  socket.on('room:create', (name: string, callback: (room: Room) => void) => {
-    const roomId = `room_${Date.now()}`
-    const player: Player = {
-      id: socket.id,
-      name: `玩家${socket.id.slice(0, 4)}`,
-      isOnline: true
-    }
-    
-    const room: Room = {
-      id: roomId,
-      name,
-      hostId: socket.id,
-      players: [player],
-      maxPlayers: 4,
-      status: 'waiting'
-    }
-    
-    rooms.set(roomId, room)
-    players.set(socket.id, player)
-    socket.join(roomId)
-    
-    console.log(`房间已创建: ${roomId}`)
-    callback(room)
-  })
-
-  // 加入房间
-  socket.on('room:join', (roomId: string, callback: (room: Room | null) => void) => {
-    const room = rooms.get(roomId)
-    if (!room || room.players.length >= room.maxPlayers) {
-      callback(null)
-      return
-    }
-
-    const player: Player = {
-      id: socket.id,
-      name: `玩家${socket.id.slice(0, 4)}`,
-      isOnline: true
-    }
-
-    room.players.push(player)
-    players.set(socket.id, player)
-    socket.join(roomId)
-
-    io.to(roomId).emit('player:joined', player)
-    callback(room)
-  })
-
-  // 离开房间
-  socket.on('room:leave', () => {
-    handlePlayerLeave(socket.id)
-  })
-
-  // 断开连接
-  socket.on('disconnect', () => {
-    console.log(`玩家断开: ${socket.id}`)
-    handlePlayerLeave(socket.id)
-  })
-})
-
-function handlePlayerLeave(playerId: string) {
-  players.delete(playerId)
+/**
+ * 主函数
+ */
+async function main(): Promise<void> {
+  console.log('═══════════════════════════════════════════════════');
+  console.log('       御魂传说 - 多人联机服务端 v1.0.0');
+  console.log('═══════════════════════════════════════════════════');
+  console.log();
   
-  for (const [roomId, room] of rooms) {
-    const index = room.players.findIndex(p => p.id === playerId)
-    if (index !== -1) {
-      room.players.splice(index, 1)
-      io.to(roomId).emit('player:left', playerId)
-      
-      if (room.players.length === 0) {
-        rooms.delete(roomId)
-        console.log(`房间已删除: ${roomId}`)
-      }
-      break
-    }
-  }
+  // 创建 Express 应用
+  const app = express();
+  
+  // 中间件
+  app.use(cors());
+  app.use(express.json());
+  
+  // 健康检查端点
+  app.get('/health', (req, res) => {
+    const roomManager = RoomManager.getInstance();
+    res.json({
+      status: 'ok',
+      timestamp: Date.now(),
+      rooms: roomManager.getRoomCount(),
+      players: roomManager.getOnlinePlayerCount(),
+    });
+  });
+  
+  // API 端点：获取房间列表
+  app.get('/api/rooms', (req, res) => {
+    const roomManager = RoomManager.getInstance();
+    res.json({
+      rooms: roomManager.getPublicRooms(),
+    });
+  });
+  
+  // API 端点：获取服务器状态
+  app.get('/api/status', (req, res) => {
+    const roomManager = RoomManager.getInstance();
+    res.json({
+      version: '1.0.0',
+      uptime: process.uptime(),
+      rooms: roomManager.getRoomCount(),
+      players: roomManager.getOnlinePlayerCount(),
+      memory: process.memoryUsage(),
+    });
+  });
+  
+  // 创建 HTTP 服务器
+  const httpServer = createServer(app);
+  
+  // 创建 Socket.io 服务
+  const socketServer = new SocketServer(httpServer);
+  
+  // 启动服务器
+  httpServer.listen(PORT, HOST, () => {
+    console.log(`[Server] HTTP 服务已启动`);
+    console.log(`[Server] 地址: http://${HOST}:${PORT}`);
+    console.log(`[Server] WebSocket 地址: ws://${HOST}:${PORT}`);
+    console.log();
+    console.log('[Server] 可用端点:');
+    console.log(`  - GET  /health     健康检查`);
+    console.log(`  - GET  /api/rooms  房间列表`);
+    console.log(`  - GET  /api/status 服务器状态`);
+    console.log();
+    console.log('[Server] 等待客户端连接...');
+    console.log('═══════════════════════════════════════════════════');
+  });
+  
+  // 优雅关闭
+  const shutdown = async (signal: string) => {
+    console.log(`\n[Server] 收到 ${signal} 信号，正在关闭...`);
+    
+    // 关闭 Socket.io
+    await socketServer.close();
+    
+    // 关闭房间管理器
+    RoomManager.getInstance().shutdown();
+    
+    // 关闭 HTTP 服务器
+    httpServer.close(() => {
+      console.log('[Server] HTTP 服务已关闭');
+      process.exit(0);
+    });
+    
+    // 强制退出超时
+    setTimeout(() => {
+      console.log('[Server] 强制退出');
+      process.exit(1);
+    }, 10000);
+  };
+  
+  // 监听退出信号
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  
+  // 未捕获异常处理
+  process.on('uncaughtException', (error) => {
+    console.error('[Server] 未捕获的异常:', error);
+  });
+  
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('[Server] 未处理的 Promise 拒绝:', reason);
+  });
 }
 
-const PORT = process.env.PORT || 3000
-httpServer.listen(PORT, () => {
-  console.log(`🚀 游戏服务器运行在 http://localhost:${PORT}`)
-})
+// 启动
+main().catch((error) => {
+  console.error('[Server] 启动失败:', error);
+  process.exit(1);
+});

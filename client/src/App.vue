@@ -96,18 +96,15 @@
                @mouseenter="showBossTooltip($event, boss)"
                @mouseleave="hideTooltip">
             <img v-if="getCardImage(boss)" :src="getCardImage(boss)" class="card-art boss-art" />
-            <!-- 可攻击时的引导覆盖层 -->
-            <div v-if="canAttackBoss" class="boss-attack-overlay">
-              ⚔️ 点击攻击<br/>
-              <span class="boss-dmg-preview">{{ player?.damage }} 伤害</span>
-            </div>
             <!-- 等待退治/超度选择时 -->
             <div v-if="isBossDefeated" class="boss-defeated-overlay">💀 已击败<br/>请选择...</div>
-            <div class="boss-card-info">
-              <div class="boss-stage">Ⅰ</div>
+            <!-- 鬼王信息（顶部渐变） -->
+            <div class="boss-info">
               <div class="boss-name">{{boss.name}}</div>
-              <div class="boss-hp">❤️{{state?.field.bossCurrentHp}}/{{boss.hp}}</div>
-              <div class="boss-charm">👑+{{boss.charm||0}}</div>
+              <div class="boss-stat">
+                <span :class="{'hp-damaged': state?.field.bossCurrentHp < boss.hp}">❤️{{state?.field.bossCurrentHp}}/{{boss.hp}}</span>
+                <span>👑{{boss.charm||0}}</span>
+              </div>
             </div>
           </div>
           <!-- 妖怪全清但伤害不足时的提示 -->
@@ -115,7 +112,13 @@
                class="boss-no-dmg-hint">
             妖怪已清！<br/>积累伤害后攻击鬼王
           </div>
-          <div v-else class="boss-empty">全部击败</div>
+          <!-- 鬼王区底部提示 -->
+          <div v-else-if="isFirstBoss" class="boss-tip-first">
+            所有未造成击杀的伤害在回合结束时将被移除！
+          </div>
+          <div v-else class="boss-tip-incoming">
+            👹 鬼王来袭！
+          </div>
           <div class="boss-remain">剩余:{{state?.field.bossDeck.length||0}}</div>
         </div>
         <div class="yokai-panel">
@@ -204,9 +207,16 @@
                  @mouseenter="showShikigamiTooltip($event, s)"
                  @mouseleave="hideTooltip">
               <img v-if="getCardImage(s)" :src="getCardImage(s)" class="card-art shiki-art" />
+              <!-- 式神信息（底部渐变） -->
               <div class="shiki-info">
-                <div class="s-name">{{s.name}}</div>
-                <div class="s-skill" v-if="s.skill">【启】{{s.skill.name}}(🔥{{s.skill.cost||0}})</div>
+                <div class="shiki-row1">
+                  <span class="shiki-name">{{s.name}}</span>
+                  <span class="shiki-rarity-tag" :class="'rarity-'+s.rarity?.toLowerCase()">{{s.rarity}}</span>
+                </div>
+                <div class="shiki-row2">
+                  <span v-if="s.passive" class="shiki-skill-label">【触】{{s.passive.name}}</span>
+                  <span v-if="s.skill" class="shiki-skill-label">【启】{{s.skill.name}} 🔥{{s.skill.cost||0}}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -1252,6 +1262,12 @@ function canDamage(y: CardInstance): boolean {
 const allYokaiCleared = computed(() =>
   state.value?.field.yokaiSlots.every(s => s === null) ?? false
 )
+// 是否是第一只鬼王（麒麟）
+const isFirstBoss = computed(() => {
+  const bossDeckLength = state.value?.field.bossDeck?.length || 0
+  // 初始有9只鬼王在牌堆，当前场上1只，所以第一只时牌堆还有9只
+  return bossDeckLength >= 9
+})
 // 是否处于鬼王被击败等待选择状态
 const isBossDefeated = computed(() =>
   (state.value?.turnPhase as any) === 'bossDefeated'
@@ -1906,6 +1922,7 @@ async function confirmReplaceShikigami() {
   position:relative;overflow:hidden;
   transition:all .2s;
   box-shadow:0 calc(var(--s) * 4) calc(var(--s) * 16) rgba(180,0,50,.3);
+  display:flex;flex-direction:column;justify-content:flex-end;
 }
 .boss-card:hover{
   transform:scale(1.03);
@@ -1934,20 +1951,6 @@ async function confirmReplaceShikigami() {
   0%,100%{box-shadow:0 0 12px rgba(255,50,50,.5)}
   50%{box-shadow:0 0 28px rgba(255,50,50,.9)}
 }
-/* 攻击引导覆盖层 */
-.boss-attack-overlay{
-  position:absolute;inset:0;z-index:2;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  background:rgba(180,0,0,.55);
-  font-size:12px;font-weight:bold;color:#fff;
-  text-shadow:0 1px 4px rgba(0,0,0,.8);
-  border-radius:inherit;
-  pointer-events:none;
-}
-.boss-dmg-preview{
-  font-size:18px;color:#ffcc00;
-  text-shadow:0 0 8px rgba(255,200,0,.8);
-}
 /* 已击败覆盖层 */
 .boss-defeated-overlay{
   position:absolute;inset:0;z-index:2;
@@ -1965,16 +1968,50 @@ async function confirmReplaceShikigami() {
   background:rgba(0,0,0,.3);
   border-radius:4px;padding:3px 6px;
 }
-.boss-card-info{
-  position:absolute;bottom:0;left:0;right:0;
-  background:linear-gradient(0deg,rgba(0,0,0,.9) 0%,transparent 100%);
-  padding:10px 5px 5px;
+/* 鬼王信息（底部渐变，贴边显示） */
+.boss-card .boss-info{
+  position:absolute !important;
+  left:0;right:0;bottom:0;
+  z-index:2;
+  background:linear-gradient(0deg,rgba(0,0,0,.85) 0%,rgba(0,0,0,.6) 40%,rgba(0,0,0,.2) 80%,transparent 100%);
+  padding:25px 0 10px;
+  text-align:center;
 }
-.boss-stage{font-size:8px;color:#ffc107;letter-spacing:.1em}
-.boss-name{font-size:11px;font-weight:bold;color:#fff;margin:2px 0}
-.boss-hp{font-size:10px;color:#ff6b6b}
-.boss-charm{font-size:9px;color:#ffd700}
-.boss-empty{color:#555;padding:12px;font-size:10px;text-align:center}
+.boss-name{
+  font-size:14px;
+  font-weight:700;
+  color:#f0e6d3;
+  text-shadow:0 1px 4px rgba(0,0,0,.8);
+}
+.boss-stat{
+  font-size:13px;
+  color:#ccc;
+  margin-top:4px;
+  display:flex;
+  gap:12px;
+  justify-content:center;
+}
+/* 鬼王区底部提示 */
+.boss-tip-first{
+  color:#aaa;
+  padding:8px 12px;
+  font-size:11px;
+  text-align:center;
+  line-height:1.4;
+}
+.boss-tip-incoming{
+  background:linear-gradient(90deg,transparent,rgba(180,30,30,.6),transparent);
+  color:#ff6b6b;
+  padding:10px 12px;
+  font-size:13px;
+  font-weight:bold;
+  text-align:center;
+  animation:bossIncoming 1.5s infinite;
+}
+@keyframes bossIncoming{
+  0%,100%{opacity:0.7}
+  50%{opacity:1}
+}
 .boss-remain{
   color:#777;font-size:9px;
   background:rgba(0,0,0,.3);
@@ -2323,25 +2360,45 @@ async function confirmReplaceShikigami() {
 }
 .shiki-card.tired{opacity:.35;filter:grayscale(.8)}
 
-/* 式神卡底部信息 */
-.shiki-info{
-  position:relative;z-index:1;
-  background:linear-gradient(0deg,rgba(0,0,0,.9) 0%,rgba(0,0,0,.4) 70%,transparent 100%);
-  padding:calc(var(--s) * 14) calc(var(--s) * 6) calc(var(--s) * 6);
+/* 式神卡底部信息（渐变透明，贴边显示） */
+.shiki-card .shiki-info{
+  position:absolute !important;
+  left:0;right:0;bottom:0;
+  z-index:2;
+  background:linear-gradient(0deg,rgba(0,0,0,.85) 0%,rgba(0,0,0,.6) 40%,rgba(0,0,0,.2) 80%,transparent 100%);
+  padding:calc(var(--s) * 18) 0 calc(var(--s) * 5);
 }
-.s-name{
+.shiki-row1{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:calc(var(--s) * 6);
+}
+.shiki-name{
   font-size:calc(var(--s) * 14);
   font-weight:700;
-  color:#f5e0c0;
-  text-shadow:0 1px 3px rgba(0,0,0,.8);
-  text-align:center;
+  color:#f0e6d3;
+  text-shadow:0 1px 4px rgba(0,0,0,.8);
 }
-.s-skill{
-  font-size:calc(var(--s) * 11);
-  color:#c8a96e;
-  margin-top:calc(var(--s) * 3);
-  line-height:1.3;
-  text-align:center;
+.shiki-rarity-tag{
+  font-size:calc(var(--s) * 10);
+  padding:calc(var(--s) * 1) calc(var(--s) * 5);
+  border-radius:calc(var(--s) * 3);
+  font-weight:bold;
+}
+.shiki-rarity-tag.rarity-ssr{background:linear-gradient(135deg,#FFD700,#FFA500);color:#3a2a00}
+.shiki-rarity-tag.rarity-sr{background:linear-gradient(135deg,#9b59b6,#8e44ad);color:#fff}
+.shiki-rarity-tag.rarity-r{background:linear-gradient(135deg,#3498db,#2980b9);color:#fff}
+.shiki-row2{
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:center;
+  gap:calc(var(--s) * 6);
+  margin-top:calc(var(--s) * 4);
+}
+.shiki-skill-label{
+  font-size:calc(var(--s) * 10);
+  color:#c8b896;
 }
 
 /* 牌库面板 - 移入式神区内部 */

@@ -3088,7 +3088,7 @@ export class MultiplayerGame {
         const key = `yokai_${refIndex++}`;
         refs[key] = {
           type: 'card',
-          id: yokai.cardId,
+          id: yokai.id || yokai.cardId,
           name: yokai.name,
           data: { hp: yokai.hp, damage: yokai.damage, charm: yokai.charm, image: yokai.image, effect: yokai.effect }
         };
@@ -3101,7 +3101,7 @@ export class MultiplayerGame {
         const key = `boss_${refIndex++}`;
         refs[key] = {
           type: 'boss',
-          id: boss.cardId,
+          id: boss.id || boss.cardId,
           name: boss.name,
           data: { hp: boss.hp, charm: boss.charm, image: boss.image, effect: boss.effect }
         };
@@ -3114,7 +3114,7 @@ export class MultiplayerGame {
         const key = `shikigami_${refIndex++}`;
         refs[key] = {
           type: 'shikigami',
-          id: shikigami.cardId,
+          id: shikigami.id || shikigami.cardId,
           name: shikigami.name,
           data: { hp: shikigami.hp, charm: shikigami.charm, image: shikigami.image, skill: shikigami.skill, skillCost: shikigami.skillCost }
         };

@@ -643,6 +643,7 @@
     <!-- 日志引用弹出框（卡牌详情） -->
     <Teleport to="body">
       <div class="log-ref-popup" v-if="logRefPopup.show" 
+           :class="{ 'boss-popup': logRefPopup.ref?.type === 'boss' }"
            :style="{ left: logRefPopup.x + 'px', top: logRefPopup.y + 'px' }"
            @click.stop>
         <template v-if="logRefPopup.ref">
@@ -1121,28 +1122,35 @@ function closeLogRefPopup() {
   logRefPopup.value.show = false
 }
 
-// 获取日志引用卡牌的图片路径
+// 获取日志引用卡牌的图片路径（复用getCardImage的逻辑）
 function getLogRefCardImage(ref: any): string {
-  if (!ref || !ref.data) return ''
+  if (!ref) return ''
   
-  const data = ref.data
-  const image = data.image
+  // 使用id来计算图片路径，与getCardImage逻辑一致
+  const rawId = ref.id
+  if (!rawId) return ''
   
-  if (!image) return ''
-  
-  // 根据卡牌类型确定图片路径
-  if (ref.type === 'boss') {
-    return `/images/boss/${image}`
-  } else if (ref.type === 'shikigami') {
-    return `/images/cards/${image}`
-  } else if (data.cardType === 'yokai' || ref.id?.startsWith('yokai')) {
-    return `/images/yokai/${image}`
-  } else if (data.cardType === 'spell' || ref.id?.startsWith('spell')) {
-    return `/images/spells/${image}`
+  const m = String(rawId).match(/^(\w+)_(\d+)$/)
+  if (!m) {
+    // 特殊处理阴阳术（id格式为 spell_基础术式 等）
+    if (rawId.startsWith('spell_')) {
+      const spellName = rawId.replace('spell_', '')
+      if (spellName === '基础术式') return '/images/spells/601.webp'
+      if (spellName === '中级符咒') return '/images/spells/602.webp'
+      if (spellName === '高级符咒') return '/images/spells/603.webp'
+    }
+    return ''
   }
   
-  // 默认尝试yokai
-  return `/images/yokai/${image}`
+  const [, type, num] = m
+  const n = parseInt(num)
+  
+  if (type === 'yokai')     return `/images/yokai/${201 + n}.webp`
+  if (type === 'boss')      return `/images/bosses/${100 + n}.webp`
+  if (type === 'shikigami') return `/images/shikigami/${400 + n}.webp`
+  if (type === 'spell')     return `/images/spells/${600 + n}.webp`
+  
+  return ''
 }
 
 const canSpell = computed(() => {
@@ -3021,19 +3029,24 @@ async function confirmReplaceShikigami() {
   border:2px solid #D4A574;
   border-radius:8px;
   overflow:hidden;
-  width:180px;
+  width:140px;
   box-shadow:0 4px 20px rgba(0,0,0,0.5);
 }
-/* 卡牌图片区 */
+.log-ref-popup.boss-popup{
+  width:196px;
+}
+/* 卡牌图片区（手牌比例 140x196） */
 .ref-card-image-area{
   position:relative;
-  width:100%;
-  height:140px;
+  width:140px;
+  height:196px;
   overflow:hidden;
   background:#1A1A2E;
 }
+/* 鬼王横版（196x140） */
 .ref-card-image-area.boss-image-area{
-  height:160px;
+  width:196px;
+  height:140px;
 }
 .ref-card-img{
   width:100%;

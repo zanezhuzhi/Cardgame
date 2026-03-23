@@ -118,6 +118,27 @@ export class Room {
   get lastActivity(): number {
     return this._lastActivity;
   }
+  
+  // ============ 调试方法 ============
+  
+  /** 获取游戏实例 */
+  getGame(): MultiplayerGame | null {
+    return this._game;
+  }
+  
+  /** 获取房间信息摘要 */
+  getInfo(): RoomInfo {
+    return {
+      id: this.id,
+      hostId: this._hostId,
+      hostName: this._players.get(this._hostId)?.name || 'Unknown',
+      playerCount: this.playerCount,
+      maxPlayers: this._config.maxPlayers,
+      status: this._status,
+      isPrivate: this._config.isPrivate,
+      players: this.players,
+    };
+  }
 
   // ============ 玩家管理 ============
 

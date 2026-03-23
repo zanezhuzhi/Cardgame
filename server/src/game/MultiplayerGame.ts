@@ -481,11 +481,7 @@ export class MultiplayerGame {
     delete (this.state as any).shikigamiOptions;
     this.shikigamiSelections.clear();
     
-    // 🎲 随机打乱玩家行动顺序
-    this.state.players = shuffle([...this.state.players]);
-    this.addLog(`🎲 行动顺序：${this.state.players.map(p => p.name).join(' → ')}`);
-    
-    // 开始游戏
+    // 开始游戏（会在 startPlayingPhase 中随机打乱玩家顺序）
     this.startGame();
   }
 
@@ -543,6 +539,11 @@ export class MultiplayerGame {
     const player = this.getCurrentPlayer();
     this.state.turnPhase = 'ghostFire';
     
+    // 重置回合限制标记
+    player.hasGainedBasicSpell = false;
+    (player as any).hasGainedMediumSpell = false;
+    (player as any).hasGainedAdvancedSpell = false;
+    
     // 鬼火+1
     player.ghostFire = Math.min(
       player.ghostFire + GAME_CONSTANTS.GHOST_FIRE_PER_TURN,
@@ -552,6 +553,7 @@ export class MultiplayerGame {
     this.addLog(`🔥 ${player.name} 鬼火+1（当前:${player.ghostFire}）`);
     
     // 检查妖怪刷新选项
+    console.log(`[enterGhostFirePhase] lastPlayerKilledYokai=${this.state.lastPlayerKilledYokai}`);
     if (this.state.lastPlayerKilledYokai === false) {
       this.state.pendingYokaiRefresh = true;
       this.addLog(`⚠️ 上一玩家未击败妖怪，${player.name}可选择刷新场上的妖怪`);
@@ -560,6 +562,7 @@ export class MultiplayerGame {
     }
     
     // 直接进入行动阶段
+    console.log('[enterGhostFirePhase] 进入行动阶段');
     this.enterActionPhase();
   }
 
@@ -581,18 +584,44 @@ export class MultiplayerGame {
     const player = this.getCurrentPlayer();
     this.state.turnPhase = 'cleanup';
     
-    // 弃置所有已打出的牌
+    // 检查本回合是否击杀了妖怪（场上有空位 = 击杀了妖怪）
+    const hasEmptySlot = this.state.field.yokaiSlots.some(s => s === null);
+    
+    // 1. 所有存活妖怪生命恢复至上限
+    for (const yokai of this.state.field.yokaiSlots) {
+      if (yokai && yokai.hp > 0 && yokai.maxHp) {
+        yokai.hp = yokai.maxHp;
+      }
+    }
+    
+    // 2. 鬼王生命恢复至上限
+    const boss = this.state.field.currentBoss;
+    if (boss && boss.hp > 0 && boss.maxHp) {
+      boss.hp = boss.maxHp;
+    }
+    
+    // 3. 未使用伤害清空
+    player.damage = 0;
+    
+    // 4. 弃置所有手牌
+    player.discard.push(...player.hand);
+    player.hand = [];
+    
+    // 5. 弃置所有已打出的牌
     player.discard.push(...player.played);
     player.played = [];
     
-    // 抓5张牌
+    // 6. 重置本回合打牌计数
+    player.cardsPlayed = 0;
+    
+    // 7. 抓5张牌
     this.drawCards(player, GAME_CONSTANTS.STARTING_HAND_SIZE);
     
-    // 补充妖怪
+    // 8. 补充妖怪
     this.fillYokaiSlots();
     
-    // 记录是否击杀妖怪
-    this.state.lastPlayerKilledYokai = player.damage > 0;
+    // 9. 记录是否击杀妖怪
+    this.state.lastPlayerKilledYokai = hasEmptySlot;
     
     this.addLog(`🔄 ${player.name} 回合结束`);
     
@@ -688,6 +717,24 @@ export class MultiplayerGame {
       
       case 'confirmShikigamiPhase':
         return this.handleConfirmShikigamiPhase(playerId);
+      
+      case 'gainBasicSpell':
+        return this.handleGainBasicSpell(playerId);
+      
+      case 'exchangeMediumSpell':
+        return this.handleExchangeMediumSpell(playerId, action.yokaiId);
+      
+      case 'exchangeAdvancedSpell':
+        return this.handleExchangeAdvancedSpell(playerId, action.yokaiId);
+      
+      case 'acquireShikigami':
+        return this.handleAcquireShikigami(playerId, action.shikigamiId, action.spellIds);
+      
+      case 'replaceShikigami':
+        return this.handleReplaceShikigami(playerId, action.oldShikigamiId, action.newShikigamiId, action.spellIds);
+      
+      case 'getShikigamiCandidates':
+        return this.handleGetShikigamiCandidates(playerId, action.spellIds, action.isReplace);
       
       default:
         return { success: false, error: `未知的操作类型: ${(action as any).type}` };
@@ -811,6 +858,14 @@ export class MultiplayerGame {
       this.shikigamiSelectTimer = undefined;
     }
     
+    // 🎲 随机打乱玩家行动顺序
+    const originalOrder = this.state.players.map(p => p.name).join(' → ');
+    this.state.players = shuffle([...this.state.players]);
+    const newOrder = this.state.players.map(p => p.name).join(' → ');
+    console.log(`[MultiplayerGame] 原始顺序: ${originalOrder}`);
+    console.log(`[MultiplayerGame] 随机顺序: ${newOrder}`);
+    this.addLog(`🎲 行动顺序：${newOrder}`);
+    
     // 收集所有未被选择的式神
     this.collectUnselectedShikigami();
     
@@ -828,6 +883,7 @@ export class MultiplayerGame {
     this.state.phase = 'playing' as any;
     this.state.turnPhase = 'ghostFire';
     this.state.turnNumber = 1;
+    this.state.currentPlayerIndex = 0;  // 确保从第一个玩家开始
     
     // 为每个玩家抽初始手牌
     for (const player of this.state.players) {
@@ -842,6 +898,9 @@ export class MultiplayerGame {
     
     this.addLog('=== 游戏开始 ===');
     this.addLog(`第 ${this.state.turnNumber} 回合开始，${this.getCurrentPlayer().name} 的回合`);
+    
+    // 执行第一个玩家的鬼火阶段
+    this.enterGhostFirePhase();
     
     // 广播所有玩家的式神选择结果
     const shikigamiSummary = this.state.players.map(p => ({
@@ -1003,6 +1062,297 @@ export class MultiplayerGame {
   }
   
   /**
+   * 处理获取基础术式
+   */
+  private handleGainBasicSpell(playerId: string): { success: boolean; error?: string } {
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+    
+    if (this.state.turnPhase !== 'action') {
+      return { success: false, error: '当前不在行动阶段' };
+    }
+    
+    if (player.hasGainedBasicSpell) {
+      return { success: false, error: '本回合已获得过基础术式' };
+    }
+    
+    // 创建基础术式卡牌（使用完整数据）
+    const basicSpell: CardInstance = {
+      instanceId: `spell_basic_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      cardId: 'spell_001',
+      cardType: 'spell',
+      name: '基础术式',
+      damage: 1,
+      hp: 1,
+      charm: 0,
+      effect: '【触】超度此牌+弃牌堆中生命≥2的妖怪，获得「中级符咒」',
+      image: '阴阳术01.png',
+    };
+    
+    // 加入弃牌堆
+    player.discard.push(basicSpell);
+    player.hasGainedBasicSpell = true;
+    
+    this.addLog(`📜 ${player.name} 获得了【基础术式】`);
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    
+    return { success: true };
+  }
+  
+  /**
+   * 处理兑换中级符咒
+   */
+  private handleExchangeMediumSpell(playerId: string, yokaiId: string): { success: boolean; error?: string } {
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+    
+    if (this.state.turnPhase !== 'action') {
+      return { success: false, error: '当前不在行动阶段' };
+    }
+    
+    if ((player as any).hasGainedMediumSpell) {
+      return { success: false, error: '本回合已兑换过中级符咒' };
+    }
+    
+    // 找到手牌中的基础术式
+    const basicSpellIdx = player.hand.findIndex(c => 
+      c.cardId === 'spell_001' || c.cardId === 'basic_spell' || c.name === '基础术式'
+    );
+    if (basicSpellIdx === -1) {
+      return { success: false, error: '手牌中没有基础术式' };
+    }
+    
+    // 找到弃牌堆中的妖怪
+    const yokaiIdx = player.discard.findIndex(c => c.instanceId === yokaiId);
+    if (yokaiIdx === -1) {
+      return { success: false, error: '弃牌堆中没有该妖怪' };
+    }
+    
+    const yokai = player.discard[yokaiIdx];
+    if ((yokai.hp || 0) < 2) {
+      return { success: false, error: '妖怪生命值不足' };
+    }
+    
+    // 移除基础术式和妖怪（超度）
+    player.hand.splice(basicSpellIdx, 1);
+    player.discard.splice(yokaiIdx, 1);
+    
+    // 创建中级符咒（使用完整数据）
+    const mediumSpell: CardInstance = {
+      instanceId: `spell_medium_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      cardId: 'spell_002',
+      cardType: 'spell',
+      name: '中级符咒',
+      damage: 2,
+      hp: 2,
+      charm: 0,
+      effect: '【触】超度此牌+弃牌堆中生命≥4的妖怪，获得「高级符咒」',
+      image: '阴阳术02.png',
+    };
+    
+    player.discard.push(mediumSpell);
+    (player as any).hasGainedMediumSpell = true;
+    
+    this.addLog(`📜 ${player.name} 兑换了【中级符咒】（超度了 ${yokai.name}）`);
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    
+    return { success: true };
+  }
+  
+  /**
+   * 处理兑换高级符咒
+   */
+  private handleExchangeAdvancedSpell(playerId: string, yokaiId: string): { success: boolean; error?: string } {
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+    
+    if (this.state.turnPhase !== 'action') {
+      return { success: false, error: '当前不在行动阶段' };
+    }
+    
+    if ((player as any).hasGainedAdvancedSpell) {
+      return { success: false, error: '本回合已兑换过高级符咒' };
+    }
+    
+    // 找到手牌中的中级符咒
+    const mediumSpellIdx = player.hand.findIndex(c => 
+      c.cardId === 'spell_002' || c.name === '中级符咒'
+    );
+    if (mediumSpellIdx === -1) {
+      return { success: false, error: '手牌中没有中级符咒' };
+    }
+    
+    // 找到弃牌堆中的妖怪
+    const yokaiIdx = player.discard.findIndex(c => c.instanceId === yokaiId);
+    if (yokaiIdx === -1) {
+      return { success: false, error: '弃牌堆中没有该妖怪' };
+    }
+    
+    const yokai = player.discard[yokaiIdx];
+    if ((yokai.hp || 0) < 4) {
+      return { success: false, error: '妖怪生命值不足' };
+    }
+    
+    // 移除中级符咒和妖怪（超度）
+    player.hand.splice(mediumSpellIdx, 1);
+    player.discard.splice(yokaiIdx, 1);
+    
+    // 创建高级符咒（使用完整数据）
+    const advancedSpell: CardInstance = {
+      instanceId: `spell_advanced_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      cardId: 'spell_003',
+      cardType: 'spell',
+      name: '高级符咒',
+      damage: 3,
+      hp: 3,
+      charm: 0,
+      effect: '超度此牌获得式神，或替换已有的式神',
+      image: '阴阳术03.png',
+    };
+    
+    player.discard.push(advancedSpell);
+    (player as any).hasGainedAdvancedSpell = true;
+    
+    this.addLog(`📜 ${player.name} 兑换了【高级符咒】（超度了 ${yokai.name}）`);
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    
+    return { success: true };
+  }
+  
+  /**
+   * 处理获取式神候选列表
+   */
+  private handleGetShikigamiCandidates(playerId: string, spellIds: string[], isReplace: boolean): { success: boolean; error?: string } {
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+    
+    // 计算符咒总伤害
+    const spellDamage = spellIds.reduce((sum, id) => {
+      const spell = player.hand.find(c => c.instanceId === id);
+      return sum + (spell?.damage || 1);
+    }, 0);
+    
+    // 从式神牌堆抽取候选
+    const candidateCount = isReplace ? 3 : Math.min(spellDamage, 3);
+    const candidates: any[] = [];
+    
+    for (let i = 0; i < candidateCount && this.state.field.shikigamiDeck.length > 0; i++) {
+      const shikigami = this.state.field.shikigamiDeck.pop();
+      if (shikigami) {
+        candidates.push(shikigami);
+      }
+    }
+    
+    // 发送候选列表事件
+    this.notifyStateChange({
+      type: 'shikigamiCandidates',
+      candidates,
+    } as any);
+    
+    return { success: true };
+  }
+  
+  /**
+   * 处理获取式神
+   */
+  private handleAcquireShikigami(playerId: string, shikigamiId: string, spellIds: string[]): { success: boolean; error?: string } {
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+    
+    if (this.state.turnPhase !== 'action') {
+      return { success: false, error: '当前不在行动阶段' };
+    }
+    
+    if ((player.shikigami?.length || 0) >= 2) {
+      return { success: false, error: '式神数量已达上限' };
+    }
+    
+    // 消耗选中的符咒
+    for (const spellId of spellIds) {
+      const idx = player.hand.findIndex(c => c.instanceId === spellId);
+      if (idx !== -1) {
+        player.hand.splice(idx, 1);
+      }
+    }
+    
+    // 找到选中的式神（从临时候选区）
+    // TODO: 需要更好的候选管理
+    const shikigami = this.cardsData.shikigami.find((s: any) => s.id === shikigamiId);
+    if (!shikigami) {
+      return { success: false, error: '式神不存在' };
+    }
+    
+    // 添加式神
+    if (!player.shikigami) player.shikigami = [];
+    player.shikigami.push(shikigami);
+    
+    // 添加式神状态
+    if (!player.shikigamiState) player.shikigamiState = [];
+    player.shikigamiState.push({
+      cardId: shikigami.id,
+      isExhausted: false,
+      markers: {},
+    });
+    
+    this.addLog(`✨ ${player.name} 获得了式神【${shikigami.name}】`);
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    
+    return { success: true };
+  }
+  
+  /**
+   * 处理置换式神
+   */
+  private handleReplaceShikigami(playerId: string, oldShikigamiId: string, newShikigamiId: string, spellIds: string[]): { success: boolean; error?: string } {
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+    
+    if (this.state.turnPhase !== 'action') {
+      return { success: false, error: '当前不在行动阶段' };
+    }
+    
+    // 消耗高级符咒
+    for (const spellId of spellIds) {
+      const idx = player.hand.findIndex(c => c.instanceId === spellId);
+      if (idx !== -1) {
+        player.hand.splice(idx, 1);
+      }
+    }
+    
+    // 移除旧式神
+    const oldIdx = player.shikigami?.findIndex(s => s.id === oldShikigamiId) ?? -1;
+    let oldShikigami: any = null;
+    if (oldIdx !== -1 && player.shikigami) {
+      oldShikigami = player.shikigami[oldIdx];
+      player.shikigami.splice(oldIdx, 1);
+      player.shikigamiState?.splice(oldIdx, 1);
+    }
+    
+    // 找到新式神
+    const newShikigami = this.cardsData.shikigami.find((s: any) => s.id === newShikigamiId);
+    if (!newShikigami) {
+      return { success: false, error: '式神不存在' };
+    }
+    
+    // 添加新式神
+    if (!player.shikigami) player.shikigami = [];
+    player.shikigami.push(newShikigami);
+    
+    if (!player.shikigamiState) player.shikigamiState = [];
+    player.shikigamiState.push({
+      cardId: newShikigami.id,
+      isExhausted: false,
+      markers: {},
+    });
+    
+    const oldName = oldShikigami?.name || '旧式神';
+    this.addLog(`🔄 ${player.name} 置换式神【${oldName}】→【${newShikigami.name}】`);
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    
+    return { success: true };
+  }
+  
+  /**
    * 处理确认式神阶段
    */
   private handleConfirmShikigamiPhase(playerId: string): { success: boolean; error?: string } {
@@ -1051,6 +1401,10 @@ export class MultiplayerGame {
     }
     
     const boss = this.state.field.bossDeck.shift()!;
+    // 保存maxHp用于回合结束恢复
+    if (!boss.maxHp && boss.hp) {
+      boss.maxHp = boss.hp;
+    }
     this.state.field.currentBoss = boss;
     this.state.field.bossCurrentHp = boss.hp;
     
@@ -1064,6 +1418,10 @@ export class MultiplayerGame {
     for (let i = 0; i < this.state.field.yokaiSlots.length; i++) {
       if (!this.state.field.yokaiSlots[i] && this.state.field.yokaiDeck.length > 0) {
         const yokai = this.state.field.yokaiDeck.shift()!;
+        // 设置maxHp用于显示
+        if (!yokai.maxHp && yokai.hp) {
+          yokai.maxHp = yokai.hp;
+        }
         this.state.field.yokaiSlots[i] = yokai;
       }
     }

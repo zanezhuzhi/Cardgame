@@ -62,6 +62,55 @@ async function main(): Promise<void> {
     });
   });
   
+  // API 端点：调试 - 获取房间详细状态
+  app.get('/api/debug/room/:roomId', (req, res) => {
+    const roomManager = RoomManager.getInstance();
+    const room = roomManager.getRoom(req.params.roomId);
+    if (!room) {
+      return res.status(404).json({ error: '房间不存在' });
+    }
+    // 返回游戏状态摘要（避免太大）
+    const game = room.getGame();
+    const state = game?.getState();
+    if (!state) {
+      return res.json({ room: room.getInfo(), game: null });
+    }
+    
+    // 玩家状态摘要
+    const playersSummary = state.players.map(p => ({
+      id: p.id,
+      name: p.name,
+      deckCount: p.deck?.length || 0,
+      handCount: p.hand?.length || 0,
+      discardCount: p.discard?.length || 0,
+      playedCount: p.played?.length || 0,
+      totalCards: (p.deck?.length || 0) + (p.hand?.length || 0) + (p.discard?.length || 0) + (p.played?.length || 0),
+      ghostFire: p.ghostFire,
+      damage: p.damage,
+      totalCharm: p.totalCharm,
+      shikigamiCount: p.shikigami?.length || 0,
+    }));
+    
+    res.json({
+      room: room.getInfo(),
+      game: {
+        phase: state.phase,
+        turnPhase: state.turnPhase,
+        turnNumber: state.turnNumber,
+        currentPlayerIndex: state.currentPlayerIndex,
+        currentPlayer: state.players[state.currentPlayerIndex]?.name,
+        players: playersSummary,
+        field: {
+          yokaiSlots: state.field.yokaiSlots?.map(y => y ? { name: y.name, hp: y.hp, maxHp: y.maxHp } : null),
+          currentBoss: state.field.currentBoss ? { name: state.field.currentBoss.name, hp: state.field.currentBoss.hp } : null,
+          yokaiDeckCount: state.field.yokaiDeck?.length || 0,
+          bossDeckCount: state.field.bossDeck?.length || 0,
+        },
+        lastLogs: state.log?.slice(-10) || [],
+      },
+    });
+  });
+  
   // 创建 HTTP 服务器
   const httpServer = createServer(app);
   

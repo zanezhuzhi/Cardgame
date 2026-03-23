@@ -163,6 +163,8 @@ export interface PlayerState {
   tempBuffs: TempBuff[];
   // 式神选择阶段的临时字段
   selectedShikigami?: ShikigamiCard[];
+  // 本回合是否已获得基础术式
+  hasGainedBasicSpell?: boolean;
 }
 
 /** 战场状态 */
@@ -233,7 +235,10 @@ export type GameAction =
   | { type: 'confirmShikigamiPhase' }
   | { type: 'selectShikigami'; shikigamiId: string }
   | { type: 'deselectShikigami'; shikigamiId: string }
-  | { type: 'confirmShikigamiSelection' };
+  | { type: 'confirmShikigamiSelection' }
+  | { type: 'gainBasicSpell' }
+  | { type: 'exchangeMediumSpell'; exileCardIds: string[] }
+  | { type: 'exchangeAdvancedSpell'; exileCardIds: string[] };
 
 /** 游戏事件 */
 export type GameEvent =

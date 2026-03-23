@@ -85,10 +85,10 @@
                v-for="(p, idx) in allPlayers" 
                :key="p.id"
                :class="{ 'is-current': idx === state?.currentPlayerIndex }">
-            <!-- 自己标签（右上角） -->
-            <div v-if="p.id === myPlayerId" class="me-badge">自己</div>
             <div class="player-avatar" :class="{ active: idx === state?.currentPlayerIndex }">
               <span>{{ p.name?.charAt(0) || 'P' }}</span>
+              <!-- 自己标签（头像右上角） -->
+              <div v-if="p.id === myPlayerId" class="me-badge">自己</div>
             </div>
             <div class="player-stats">
               <div class="mini-stat"><span class="icon-hand-cards"></span>{{ p.hand?.length || 0 }}</div>
@@ -171,7 +171,7 @@
                 <div class="yokai-info">
                   <div class="y-name">{{y.name}}</div>
                   <div class="y-stat">
-                    <span :class="{'hp-damaged': getYokaiCurrentHp(y) < y.hp}">❤️{{getYokaiCurrentHp(y)}}/{{y.hp}}</span>
+                    <span :class="{'hp-damaged': getYokaiCurrentHp(y) < getYokaiMaxHp(y)}">❤️{{getYokaiCurrentHp(y)}}/{{getYokaiMaxHp(y)}}</span>
                     <span>👑{{y.charm||0}}</span>
                   </div>
                 </div>
@@ -209,7 +209,7 @@
           <div class="avatar-box"></div>
           <div class="stat-box">
             <div class="stat-item"><span>👑</span><b>{{player?.totalCharm||0}}</b></div>
-            <div class="stat-item"><span>📚</span><b>{{(player?.deck?.length||0)+(player?.hand?.length||0)+(player?.discard?.length||0)}}</b></div>
+            <div class="stat-item"><span>📚</span><b>{{(player?.deck?.length||0)+(player?.hand?.length||0)+(player?.discard?.length||0)+(player?.played?.length||0)}}</b></div>
           </div>
         </div>
         <div class="deck-discard-area">
@@ -292,10 +292,10 @@
         </div>
       </div>
 
-      <!-- 弹窗：妖怪刷新确认 -->
-      <div class="modal" v-if="state?.pendingYokaiRefresh">
+      <!-- 弹窗：妖怪刷新确认（只有当前回合玩家可见） -->
+      <div class="modal" v-if="state?.pendingYokaiRefresh && isMyTurn">
         <div class="modal-box">
-          <p>⚠️ 是否刷新场上妖怪？</p>
+          <p>⚠️ 上一玩家未击败妖怪，是否刷新场上妖怪？</p>
           <button class="btn primary" @click="refresh(true)">刷新</button>
           <button class="btn" @click="refresh(false)">保持</button>
         </div>
@@ -924,8 +924,14 @@ const yokai = computed(() => state.value?.field.yokaiSlots || [])
 const boss = computed(() => state.value?.field.currentBoss)
 const logs = computed(() => (state.value?.log || []).slice(-6))
 const canSpell = computed(() => {
-  // 触发响应式依赖
-  const _ = state.value?.turnPhase
+  // 多人模式下检查远程状态
+  if (isMultiMode.value && state.value) {
+    if (!isMyTurn.value) return false
+    if (state.value.turnPhase !== 'action') return false
+    // 检查本回合是否已获取过基础术式
+    return !(player.value as any)?.hasGainedBasicSpell
+  }
+  // 单人模式
   return game?.canGainBasicSpell() ?? false
 })
 
@@ -952,16 +958,37 @@ const recommendSpell = computed(() => {
 
 // 式神获取/置换相关 - 依赖 state 触发响应式更新
 const canAcquireShikigami = computed(() => {
-  // 触发响应式依赖
-  const _ = state.value?.turnPhase
-  const __ = player.value?.hand?.length
+  // 多人模式
+  if (isMultiMode.value) {
+    if (!isMyTurn.value) return false
+    if (state.value?.turnPhase !== 'action') return false
+    const p = player.value
+    if (!p) return false
+    // 检查是否已有2只式神
+    if ((p.shikigami?.length || 0) >= 2) return false
+    // 检查手牌中是否有阴阳术（总伤害>=3）
+    const spellDamage = (p.hand || [])
+      .filter(c => c.cardType === 'spell')
+      .reduce((sum, c) => sum + (c.damage || 1), 0)
+    return spellDamage >= 3
+  }
+  // 单人模式
   return game?.canAcquireShikigami() ?? false
 })
 const canReplaceShikigami = computed(() => {
-  // 触发响应式依赖
-  const _ = state.value?.turnPhase
-  const __ = player.value?.hand?.length
-  const ___ = player.value?.shikigami?.length
+  // 多人模式
+  if (isMultiMode.value) {
+    if (!isMyTurn.value) return false
+    if (state.value?.turnPhase !== 'action') return false
+    const p = player.value
+    if (!p) return false
+    // 检查是否有式神可置换
+    if ((p.shikigami?.length || 0) === 0) return false
+    // 检查手牌中是否有高级符咒（伤害=3）
+    const hasAdvanced = (p.hand || []).some(c => c.cardType === 'spell' && c.damage === 3)
+    return hasAdvanced
+  }
+  // 单人模式
   return game?.canReplaceShikigami() ?? false
 })
 // 手牌中的符咒卡（直接从响应式状态获取）
@@ -1434,11 +1461,27 @@ function resolveTarget(id: string) {
 
 // 游戏操作
 function handleCardClick(c: CardInstance) {
-  if (selectingCards.value || cardSelectModal.show) return // 选择模式下不打牌
-  if (!isMyTurn.value) return
+  console.log('[handleCardClick] 点击卡牌:', c.name, c.instanceId)
+  console.log('[handleCardClick] isMyTurn:', isMyTurn.value)
+  console.log('[handleCardClick] currentPlayerIndex:', state.value?.currentPlayerIndex)
+  console.log('[handleCardClick] myPlayerIndex:', myPlayerIndex.value)
+  console.log('[handleCardClick] myPlayerId:', myPlayerId.value)
+  console.log('[handleCardClick] turnPhase:', state.value?.turnPhase)
+  
+  if (selectingCards.value || cardSelectModal.show) {
+    console.log('[handleCardClick] 选择模式，忽略')
+    return
+  }
+  if (!isMyTurn.value) {
+    console.log('[handleCardClick] 不是我的回合，忽略')
+    return
+  }
   
   if (isMultiMode.value) {
+    console.log('[handleCardClick] 多人模式，发送 playCard')
     socketClient.sendAction({ type: 'playCard', cardInstanceId: c.instanceId })
+      .then(() => console.log('[handleCardClick] 发送成功'))
+      .catch(e => console.error('[handleCardClick] 发送失败:', e))
   } else {
     game?.playCard(c.instanceId)
   }
@@ -1500,15 +1543,24 @@ async function kill(i: number) {
 
 // 妖怪状态辅助函数
 function getYokaiCurrentHp(y: CardInstance): number {
-  return y.currentHp !== undefined ? y.currentHp : y.hp
+  // 优先使用currentHp，否则使用hp（服务端格式）
+  return y.currentHp !== undefined ? y.currentHp : (y.hp || 0)
+}
+
+function getYokaiMaxHp(y: CardInstance): number {
+  // 优先使用maxHp，否则检查原始卡牌数据
+  return y.maxHp !== undefined ? y.maxHp : (y.hp || 0)
 }
 function isKilled(y: CardInstance): boolean {
-  return y.currentHp !== undefined && y.currentHp <= 0
+  // 服务端使用hp字段，客户端可能用currentHp
+  const hp = y.currentHp !== undefined ? y.currentHp : (y.hp || 0)
+  return hp <= 0
 }
 function isWounded(y: CardInstance): boolean {
   // 已受伤：当前HP < 最大HP
   const currentHp = getYokaiCurrentHp(y)
-  return currentHp < y.hp && currentHp > 0
+  const maxHp = getYokaiMaxHp(y)
+  return currentHp < maxHp && currentHp > 0
 }
 function canKillYokai(y: CardInstance): boolean {
   // 玩家伤害足以击杀该妖怪（伤害 >= 剩余HP）
@@ -1571,7 +1623,19 @@ const spellSelectModal = reactive({
 // 中级符咒条件：手牌有基础术式 + 弃牌堆有生命≥2的妖怪 + 本回合未获得过
 const canGetMediumSpell = computed(() => {
   const p = player.value
-  if (!p || !game) return false
+  if (!p) return false
+  
+  // 多人模式
+  if (isMultiMode.value) {
+    if (!isMyTurn.value || state.value?.turnPhase !== 'action') return false
+    if ((p as any).hasGainedMediumSpell) return false
+    const hasBasicSpell = (p.hand || []).some(c => c.cardId === 'spell_001' || c.cardId === 'basic_spell' || c.name === '基础术式')
+    const hasYokaiHp2 = (p.discard || []).some(c => (c.cardType === 'yokai' || c.cardType === 'token') && (c.hp || 0) >= 2)
+    return hasBasicSpell && hasYokaiHp2
+  }
+  
+  // 单人模式
+  if (!game) return false
   if (!game.canExchangeMediumSpell()) return false  // 本回合已获得过
   const hasBasicSpell = p.hand.some(c => c.cardId === 'spell_001' || c.name === '基础术式')
   const hasYokaiHp2 = p.discard.some(c => (c.cardType === 'yokai' || c.cardType === 'token') && (c.hp || 0) >= 2)
@@ -1581,7 +1645,19 @@ const canGetMediumSpell = computed(() => {
 // 高级符咒条件：手牌有中级符咒 + 弃牌堆有生命≥4的妖怪 + 本回合未获得过
 const canGetAdvancedSpell = computed(() => {
   const p = player.value
-  if (!p || !game) return false
+  if (!p) return false
+  
+  // 多人模式
+  if (isMultiMode.value) {
+    if (!isMyTurn.value || state.value?.turnPhase !== 'action') return false
+    if ((p as any).hasGainedAdvancedSpell) return false
+    const hasMediumSpell = (p.hand || []).some(c => c.cardId === 'spell_002' || c.name === '中级符咒')
+    const hasYokaiHp4 = (p.discard || []).some(c => (c.cardType === 'yokai' || c.cardType === 'token') && (c.hp || 0) >= 4)
+    return hasMediumSpell && hasYokaiHp4
+  }
+  
+  // 单人模式
+  if (!game) return false
   if (!game.canExchangeAdvancedSpell()) return false  // 本回合已获得过
   const hasMediumSpell = p.hand.some(c => c.cardId === 'spell_002' || c.name === '中级符咒')
   const hasYokaiHp4 = p.discard.some(c => (c.cardType === 'yokai' || c.cardType === 'token') && (c.hp || 0) >= 4)
@@ -1636,7 +1712,11 @@ const spellExchangeState = reactive({
 function selectSpell(spellId: string) {
   if (spellId === 'basic') {
     if (canSpell.value) {
-      game?.gainBasicSpell()
+      if (isMultiMode.value) {
+        socketClient.sendAction({ type: 'gainBasicSpell' })
+      } else {
+        game?.gainBasicSpell()
+      }
       spellSelectModal.show = false
     }
   } else if (spellId === 'medium' && canGetMediumSpell.value) {
@@ -1682,39 +1762,39 @@ function startSpellExchange(type: 'medium' | 'advanced') {
 }
 
 function executeSpellExchange() {
-  console.log('[DEBUG] executeSpellExchange called')
-  console.log('[DEBUG] game:', !!game)
-  console.log('[DEBUG] selected:', cardSelectModal.selected)
-  console.log('[DEBUG] type:', spellExchangeState.type)
-  
-  if (!game) {
-    console.log('[DEBUG] no game, return')
-    return
-  }
-  
   const selectedYokaiId = cardSelectModal.selected[0]
-  console.log('[DEBUG] selectedYokaiId:', selectedYokaiId)
   
   if (!selectedYokaiId) {
-    console.log('[DEBUG] no selectedYokaiId, reset and return')
     resetSpellExchangeState()
     return
   }
   
   const type = spellExchangeState.type
   
-  // 调用游戏引擎的兑换方法
-  if (type === 'medium') {
-    console.log('[DEBUG] calling exchangeMediumSpell...')
-    const result = game.exchangeMediumSpell(selectedYokaiId)
-    console.log('[DEBUG] exchangeMediumSpell result:', result)
-  } else if (type === 'advanced') {
-    console.log('[DEBUG] calling exchangeAdvancedSpell...')
-    const result = game.exchangeAdvancedSpell(selectedYokaiId)
-    console.log('[DEBUG] exchangeAdvancedSpell result:', result)
+  // 多人模式
+  if (isMultiMode.value) {
+    if (type === 'medium') {
+      socketClient.sendAction({ type: 'exchangeMediumSpell', yokaiId: selectedYokaiId })
+    } else if (type === 'advanced') {
+      socketClient.sendAction({ type: 'exchangeAdvancedSpell', yokaiId: selectedYokaiId })
+    }
+    resetSpellExchangeState()
+    return
   }
   
-  console.log('[DEBUG] resetting state...')
+  // 单人模式
+  if (!game) {
+    resetSpellExchangeState()
+    return
+  }
+  
+  // 调用游戏引擎的兑换方法
+  if (type === 'medium') {
+    game.exchangeMediumSpell(selectedYokaiId)
+  } else if (type === 'advanced') {
+    game.exchangeAdvancedSpell(selectedYokaiId)
+  }
+  
   resetSpellExchangeState()
 }
 
@@ -1821,6 +1901,18 @@ function cardType(c: CardInstance) {
 
 // 检查卡牌是否可以打出
 function canPlay(c: CardInstance): boolean {
+  // 多人模式
+  if (isMultiMode.value) {
+    if (!isMyTurn.value) return false
+    if (state.value?.turnPhase !== 'action') return false
+    const p = player.value
+    if (!p) return false
+    // 检查鬼火是否足够
+    const cost = c.cost || 0
+    if (p.ghostFire < cost) return false
+    return true
+  }
+  // 单人模式
   if (!game) return false
   return game.canPlayCard(c).canPlay
 }
@@ -1858,6 +1950,38 @@ function toggleSpellForShikigami(card: CardInstance) {
 }
 
 async function nextShikigamiStep() {
+  // 多人模式：从服务器获取候选式神
+  if (isMultiMode.value) {
+    // 发送请求获取候选式神
+    socketClient.sendAction({
+      type: 'getShikigamiCandidates',
+      spellIds: shikigamiModal.selectedSpells,
+      isReplace: shikigamiModal.isReplace
+    })
+    // 服务器会返回候选列表，监听响应
+    const response = await new Promise<any>((resolve) => {
+      const handler = (data: any) => {
+        if (data.type === 'shikigamiCandidates') {
+          socketClient.socket?.off('gameEvent', handler)
+          resolve(data)
+        }
+      }
+      socketClient.socket?.on('gameEvent', handler)
+      // 超时处理
+      setTimeout(() => {
+        socketClient.socket?.off('gameEvent', handler)
+        resolve({ candidates: [] })
+      }, 5000)
+    })
+    if (response.candidates && response.candidates.length > 0) {
+      shikigamiModal.candidates = response.candidates
+      shikigamiModal.step = 2
+      shikigamiModal.selectedNewId = ''
+    }
+    return
+  }
+  
+  // 单人模式
   if (shikigamiModal.isReplace) {
     // 置换模式：先抽取候选式神，然后进入步骤2选新式神
     const candidates = await game?.prepareReplaceShikigami(shikigamiModal.selectedSpells)
@@ -1894,9 +2018,18 @@ function confirmNewShikigami() {
     shikigamiModal.selectedOldId = ''
   } else {
     // 获取模式：直接确认
-    const success = game?.confirmAcquireShikigami(shikigamiModal.selectedNewId)
-    if (success) {
+    if (isMultiMode.value) {
+      socketClient.sendAction({
+        type: 'acquireShikigami',
+        shikigamiId: shikigamiModal.selectedNewId,
+        spellIds: shikigamiModal.selectedSpells
+      })
       closeShikigamiModal()
+    } else {
+      const success = game?.confirmAcquireShikigami(shikigamiModal.selectedNewId)
+      if (success) {
+        closeShikigamiModal()
+      }
     }
   }
 }
@@ -1904,15 +2037,25 @@ function confirmNewShikigami() {
 async function confirmReplaceShikigami() {
   if (!shikigamiModal.selectedNewId || !shikigamiModal.selectedOldId) return
   
-  // 执行置换：移除旧式神，添加新式神
-  const success = await game?.executeReplaceShikigami(
-    shikigamiModal.selectedOldId,
-    shikigamiModal.selectedNewId,
-    shikigamiModal.candidates
-  )
-  
-  if (success) {
+  if (isMultiMode.value) {
+    socketClient.sendAction({
+      type: 'replaceShikigami',
+      oldShikigamiId: shikigamiModal.selectedOldId,
+      newShikigamiId: shikigamiModal.selectedNewId,
+      spellIds: shikigamiModal.selectedSpells
+    })
     closeShikigamiModal()
+  } else {
+    // 执行置换：移除旧式神，添加新式神
+    const success = await game?.executeReplaceShikigami(
+      shikigamiModal.selectedOldId,
+      shikigamiModal.selectedNewId,
+      shikigamiModal.candidates
+    )
+    
+    if (success) {
+      closeShikigamiModal()
+    }
   }
 }
 </script>
@@ -2329,6 +2472,7 @@ async function confirmReplaceShikigami() {
   display:flex;align-items:center;justify-content:center;
   font-size:calc(var(--s) * 32);
   color:#fff;
+  position:relative;
 }
 .player-avatar.empty{
   background:#151525;

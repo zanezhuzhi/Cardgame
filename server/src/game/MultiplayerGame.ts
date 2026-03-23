@@ -3025,8 +3025,8 @@ export class MultiplayerGame {
 
   /**
    * 添加日志
-   * @param message 消息内容（可包含 {type:name} 格式的引用占位符）
-   * @param options 可选参数：visibility(可见性), playerId(私有消息所属玩家), refs(引用对象)
+   * @param message 消息内容（自动识别卡牌/式神/鬼王名称生成超链接）
+   * @param options 可选参数：visibility(可见性), playerId(私有消息所属玩家), refs(手动指定引用对象)
    */
   private addLog(
     message: string, 
@@ -3036,19 +3036,117 @@ export class MultiplayerGame {
       refs?: Record<string, { type: 'card' | 'shikigami' | 'boss' | 'player'; id: string; name: string; data?: any }>;
     }
   ): void {
+    // 自动提取实体引用
+    const autoRefs = this.extractEntityRefs(message);
+    const finalRefs = { ...autoRefs, ...(options?.refs || {}) };
+    
+    // 替换消息中的实体名称为占位符格式
+    let processedMessage = message;
+    for (const [key, ref] of Object.entries(finalRefs)) {
+      // 只替换未被占位符包围的实体名称
+      const name = ref.name;
+      if (!processedMessage.includes(`{${key}}`)) {
+        // 使用正则避免重复替换
+        processedMessage = processedMessage.replace(
+          new RegExp(`(?<!\\{[^}]*)${this.escapeRegex(name)}(?![^{]*\\})`, 'g'),
+          `{${key}}`
+        );
+      }
+    }
+    
     this.state.log.push({
       type: 'game_start',
-      message,
+      message: processedMessage,
       timestamp: Date.now(),
       visibility: options?.visibility || 'public',
       playerId: options?.playerId,
-      refs: options?.refs,
+      refs: Object.keys(finalRefs).length > 0 ? finalRefs : undefined,
     });
     
     // 保留最近100条日志
     if (this.state.log.length > 100) {
       this.state.log = this.state.log.slice(-100);
     }
+  }
+
+  /**
+   * 从日志消息中提取实体引用
+   */
+  private extractEntityRefs(message: string): Record<string, { type: 'card' | 'shikigami' | 'boss' | 'player'; id: string; name: string; data?: any }> {
+    const refs: Record<string, { type: 'card' | 'shikigami' | 'boss' | 'player'; id: string; name: string; data?: any }> = {};
+    let refIndex = 0;
+    
+    // 从卡牌数据中查找匹配的名称
+    const allYokai = cardsData.yokai || [];
+    const allBoss = cardsData.boss || [];
+    const allShikigami = cardsData.shikigami || [];
+    const allSpells = ['基础术式', '中级符咒', '高级符咒'];
+    
+    // 检查妖怪
+    for (const yokai of allYokai) {
+      if (message.includes(yokai.name)) {
+        const key = `yokai_${refIndex++}`;
+        refs[key] = {
+          type: 'card',
+          id: yokai.cardId,
+          name: yokai.name,
+          data: { hp: yokai.hp, damage: yokai.damage, charm: yokai.charm, image: yokai.image, effect: yokai.effect }
+        };
+      }
+    }
+    
+    // 检查鬼王
+    for (const boss of allBoss) {
+      if (message.includes(boss.name)) {
+        const key = `boss_${refIndex++}`;
+        refs[key] = {
+          type: 'boss',
+          id: boss.cardId,
+          name: boss.name,
+          data: { hp: boss.hp, charm: boss.charm, image: boss.image, effect: boss.effect }
+        };
+      }
+    }
+    
+    // 检查式神
+    for (const shikigami of allShikigami) {
+      if (message.includes(shikigami.name)) {
+        const key = `shikigami_${refIndex++}`;
+        refs[key] = {
+          type: 'shikigami',
+          id: shikigami.cardId,
+          name: shikigami.name,
+          data: { hp: shikigami.hp, charm: shikigami.charm, image: shikigami.image, skill: shikigami.skill, skillCost: shikigami.skillCost }
+        };
+      }
+    }
+    
+    // 检查阴阳术
+    for (const spellName of allSpells) {
+      if (message.includes(spellName)) {
+        const key = `spell_${refIndex++}`;
+        const spellData = spellName === '基础术式' 
+          ? { damage: 1, hp: 1, charm: 0, image: '阴阳术01.png' }
+          : spellName === '中级符咒'
+          ? { damage: 2, hp: 2, charm: 0, image: '阴阳术02.png' }
+          : { damage: 3, hp: 3, charm: 1, image: '阴阳术03.png' };
+        refs[key] = {
+          type: 'card',
+          id: `spell_${spellName}`,
+          name: spellName,
+          data: spellData
+        };
+      }
+    }
+    
+    return refs;
+  }
+
+  /**
+   * 转义正则表达式特殊字符
+   */
+  private escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   /**

@@ -63,6 +63,8 @@ export class SinglePlayerGame {
   // 本回合状态
   private hasAllocatedDamage: boolean = false;  // 本回合是否已分配伤害
   private hasGainedBasicSpell: boolean = false; // 本回合是否已获得基础术式
+  private hasGainedMediumSpell: boolean = false; // 本回合是否已获得中级符咒
+  private hasGainedAdvancedSpell: boolean = false; // 本回合是否已获得高级符咒
   private killedYokaiThisTurn: boolean = false; // 本回合是否击杀了妖怪
   private yokaiKilledCount: number = 0;         // 本回合击杀妖怪数量
   private cardsDrawnThisTurn: number = 0;       // 本回合因效果抓牌数
@@ -369,6 +371,27 @@ export class SinglePlayerGame {
     }
     // END TEST2
     
+    // TEST3: 测试中级/高级符咒获取条件
+    // 关闭方式：将 TEST3_ENABLED 改为 false
+    const TEST3_ENABLED = false;
+    if (TEST3_ENABLED) {
+      const player = this.getPlayer();
+      // 手牌增加：基础术式 + 中级符咒
+      const testSpells: CardInstance[] = [
+        { instanceId: generateId(), cardId: 'spell_001', cardType: 'spell', name: '基础术式', hp: 1, damage: 1, charm: 0 },
+        { instanceId: generateId(), cardId: 'spell_002', cardType: 'spell', name: '中级符咒', hp: 2, damage: 2, charm: 0 },
+      ];
+      player.hand.push(...testSpells);
+      // 弃牌堆增加：生命≥2的妖怪 + 生命≥4的妖怪
+      const testYokai: CardInstance[] = [
+        { instanceId: generateId(), cardId: 'yokai_001', cardType: 'yokai', name: '赤舌', hp: 3, damage: 0, charm: 0 }, // 生命3≥2
+        { instanceId: generateId(), cardId: 'yokai_010', cardType: 'yokai', name: '海坊主', hp: 5, damage: 0, charm: 1 }, // 生命5≥4
+      ];
+      player.discard.push(...testYokai);
+      this.addLog('🧪 [TEST3] 添加测试卡牌：手牌(基础+中级)、弃牌堆(妖怪hp3+hp5)');
+    }
+    // END TEST3
+    
     // 翻出第一个鬼王（麒麟，无来袭效果）
     this.revealBoss();
     
@@ -399,6 +422,8 @@ export class SinglePlayerGame {
     // 重置回合状态
     this.hasAllocatedDamage = false;
     this.hasGainedBasicSpell = false;
+    this.hasGainedMediumSpell = false;
+    this.hasGainedAdvancedSpell = false;
     this.killedYokaiThisTurn = false;
     this.yokaiKilledCount = 0;
     this.cardsDrawnThisTurn = 0;
@@ -925,6 +950,135 @@ export class SinglePlayerGame {
     this.addLog(`📜 获得1张【基础术式】（进入弃牌堆）`);
     this.notifyChange();
     return true;
+  }
+
+  /** 兑换中级符咒：超度基础术式 + 弃牌堆妖怪(hp≥2) */
+  exchangeMediumSpell(yokaiInstanceId: string): boolean {
+    console.log('[ENGINE] exchangeMediumSpell called with:', yokaiInstanceId);
+    console.log('[ENGINE] turnPhase:', this.state.turnPhase);
+    console.log('[ENGINE] hasGainedMediumSpell:', this.hasGainedMediumSpell);
+    
+    if (this.state.turnPhase !== 'action') {
+      console.log('[ENGINE] not in action phase');
+      return false;
+    }
+    if (this.hasGainedMediumSpell) {
+      this.addLog(`❌ 本回合已获得过中级符咒`);
+      this.notifyChange();
+      return false;
+    }
+    
+    const player = this.getPlayer();
+    console.log('[ENGINE] hand count:', player.hand.length);
+    console.log('[ENGINE] discard count:', player.discard.length);
+    
+    // 找到手牌中的基础术式
+    const spellIndex = player.hand.findIndex(c => c.cardId === 'spell_001' || c.name === '基础术式');
+    console.log('[ENGINE] spellIndex:', spellIndex);
+    if (spellIndex < 0) {
+      this.addLog(`❌ 手牌中没有基础术式`);
+      this.notifyChange();
+      return false;
+    }
+    
+    // 找到弃牌堆中的目标妖怪
+    console.log('[ENGINE] looking for yokai:', yokaiInstanceId);
+    console.log('[ENGINE] discard instanceIds:', player.discard.map(c => c.instanceId));
+    const yokaiIndex = player.discard.findIndex(c => c.instanceId === yokaiInstanceId);
+    console.log('[ENGINE] yokaiIndex:', yokaiIndex);
+    if (yokaiIndex < 0 || (player.discard[yokaiIndex].hp || 0) < 2) {
+      this.addLog(`❌ 目标妖怪不符合条件 (index: ${yokaiIndex})`);
+      this.notifyChange();
+      return false;
+    }
+    
+    // 超度基础术式
+    const spell = player.hand.splice(spellIndex, 1)[0];
+    player.exiled.push(spell);
+    
+    // 超度弃牌堆妖怪
+    const yokai = player.discard.splice(yokaiIndex, 1)[0];
+    player.exiled.push(yokai);
+    
+    // 获得中级符咒（放入弃牌堆）
+    const newSpell: CardInstance = {
+      instanceId: generateId(),
+      cardId: 'spell_002',
+      cardType: 'spell',
+      name: '中级符咒',
+      damage: 2,
+      hp: 2,
+      charm: 0
+    };
+    player.discard.push(newSpell);
+    
+    this.hasGainedMediumSpell = true;
+    this.addLog(`🔄 兑换【中级符咒】：超度基础术式 + ${yokai.name} → 获得中级符咒（置入弃牌堆）`);
+    this.notifyChange();
+    return true;
+  }
+
+  /** 兑换高级符咒：超度中级符咒 + 弃牌堆妖怪(hp≥4) */
+  exchangeAdvancedSpell(yokaiInstanceId: string): boolean {
+    if (this.state.turnPhase !== 'action') return false;
+    if (this.hasGainedAdvancedSpell) {
+      this.addLog(`❌ 本回合已获得过高级符咒`);
+      this.notifyChange();
+      return false;
+    }
+    
+    const player = this.getPlayer();
+    
+    // 找到手牌中的中级符咒
+    const spellIndex = player.hand.findIndex(c => c.cardId === 'spell_002' || c.name === '中级符咒');
+    if (spellIndex < 0) {
+      this.addLog(`❌ 手牌中没有中级符咒`);
+      this.notifyChange();
+      return false;
+    }
+    
+    // 找到弃牌堆中的目标妖怪
+    const yokaiIndex = player.discard.findIndex(c => c.instanceId === yokaiInstanceId);
+    if (yokaiIndex < 0 || (player.discard[yokaiIndex].hp || 0) < 4) {
+      this.addLog(`❌ 目标妖怪不符合条件`);
+      this.notifyChange();
+      return false;
+    }
+    
+    // 超度中级符咒
+    const spell = player.hand.splice(spellIndex, 1)[0];
+    player.exiled.push(spell);
+    
+    // 超度弃牌堆妖怪
+    const yokai = player.discard.splice(yokaiIndex, 1)[0];
+    player.exiled.push(yokai);
+    
+    // 获得高级符咒（放入弃牌堆）
+    const newSpell: CardInstance = {
+      instanceId: generateId(),
+      cardId: 'spell_003',
+      cardType: 'spell',
+      name: '高级符咒',
+      damage: 3,
+      hp: 3,
+      charm: 1
+    };
+    player.discard.push(newSpell);
+    
+    this.hasGainedAdvancedSpell = true;
+    this.addLog(`🔄 兑换【高级符咒】：超度中级符咒 + ${yokai.name} → 获得高级符咒（置入弃牌堆）`);
+    this.notifyChange();
+    return true;
+  }
+
+  /** 检查本回合是否可以获得中级符咒 */
+  canExchangeMediumSpell(): boolean {
+    return !this.hasGainedMediumSpell && this.state.turnPhase === 'action';
+  }
+
+  /** 检查本回合是否可以获得高级符咒 */
+  canExchangeAdvancedSpell(): boolean {
+    return !this.hasGainedAdvancedSpell && this.state.turnPhase === 'action';
   }
 
   /** 

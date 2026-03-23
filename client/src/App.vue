@@ -158,9 +158,9 @@
             <div v-for="(l,i) in logs.slice(-8)" :key="i" class="info-line">{{l.message}}</div>
           </div>
           <div class="action-buttons">
-            <button class="side-btn" :class="{ disabled: !canSpell }" @click="handleGetSpell">
+            <button class="side-btn" :class="{ disabled: !canGetAnySpell }" @click="handleGetSpell">
               获得阴阳术
-              <span v-if="recommendSpell && canSpell" class="recommend-badge">推荐</span>
+              <span v-if="recommendSpell && canGetAnySpell" class="recommend-badge">推荐</span>
             </button>
             <button class="side-btn" :class="{ disabled: !(canAcquireShikigami || canReplaceShikigami) }" @click="handleShikigamiAction">
               {{ (player?.shikigami?.length || 0) >= 3 ? '置换式神' : '获得式神' }}
@@ -299,7 +299,7 @@
             <div v-for="spell in spellOptions" :key="spell.id"
                  class="spell-type-card"
                  :class="{ disabled: !spell.canGet }"
-                 @click="selectSpell(spell.id)">
+                 @click="spell.canGet && selectSpell(spell.id)">
               <div class="spell-type-header">
                 <span class="spell-type-name">{{ spell.name }}</span>
                 <span class="spell-type-damage">⚔️{{ spell.damage }}</span>
@@ -328,21 +328,30 @@
       <div class="modal" v-if="cardSelectModal.show">
         <div class="modal-box card-select-modal">
           <p class="modal-title">{{cardSelectModal.title}}</p>
-          <p class="modal-hint">选择 {{cardSelectModal.count}} 张牌</p>
+          <p class="modal-hint">{{cardSelectModal.hint || `选择 ${cardSelectModal.count} 张牌`}}</p>
           <div class="card-select-grid">
             <div v-for="c in cardSelectModal.candidates" :key="c.instanceId"
-                 class="select-card" 
-                 :class="{selected: cardSelectModal.selected.includes(c.instanceId)}"
-                 @click="toggleCardSelect(c.instanceId)">
-              <div class="c-name">{{c.name}}</div>
-              <div class="c-stat">{{c.damage ? `⚔️${c.damage}` : `❤️${c.hp}`}}</div>
+                 class="select-card-item" 
+                 :class="[c.cardType, {selected: cardSelectModal.selected.includes(c.instanceId)}]"
+                 @click="toggleCardSelect(c.instanceId)"
+                 @mouseenter="showTooltip($event, c)"
+                 @mouseleave="hideTooltip">
+              <img v-if="getCardImage(c)" :src="getCardImage(c)" class="card-art" />
+              <div class="card-info">
+                <div class="c-name">{{c.name}}</div>
+                <div class="c-stat">❤️{{c.hp}}</div>
+              </div>
+              <div class="select-check" v-if="cardSelectModal.selected.includes(c.instanceId)">✓</div>
             </div>
           </div>
           <div class="modal-actions">
             <button class="btn primary" 
                     :disabled="cardSelectModal.selected.length !== cardSelectModal.count"
-                    @click="resolveCardSelect">
+                    @click="handleCardSelectConfirm">
               确认
+            </button>
+            <button class="btn secondary" @click="cancelCardSelect" v-if="cardSelectModal.onConfirm">
+              取消
             </button>
           </div>
         </div>
@@ -722,17 +731,21 @@ const choiceModal = reactive<{
 const cardSelectModal = reactive<{
   show: boolean
   title: string
+  hint: string
   candidates: CardInstance[]
   count: number
   selected: string[]
   resolve: ((ids: string[]) => void) | null
+  onConfirm: (() => void) | null
 }>({
   show: false,
   title: '选择卡牌',
+  hint: '',
   candidates: [],
   count: 1,
   selected: [],
-  resolve: null
+  resolve: null,
+  onConfirm: null
 })
 
 // 目标选择弹窗
@@ -1197,6 +1210,22 @@ function resolveCardSelect() {
   }
 }
 
+function handleCardSelectConfirm() {
+  console.log('[DEBUG] handleCardSelectConfirm called')
+  console.log('[DEBUG] selected:', cardSelectModal.selected)
+  console.log('[DEBUG] onConfirm:', cardSelectModal.onConfirm)
+  
+  // 如果有onConfirm回调，使用它；否则使用resolve
+  if (cardSelectModal.onConfirm) {
+    console.log('[DEBUG] calling onConfirm...')
+    cardSelectModal.onConfirm()
+    cardSelectModal.onConfirm = null
+  } else {
+    console.log('[DEBUG] calling resolveCardSelect...')
+    resolveCardSelect()
+  }
+}
+
 function resolveTarget(id: string) {
   if (targetModal.resolve) {
     targetModal.resolve(id)
@@ -1291,28 +1320,57 @@ const spellSelectModal = reactive({
   show: false
 })
 
+// 中级符咒条件：手牌有基础术式 + 弃牌堆有生命≥2的妖怪 + 本回合未获得过
+const canGetMediumSpell = computed(() => {
+  const p = player.value
+  if (!p || !game) return false
+  if (!game.canExchangeMediumSpell()) return false  // 本回合已获得过
+  const hasBasicSpell = p.hand.some(c => c.cardId === 'spell_001' || c.name === '基础术式')
+  const hasYokaiHp2 = p.discard.some(c => (c.cardType === 'yokai' || c.cardType === 'token') && (c.hp || 0) >= 2)
+  return hasBasicSpell && hasYokaiHp2
+})
+
+// 高级符咒条件：手牌有中级符咒 + 弃牌堆有生命≥4的妖怪 + 本回合未获得过
+const canGetAdvancedSpell = computed(() => {
+  const p = player.value
+  if (!p || !game) return false
+  if (!game.canExchangeAdvancedSpell()) return false  // 本回合已获得过
+  const hasMediumSpell = p.hand.some(c => c.cardId === 'spell_002' || c.name === '中级符咒')
+  const hasYokaiHp4 = p.discard.some(c => (c.cardType === 'yokai' || c.cardType === 'token') && (c.hp || 0) >= 4)
+  return hasMediumSpell && hasYokaiHp4
+})
+
+// 是否有任何阴阳术可获取（用于按钮高亮）
+const canGetAnySpell = computed(() => {
+  return canSpell.value || canGetMediumSpell.value || canGetAdvancedSpell.value
+})
+
 // 使用 computed 让 spellOptions 响应式更新
 const spellOptions = computed(() => [
   { 
     id: 'basic', 
     name: '基础术式', 
     damage: 1, 
-    condition: canSpell.value ? '每回合可免费获得1张' : '❌ 本回合已获得过',
+    condition: canSpell.value ? '✅ 每回合可免费获得1张' : '❌ 本回合已获得过',
     canGet: canSpell.value
   },
   { 
     id: 'medium', 
     name: '中级符咒', 
     damage: 2, 
-    condition: '超度1张基础术式 + 弃牌堆中1张生命≥2的妖怪',
-    canGet: false // TODO: 实现条件判断
+    condition: canGetMediumSpell.value 
+      ? '✅ 超度基础术式 + 弃牌堆妖怪(hp≥2)' 
+      : '❌ 超度1张基础术式 + 弃牌堆中1张生命≥2的妖怪',
+    canGet: canGetMediumSpell.value
   },
   { 
     id: 'advanced', 
     name: '高级符咒', 
     damage: 3, 
-    condition: '超度1张中级符咒 + 弃牌堆中1张生命≥4的妖怪',
-    canGet: false // TODO: 实现条件判断
+    condition: canGetAdvancedSpell.value 
+      ? '✅ 超度中级符咒 + 弃牌堆妖怪(hp≥4)' 
+      : '❌ 超度1张中级符咒 + 弃牌堆中1张生命≥4的妖怪',
+    canGet: canGetAdvancedSpell.value
   }
 ])
 
@@ -1321,19 +1379,110 @@ function handleGetSpell() {
   spellSelectModal.show = true
 }
 
+// 兑换阴阳术的状态
+const spellExchangeState = reactive({
+  type: '' as 'medium' | 'advanced' | '',  // 正在兑换的类型
+  step: 0,  // 0=未开始, 1=选择弃牌堆妖怪
+})
+
 function selectSpell(spellId: string) {
   if (spellId === 'basic') {
     if (canSpell.value) {
       game?.gainBasicSpell()
       spellSelectModal.show = false
-    } else {
-      showHint('⚠️ 无法获得', ['本回合已获得过阴阳术'])
     }
-  } else if (spellId === 'medium') {
-    showHint('⚠️ 暂未实现', ['中级符咒需要通过【启】效果获得'])
-  } else if (spellId === 'advanced') {
-    showHint('⚠️ 暂未实现', ['高级符咒需要通过【启】效果获得'])
+  } else if (spellId === 'medium' && canGetMediumSpell.value) {
+    // 开始中级符咒兑换流程
+    startSpellExchange('medium')
+  } else if (spellId === 'advanced' && canGetAdvancedSpell.value) {
+    // 开始高级符咒兑换流程
+    startSpellExchange('advanced')
   }
+}
+
+function startSpellExchange(type: 'medium' | 'advanced') {
+  spellSelectModal.show = false
+  spellExchangeState.type = type
+  spellExchangeState.step = 1
+  
+  const p = player.value
+  if (!p) return
+  
+  // 设置需要的条件
+  const requiredHp = type === 'medium' ? 2 : 4
+  
+  // 找到符合条件的弃牌堆妖怪（深拷贝避免影响原数据）
+  const validYokai = p.discard
+    .filter(c => (c.cardType === 'yokai' || c.cardType === 'token') && (c.hp || 0) >= requiredHp)
+    .map(c => ({ ...c }))  // 深拷贝
+  
+  if (validYokai.length === 0) {
+    spellExchangeState.type = ''
+    spellExchangeState.step = 0
+    return
+  }
+  
+  // 打开弃牌堆妖怪选择弹窗
+  cardSelectModal.title = type === 'medium' ? '🔄 兑换中级符咒' : '🔄 兑换高级符咒'
+  cardSelectModal.hint = `选择1张生命≥${requiredHp}的妖怪超度`
+  cardSelectModal.candidates = validYokai
+  cardSelectModal.count = 1
+  cardSelectModal.selected = []
+  cardSelectModal.resolve = null  // 清除旧的resolve
+  cardSelectModal.onConfirm = executeSpellExchange  // 直接引用函数，不要包装
+  cardSelectModal.show = true
+}
+
+function executeSpellExchange() {
+  console.log('[DEBUG] executeSpellExchange called')
+  console.log('[DEBUG] game:', !!game)
+  console.log('[DEBUG] selected:', cardSelectModal.selected)
+  console.log('[DEBUG] type:', spellExchangeState.type)
+  
+  if (!game) {
+    console.log('[DEBUG] no game, return')
+    return
+  }
+  
+  const selectedYokaiId = cardSelectModal.selected[0]
+  console.log('[DEBUG] selectedYokaiId:', selectedYokaiId)
+  
+  if (!selectedYokaiId) {
+    console.log('[DEBUG] no selectedYokaiId, reset and return')
+    resetSpellExchangeState()
+    return
+  }
+  
+  const type = spellExchangeState.type
+  
+  // 调用游戏引擎的兑换方法
+  if (type === 'medium') {
+    console.log('[DEBUG] calling exchangeMediumSpell...')
+    const result = game.exchangeMediumSpell(selectedYokaiId)
+    console.log('[DEBUG] exchangeMediumSpell result:', result)
+  } else if (type === 'advanced') {
+    console.log('[DEBUG] calling exchangeAdvancedSpell...')
+    const result = game.exchangeAdvancedSpell(selectedYokaiId)
+    console.log('[DEBUG] exchangeAdvancedSpell result:', result)
+  }
+  
+  console.log('[DEBUG] resetting state...')
+  resetSpellExchangeState()
+}
+
+function resetSpellExchangeState() {
+  spellExchangeState.type = ''
+  spellExchangeState.step = 0
+  cardSelectModal.show = false
+  cardSelectModal.hint = ''
+  cardSelectModal.onConfirm = null
+  cardSelectModal.candidates = []
+  cardSelectModal.selected = []
+}
+
+function cancelCardSelect() {
+  // 取消卡牌选择，重置所有状态
+  resetSpellExchangeState()
 }
 
 function closeSpellModal() {
@@ -2593,6 +2742,7 @@ async function confirmReplaceShikigami() {
   opacity:0.5;
   cursor:not-allowed;
   border-color:#333;
+  pointer-events:none;
 }
 .spell-type-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
 .spell-type-name{font-size:16px;font-weight:bold;color:#fff}
@@ -2621,13 +2771,39 @@ async function confirmReplaceShikigami() {
 .choice-btn:hover{transform:scale(1.02);box-shadow:0 3px 12px rgba(102,126,234,.4)}
 
 /* 卡牌选择弹窗 */
-.card-select-modal{min-width:300px}
-.card-select-grid{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-height:200px;overflow-y:auto;padding:8px}
-.select-card{width:60px;padding:8px 5px;background:rgba(100,150,200,.3);border-radius:5px;text-align:center;cursor:pointer;transition:all .15s;border:2px solid transparent}
-.select-card:hover{background:rgba(100,150,200,.5)}
-.select-card.selected{border-color:#4CAF50;background:rgba(76,175,80,.3)}
-.select-card .c-name{font-size:9px;font-weight:bold}
-.select-card .c-stat{font-size:9px;color:#ccc;margin-top:2px}
+.card-select-modal{min-width:320px}
+.card-select-grid{display:flex;flex-wrap:wrap;gap:15px;justify-content:center;max-height:300px;overflow-y:auto;padding:15px}
+.select-card-item{
+  width:120px;height:168px;
+  border-radius:6px;overflow:hidden;
+  position:relative;
+  display:flex;flex-direction:column;justify-content:flex-end;
+  border:3px solid #555;
+  background:linear-gradient(160deg,#1a1a3e,#2a2a5e);
+  cursor:pointer;transition:all .15s;
+}
+.select-card-item .card-art{
+  position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;
+}
+.select-card-item .card-info{
+  position:relative;z-index:1;
+  background:linear-gradient(0deg,rgba(0,0,0,.9) 0%,rgba(0,0,0,.5) 70%,transparent 100%);
+  padding:20px 8px 8px;
+}
+.select-card-item .c-name{font-size:13px;font-weight:bold;color:#f0e6d3}
+.select-card-item .c-stat{font-size:12px;color:#ddd;margin-top:4px}
+.select-card-item:hover{transform:translateY(-5px);border-color:#888}
+.select-card-item.selected{border-color:#4CAF50;box-shadow:0 0 15px rgba(76,175,80,.5)}
+.select-card-item.yokai{border-color:#4a7c59}
+.select-card-item.token{border-color:#9c8a4a}
+.select-check{
+  position:absolute;top:8px;right:8px;
+  width:28px;height:28px;
+  background:#4CAF50;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:16px;font-weight:bold;color:#fff;
+  z-index:2;
+}
 
 /* 目标选择弹窗 */
 .target-modal{min-width:280px}

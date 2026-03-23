@@ -1,7 +1,17 @@
 <template>
   <div class="game-container">
-    <!-- 大厅 -->
-    <div v-if="!inGame" class="lobby">
+    <!-- 多人模式：等待加载状态 -->
+    <div v-if="isMultiMode && !state" class="lobby">
+      <div class="lobby-card">
+        <h1>🎴 御魂传说</h1>
+        <h2>多人对战模式</h2>
+        <p class="tips">正在加载游戏状态...</p>
+        <button @click="router.push('/')" class="btn">返回大厅</button>
+      </div>
+    </div>
+    
+    <!-- 单人模式：大厅 -->
+    <div v-else-if="!isMultiMode && !inGame" class="lobby">
       <div class="lobby-card">
         <h1>🎴 御魂传说</h1>
         <h2>单人测试模式</h2>
@@ -16,6 +26,13 @@
       <div class="select-modal">
         <h2>🎭 选择式神</h2>
         <p class="select-hint">从下列4个式神中选择2个作为你的搭档</p>
+        
+        <!-- 多人模式倒计时 -->
+        <div v-if="isMultiMode && shikigamiSelectCountdown > 0" class="countdown-bar">
+          <span class="countdown-icon">⏱️</span>
+          <span class="countdown-text">{{ shikigamiSelectCountdown }}s</span>
+          <div class="countdown-progress" :style="{ width: (shikigamiSelectCountdown / 20 * 100) + '%' }"></div>
+        </div>
         
         <div class="shikigami-options">
           <div v-for="s in shikigamiOptions" :key="s.id"
@@ -47,10 +64,10 @@
         </div>
         
         <button class="confirm-btn" 
-                :class="{ ready: selectedShikigami.length >= 2 }"
-                :disabled="selectedShikigami.length < 2"
+                :class="{ ready: selectedShikigami.length >= 2, waiting: isWaitingOthers }"
+                :disabled="selectedShikigami.length < 2 || isWaitingOthers"
                 @click="confirmShikigamiSelection">
-          {{ selectedShikigami.length >= 2 ? '🎮 开始游戏' : `确认选择 (${selectedShikigami.length}/2)` }}
+          {{ shikigamiConfirmButtonText }}
         </button>
       </div>
     </div>
@@ -609,10 +626,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, reactive, onMounted } from 'vue'
+import { ref, computed, nextTick, reactive, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { SinglePlayerGame } from './game/SinglePlayerGame'
+import { socketClient } from './network/SocketClient'
 import type { GameState } from '../../shared/types/game'
 import type { CardInstance } from '../../shared/types/cards'
+
+// ── 路由与模式 ──────────────────────────────────────
+const route = useRoute()
+const router = useRouter()
+const isMultiMode = computed(() => route.query.mode === 'multi')
 
 // ── 卡牌图片路径映射 ──────────────────────────────────────
 // id格式：boss_001 → 101.webp, yokai_001 → 201.webp, shikigami_001 → 401.webp
@@ -659,13 +683,86 @@ onMounted(() => {
       e.preventDefault()
     }
   })
+  
+  // 多人模式：检查是否已有游戏状态
+  if (isMultiMode.value && socketClient.gameState.value) {
+    inGame.value = true
+    console.log('[App] 多人模式：检测到游戏状态，直接进入游戏')
+  }
+})
+
+// 多人模式：监听游戏状态同步
+watch(() => socketClient.gameState.value, (newState) => {
+  if (isMultiMode.value && newState) {
+    console.log('[App] 多人模式：收到状态更新', newState.phase, newState.turnPhase)
+    nextTick(() => { if(logRef.value) logRef.value.scrollTop = logRef.value.scrollHeight })
+  }
+}, { deep: true })
+
+// 多人模式：监听游戏事件（倒计时等）
+if (typeof window !== 'undefined') {
+  socketClient.on('gameEvent', (event: any) => {
+    if (event.type === 'SHIKIGAMI_SELECT_START') {
+      // 启动倒计时
+      const timeout = event.timeout || 20000
+      shikigamiSelectCountdown.value = Math.ceil(timeout / 1000)
+      
+      // 清除旧的定时器
+      if (countdownInterval) {
+        clearInterval(countdownInterval)
+      }
+      
+      // 每秒减少
+      countdownInterval = window.setInterval(() => {
+        if (shikigamiSelectCountdown.value > 0) {
+          shikigamiSelectCountdown.value--
+        } else {
+          if (countdownInterval) {
+            clearInterval(countdownInterval)
+            countdownInterval = null
+          }
+        }
+      }, 1000)
+    }
+  })
+}
+
+// 组件卸载时的清理
+onUnmounted(() => {
+  // 清除倒计时
+  if (countdownInterval) {
+    clearInterval(countdownInterval)
+    countdownInterval = null
+  }
 })
 
 const playerName = ref('阴阳师')
 const inGame = ref(false)
-const state = ref<GameState|null>(null)
+const localState = ref<GameState|null>(null)
 let game: SinglePlayerGame|null = null
 const logRef = ref<HTMLElement|null>(null)
+
+// 统一的游戏状态：多人模式用 socketClient.gameState，单人模式用 localState
+const state = computed(() => {
+  if (isMultiMode.value) {
+    return socketClient.gameState.value
+  }
+  return localState.value
+})
+
+// 当前玩家ID（多人模式从 socketClient 获取）
+const myPlayerId = computed(() => {
+  if (isMultiMode.value) {
+    return socketClient.playerId.value
+  }
+  return 'player_0' // 单人模式固定玩家ID
+})
+
+// 当前玩家在数组中的索引
+const myPlayerIndex = computed(() => {
+  if (!state.value) return 0
+  return state.value.players.findIndex(p => p.id === myPlayerId.value)
+})
 
 // 选择相关状态
 const showExiled = ref(false)
@@ -673,6 +770,10 @@ const showDeck = ref(false)
 const showDiscard = ref(false)
 const selectingTarget = ref(false)
 const selectingCards = ref(false)
+
+// 多人模式：式神选择倒计时
+const shikigamiSelectCountdown = ref(0)
+let countdownInterval: number | null = null
 
 // 悬浮提示状态
 const tooltip = reactive<{
@@ -784,7 +885,23 @@ const shikigamiModal = reactive<{
   selectedOldId: ''
 })
 
-const player = computed(() => state.value?.players[0])
+// 当前玩家数据：多人模式使用 myPlayerIndex，单人模式固定用 players[0]
+const player = computed(() => {
+  if (!state.value) return undefined
+  if (isMultiMode.value) {
+    return state.value.players[myPlayerIndex.value]
+  }
+  return state.value.players[0]
+})
+
+// 是否轮到自己行动
+const isMyTurn = computed(() => {
+  if (!state.value) return false
+  if (isMultiMode.value) {
+    return state.value.currentPlayerIndex === myPlayerIndex.value
+  }
+  return true // 单人模式始终是自己的回合
+})
 const yokai = computed(() => state.value?.field.yokaiSlots || [])
 const boss = computed(() => state.value?.field.currentBoss)
 const logs = computed(() => (state.value?.log || []).slice(-6))
@@ -1072,12 +1189,51 @@ function hideTooltip() {
 
 // 可选的式神列表
 const shikigamiOptions = computed(() => {
-  return (state.value as any)?.shikigamiOptions || []
+  const allOptions = (state.value as any)?.shikigamiOptions || []
+  
+  // 多人模式：根据自己的 playerIndex 取对应的4个式神
+  if (isMultiMode.value && allOptions.length > 4) {
+    const idx = myPlayerIndex.value
+    if (idx >= 0) {
+      const start = idx * 4
+      const end = start + 4
+      return allOptions.slice(start, end)
+    }
+    return []
+  }
+  
+  // 单人模式：直接返回全部（只有4个）
+  return allOptions
 })
 
 // 已选择的式神列表
 const selectedShikigami = computed(() => {
+  if (isMultiMode.value) {
+    // 多人模式：从当前玩家的 selectedShikigami 读取
+    return player.value?.selectedShikigami || []
+  }
+  // 单人模式：从 state.selectedShikigami 读取
   return (state.value as any)?.selectedShikigami || []
+})
+
+// 当前玩家是否已确认式神选择（多人模式）
+const isWaitingOthers = computed(() => {
+  if (!isMultiMode.value) return false
+  return player.value?.isReady === true
+})
+
+// 式神确认按钮文案
+const shikigamiConfirmButtonText = computed(() => {
+  if (isWaitingOthers.value) {
+    // 统计还有几人未确认
+    const players = state.value?.players || []
+    const notReady = players.filter((p: any) => !p.isReady).length
+    return `⏳ 等待其他玩家确认 (${notReady}人)`
+  }
+  if (selectedShikigami.value.length >= 2) {
+    return '✅ 确认选择'
+  }
+  return `确认选择 (${selectedShikigami.value.length}/2)`
 })
 
 // 检查式神是否已被选中
@@ -1087,25 +1243,42 @@ function isShikigamiSelected(shikigamiId: string): boolean {
 
 // 切换式神选择
 function toggleShikigamiSelection(shikigamiId: string) {
-  if (!game) return
-  
-  if (isShikigamiSelected(shikigamiId)) {
-    game.deselectShikigami(shikigamiId)
+  if (isMultiMode.value) {
+    // 多人模式：发送到服务器
+    if (isShikigamiSelected(shikigamiId)) {
+      socketClient.sendAction({ type: 'deselectShikigami', shikigamiId })
+    } else {
+      socketClient.sendAction({ type: 'selectShikigami', shikigamiId })
+    }
   } else {
-    game.selectShikigami(shikigamiId)
+    // 单人模式：本地处理
+    if (!game) return
+    if (isShikigamiSelected(shikigamiId)) {
+      game.deselectShikigami(shikigamiId)
+    } else {
+      game.selectShikigami(shikigamiId)
+    }
   }
 }
 
 // 取消选择式神
 function deselectShikigami(shikigamiId: string) {
-  if (!game) return
-  game.deselectShikigami(shikigamiId)
+  if (isMultiMode.value) {
+    socketClient.sendAction({ type: 'deselectShikigami', shikigamiId })
+  } else {
+    if (!game) return
+    game.deselectShikigami(shikigamiId)
+  }
 }
 
 // 确认式神选择
 function confirmShikigamiSelection() {
-  if (!game) return
-  game.confirmShikigamiSelection()
+  if (isMultiMode.value) {
+    socketClient.sendAction({ type: 'confirmShikigamiSelection' })
+  } else {
+    if (!game) return
+    game.confirmShikigamiSelection()
+  }
 }
 
 // 式神选取阶段的悬浮提示（详细技能展示）
@@ -1145,8 +1318,15 @@ function showSelectShikigamiTooltip(event: MouseEvent, shikigami: any) {
 }
 
 function startGame() {
+  // 多人模式下不创建本地游戏实例，状态由服务器同步
+  if (isMultiMode.value) {
+    inGame.value = true
+    return
+  }
+  
+  // 单人模式：创建本地游戏实例
   game = new SinglePlayerGame(playerName.value||'阴阳师', s => {
-    state.value = s
+    localState.value = s
     nextTick(() => { if(logRef.value) logRef.value.scrollTop = logRef.value.scrollHeight })
   })
   
@@ -1237,11 +1417,18 @@ function resolveTarget(id: string) {
 // 游戏操作
 function handleCardClick(c: CardInstance) {
   if (selectingCards.value || cardSelectModal.show) return // 选择模式下不打牌
-  game?.playCard(c.instanceId)
+  if (!isMyTurn.value) return
+  
+  if (isMultiMode.value) {
+    socketClient.sendAction({ type: 'playCard', cardInstanceId: c.instanceId })
+  } else {
+    game?.playCard(c.instanceId)
+  }
 }
 
 async function handleYokaiClick(i: number, y: CardInstance) {
   if (selectingTarget.value || targetModal.show) return // 选择模式下走弹窗
+  if (!isMyTurn.value) return
   
   // 检查妖怪是否已被击杀
   if (isKilled(y)) {
@@ -1252,19 +1439,46 @@ async function handleYokaiClick(i: number, y: CardInstance) {
       choiceModal.resolve = resolve
     })
     
-    if (choice === 0) {
-      await game?.retireYokai(i)
+    if (isMultiMode.value) {
+      if (choice === 0) {
+        socketClient.sendAction({ type: 'retireYokai', slotIndex: i })
+      } else {
+        socketClient.sendAction({ type: 'banishYokai', slotIndex: i })
+      }
     } else {
-      game?.banishYokai(i)
+      if (choice === 0) {
+        await game?.retireYokai(i)
+      } else {
+        game?.banishYokai(i)
+      }
     }
   } else {
     // 未击杀：分配伤害
-    await game?.allocateDamage(i)
+    if (isMultiMode.value) {
+      socketClient.sendAction({ type: 'allocateDamage', slotIndex: i })
+    } else {
+      await game?.allocateDamage(i)
+    }
   }
 }
 
-function play(id: string) { game?.playCard(id) }
-async function kill(i: number) { await game?.allocateDamage(i) }
+function play(id: string) {
+  if (!isMyTurn.value) return
+  if (isMultiMode.value) {
+    socketClient.sendAction({ type: 'playCard', cardInstanceId: id })
+  } else {
+    game?.playCard(id)
+  }
+}
+
+async function kill(i: number) {
+  if (!isMyTurn.value) return
+  if (isMultiMode.value) {
+    socketClient.sendAction({ type: 'allocateDamage', slotIndex: i })
+  } else {
+    await game?.allocateDamage(i)
+  }
+}
 
 // 妖怪状态辅助函数
 function getYokaiCurrentHp(y: CardInstance): number {
@@ -1311,10 +1525,26 @@ const canAttackBoss = computed(() => {
 
 function hitBoss() {
   if (!canAttackBoss.value) return
+  if (!isMyTurn.value) return // 多人模式：只有自己回合才能操作
+  
   const d = player.value?.damage || 0
-  if (d > 0) game?.attackBoss(d)
+  if (d > 0) {
+    if (isMultiMode.value) {
+      socketClient.sendAction({ type: 'attackBoss', damage: d })
+    } else {
+      game?.attackBoss(d)
+    }
+  }
 }
-function useSkill(id: string) { game?.useShikigamiSkill(id) }
+
+function useSkill(id: string) {
+  if (!isMyTurn.value) return
+  if (isMultiMode.value) {
+    socketClient.sendAction({ type: 'useShikigamiSkill', shikigamiId: id })
+  } else {
+    game?.useShikigamiSkill(id)
+  }
+}
 // 阴阳术选择弹窗
 const spellSelectModal = reactive({
   show: false
@@ -1535,9 +1765,32 @@ function handleShikigamiAction() {
   }
 }
 
-function endTurn() { game?.endTurn() }
-function refresh(b: boolean) { game?.decideYokaiRefresh(b) }
-function confirmShiki() { game?.confirmShikigamiPhase() }
+function endTurn() {
+  if (!isMyTurn.value) return
+  if (isMultiMode.value) {
+    socketClient.sendAction({ type: 'endTurn' })
+  } else {
+    game?.endTurn()
+  }
+}
+
+function refresh(b: boolean) {
+  if (!isMyTurn.value) return
+  if (isMultiMode.value) {
+    socketClient.sendAction({ type: 'decideYokaiRefresh', refresh: b })
+  } else {
+    game?.decideYokaiRefresh(b)
+  }
+}
+
+function confirmShiki() {
+  if (!isMyTurn.value) return
+  if (isMultiMode.value) {
+    socketClient.sendAction({ type: 'confirmShikigamiPhase' })
+  } else {
+    game?.confirmShikigamiPhase()
+  }
+}
 function cardType(c: CardInstance) { 
   return { 
     spell: c.cardType === 'spell', 
@@ -1694,7 +1947,43 @@ async function confirmReplaceShikigami() {
 .select-hint {
   text-align: center;
   color: #aaa;
-  margin-bottom: 25px;
+  margin-bottom: 15px;
+}
+
+/* 多人模式倒计时条 */
+.countdown-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 20px;
+  margin-bottom: 20px;
+  background: rgba(255, 100, 100, 0.15);
+  border: 1px solid rgba(255, 100, 100, 0.3);
+  border-radius: 8px;
+  position: relative;
+  overflow: hidden;
+}
+
+.countdown-icon {
+  font-size: 20px;
+  z-index: 1;
+}
+
+.countdown-text {
+  font-size: 18px;
+  font-weight: bold;
+  color: #ff6b6b;
+  z-index: 1;
+}
+
+.countdown-progress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: linear-gradient(90deg, rgba(255, 100, 100, 0.3), rgba(255, 150, 100, 0.2));
+  transition: width 1s linear;
 }
 
 .shikigami-options {
@@ -1885,6 +2174,20 @@ async function confirmReplaceShikigami() {
 
 .confirm-btn:disabled {
   opacity: 0.7;
+}
+
+.confirm-btn.waiting {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+  cursor: wait;
+  font-weight: bold;
+  box-shadow: 0 4px 15px rgba(245, 158, 11, 0.4);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 
 /* 响应式：小屏幕时2列 */

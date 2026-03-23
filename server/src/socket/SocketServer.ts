@@ -88,7 +88,7 @@ export class SocketServer {
       socket.data.roomId = null;
       
       // 发送连接成功
-      socket.emit('connect:success', socket.id);
+      socket.emit('connect:success', { playerId: socket.id });
       
       // 绑定事件处理
       this.bindPlayerEvents(socket);
@@ -110,7 +110,7 @@ export class SocketServer {
     // 设置玩家名称
     socket.on('player:setName', (name, callback) => {
       if (!name || name.trim().length === 0) {
-        callback(false);
+        callback({ success: false, error: '名称不能为空' });
         return;
       }
       
@@ -119,7 +119,7 @@ export class SocketServer {
       this.playerNames.set(socket.id, trimmedName);
       
       console.log(`[SocketServer] 玩家 ${socket.id} 设置名称: ${trimmedName}`);
-      callback(true);
+      callback({ success: true });
     });
   }
 
@@ -140,12 +140,12 @@ export class SocketServer {
         
         const roomInfo = room.toRoomInfo();
         socket.emit('room:created', roomInfo);
-        callback(roomInfo);
+        callback({ success: true, room: roomInfo });
         
         console.log(`[SocketServer] 玩家 ${playerName} 创建房间 ${room.id}`);
-      } catch (error) {
+      } catch (error: any) {
         console.error('[SocketServer] 创建房间失败:', error);
-        callback(null, '创建房间失败');
+        callback({ success: false, error: error.message || '创建房间失败' });
       }
     });
 
@@ -175,11 +175,11 @@ export class SocketServer {
           playerIndex: result.room.playerCount - 1,
         });
         
-        callback?.(true);
+        callback?.({ success: true, room: roomInfo });
         console.log(`[SocketServer] 玩家 ${playerName} 加入房间 ${roomId}`);
       } else {
         socket.emit('room:error', result.errorCode || ErrorCodes.UNKNOWN_ERROR, result.error || '加入失败');
-        callback?.(false, result.error);
+        callback?.({ success: false, error: result.error || '加入失败' });
       }
     });
 
@@ -187,7 +187,7 @@ export class SocketServer {
     socket.on('room:leave', (callback) => {
       const roomId = socket.data.roomId;
       if (!roomId) {
-        callback?.(false);
+        callback?.({ success: false, error: '不在房间中' });
         return;
       }
       
@@ -211,10 +211,10 @@ export class SocketServer {
           }
         }
         
-        callback?.(true);
+        callback?.({ success: true });
         console.log(`[SocketServer] 玩家 ${socket.id} 离开房间 ${roomId}`);
       } else {
-        callback?.(false);
+        callback?.({ success: false, error: '离开房间失败' });
       }
     });
 
@@ -222,16 +222,16 @@ export class SocketServer {
     socket.on('room:ready', (isReady, callback) => {
       const room = this.roomManager.getPlayerRoom(socket.id);
       if (!room) {
-        callback?.(false);
+        callback?.({ success: false, error: '不在房间中' });
         return;
       }
       
       const success = room.setPlayerReady(socket.id, isReady);
       if (success) {
         this.io.to(room.id).emit('room:playerReady', socket.id, isReady);
-        callback?.(true);
+        callback?.({ success: true });
       } else {
-        callback?.(false);
+        callback?.({ success: false, error: '设置准备状态失败' });
       }
     });
 
@@ -239,12 +239,12 @@ export class SocketServer {
     socket.on('room:kick', (playerId, callback) => {
       const room = this.roomManager.getPlayerRoom(socket.id);
       if (!room || room.hostId !== socket.id) {
-        callback?.(false, '无权限');
+        callback?.({ success: false, error: '无权限' });
         return;
       }
       
       if (playerId === socket.id) {
-        callback?.(false, '不能踢出自己');
+        callback?.({ success: false, error: '不能踢出自己' });
         return;
       }
       
@@ -260,16 +260,16 @@ export class SocketServer {
         // 通知房间
         this.io.to(room.id).emit('room:playerLeft', playerId);
         
-        callback?.(true);
+        callback?.({ success: true });
       } else {
-        callback?.(false, '玩家不存在');
+        callback?.({ success: false, error: '玩家不存在' });
       }
     });
 
     // 获取房间列表
     socket.on('room:list', (callback) => {
       const rooms = this.roomManager.getPublicRooms();
-      callback(rooms);
+      callback({ success: true, rooms });
     });
   }
 
@@ -281,7 +281,7 @@ export class SocketServer {
     socket.on('game:start', (callback) => {
       const room = this.roomManager.getPlayerRoom(socket.id);
       if (!room) {
-        callback?.(false, '不在房间中');
+        callback?.({ success: false, error: '不在房间中' });
         return;
       }
       
@@ -293,14 +293,17 @@ export class SocketServer {
           this.broadcastGameState(room.id, state, event);
         });
         
-        // 广播游戏开始
+        // 广播游戏开始（客户端根据自己的 playerIndex 取对应数据）
         const initialState = room.game.getState();
         this.io.to(room.id).emit('game:started', initialState);
         
-        callback?.(true);
+        // 启动游戏（触发式神选择倒计时等）
+        room.game.start();
+        
+        callback?.({ success: true });
         console.log(`[SocketServer] 房间 ${room.id} 游戏开始`);
       } else {
-        callback?.(false, result.error);
+        callback?.({ success: false, error: result.error });
       }
     });
 
@@ -308,7 +311,7 @@ export class SocketServer {
     socket.on('game:action', (action, seq, callback) => {
       const room = this.roomManager.getPlayerRoom(socket.id);
       if (!room || !room.game) {
-        callback?.(false, '游戏未开始');
+        callback?.({ success: false, error: '游戏未开始' });
         return;
       }
       
@@ -317,10 +320,10 @@ export class SocketServer {
       if (result.success) {
         // 发送动作结果
         socket.emit('game:actionResult', seq, true);
-        callback?.(true);
+        callback?.({ success: true });
       } else {
         socket.emit('game:actionResult', seq, false, result.error);
-        callback?.(false, result.error);
+        callback?.({ success: false, error: result.error });
       }
     });
   }
@@ -377,7 +380,7 @@ export class SocketServer {
     
     const seq = room.game.getStateSeq();
     
-    // 广播状态同步
+    // 广播状态给所有人（客户端根据自己的 playerIndex 取对应数据）
     this.io.to(roomId).emit('game:stateSync', state, seq);
     
     // 如果有事件，也广播事件

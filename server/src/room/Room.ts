@@ -363,17 +363,18 @@ export class Room {
    * 获取房间信息（用于发送给客户端）
    */
   toRoomInfo(): RoomInfo {
+    const host = this._players.get(this._hostId);
     return {
       id: this.id,
+      name: this._config.name || `房间 ${this.id}`,
       hostId: this._hostId,
-      status: this._status,
-      config: {
-        ...this._config,
-        password: undefined, // 不发送密码
-      },
+      hostName: host?.name || '未知',
       players: this.players,
+      maxPlayers: this._config.maxPlayers,
+      minPlayers: this._config.minPlayers,
+      status: this._status,
+      isPrivate: this._config.isPrivate,
       createdAt: this.createdAt,
-      lastActivity: this._lastActivity,
     };
   }
 

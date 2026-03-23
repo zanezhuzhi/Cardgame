@@ -30,6 +30,7 @@ export interface RoomPlayer {
 
 /** 房间配置 */
 export interface RoomConfig {
+  name?: string;        // 房间名称
   maxPlayers: number;   // 最大玩家数（3-6）
   minPlayers: number;   // 最小玩家数（默认3）
   isPrivate: boolean;   // 是否私有房间
@@ -39,12 +40,17 @@ export interface RoomConfig {
 /** 房间信息 */
 export interface RoomInfo {
   id: string;           // 房间码（6位）
+  name?: string;        // 房间名称
   hostId: string;       // 房主ID
+  hostName?: string;    // 房主名称
   status: RoomStatus;   // 房间状态
-  config: RoomConfig;   // 房间配置
   players: RoomPlayer[]; // 玩家列表
+  maxPlayers: number;   // 最大玩家数
+  minPlayers?: number;  // 最小玩家数
+  isPrivate?: boolean;  // 是否私有
   createdAt: number;    // 创建时间
-  lastActivity: number; // 最后活动时间
+  config?: RoomConfig;  // 房间配置（可选，用于详细信息）
+  lastActivity?: number; // 最后活动时间
 }
 
 // ============ 游戏相关类型（本地定义，避免跨项目导入问题）============
@@ -155,6 +161,8 @@ export interface PlayerState {
   isReady: boolean;
   shikigamiState: ShikigamiState[];
   tempBuffs: TempBuff[];
+  // 式神选择阶段的临时字段
+  selectedShikigami?: ShikigamiCard[];
 }
 
 /** 战场状态 */
@@ -196,10 +204,14 @@ export interface GameState {
   lastUpdate: number;
   lastPlayerKilledYokai?: boolean;
   pendingYokaiRefresh?: boolean;
+  // 式神选择阶段倒计时
+  shikigamiSelectTimeout?: number;
+  shikigamiSelectStartTime?: number;
 }
 
 /** 游戏动作 */
 export type GameAction = 
+  // 大写格式（兼容旧代码）
   | { type: 'PLAY_CARD'; cardInstanceId: string }
   | { type: 'USE_SKILL'; shikigamiId: string; targetId?: string }
   | { type: 'ATTACK'; targetId: string; damage: number }
@@ -208,7 +220,20 @@ export type GameAction =
   | { type: 'REPLACE_SHIKIGAMI'; oldId: string; newId: string }
   | { type: 'DECIDE_YOKAI_REFRESH'; refresh: boolean }
   | { type: 'SELECT_SHIKIGAMI'; selectedIds: string[] }
-  | { type: 'END_TURN' };
+  | { type: 'END_TURN' }
+  // 小写格式（客户端使用）
+  | { type: 'playCard'; cardInstanceId: string }
+  | { type: 'useShikigamiSkill'; shikigamiId: string; targetId?: string }
+  | { type: 'attackBoss'; damage: number }
+  | { type: 'allocateDamage'; slotIndex: number }
+  | { type: 'retireYokai'; slotIndex: number }
+  | { type: 'banishYokai'; slotIndex: number }
+  | { type: 'decideYokaiRefresh'; refresh: boolean }
+  | { type: 'endTurn' }
+  | { type: 'confirmShikigamiPhase' }
+  | { type: 'selectShikigami'; shikigamiId: string }
+  | { type: 'deselectShikigami'; shikigamiId: string }
+  | { type: 'confirmShikigamiSelection' };
 
 /** 游戏事件 */
 export type GameEvent =
@@ -222,14 +247,23 @@ export type GameEvent =
   | { type: 'YOKAI_DEFEATED'; card: CardInstance; playerId: string }
   | { type: 'BOSS_ARRIVAL'; boss: BossCard }
   | { type: 'BOSS_DEFEATED'; boss: BossCard; playerId: string }
-  | { type: 'GAME_ENDED'; winner: string; scores: Record<string, number> };
+  | { type: 'GAME_ENDED'; winner: string; scores: Record<string, number> }
+  | { type: 'SHIKIGAMI_SELECT_START'; timeout: number }
+  | { type: 'GAME_START'; state: GameState; shikigamiSummary: { name: string; shikigami: string[] }[] };
 
 // ============ Socket 事件类型 ============
+
+/** 通用响应类型 */
+export interface ApiResponse<T = void> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
 
 /** 服务端 → 客户端 事件 */
 export interface ServerToClientEvents {
   // 连接相关
-  'connect:success': (playerId: string) => void;
+  'connect:success': (data: { playerId: string }) => void;
   
   // 房间相关
   'room:created': (room: RoomInfo) => void;
@@ -265,22 +299,30 @@ export interface ServerToClientEvents {
   'pong': (timestamp: number, serverTime: number) => void;
 }
 
+/** 回调响应类型 */
+export interface CallbackResponse {
+  success: boolean;
+  error?: string;
+  room?: RoomInfo;
+  rooms?: RoomInfo[];
+}
+
 /** 客户端 → 服务端 事件 */
 export interface ClientToServerEvents {
   // 玩家信息
-  'player:setName': (name: string, callback: (success: boolean) => void) => void;
+  'player:setName': (name: string, callback: (response: CallbackResponse) => void) => void;
   
   // 房间相关
-  'room:create': (config: Partial<RoomConfig>, callback: (room: RoomInfo | null, error?: string) => void) => void;
-  'room:join': (roomId: string, password?: string, callback?: (success: boolean, error?: string) => void) => void;
-  'room:leave': (callback?: (success: boolean) => void) => void;
-  'room:ready': (isReady: boolean, callback?: (success: boolean) => void) => void;
-  'room:kick': (playerId: string, callback?: (success: boolean, error?: string) => void) => void;
-  'room:list': (callback: (rooms: RoomInfo[]) => void) => void;
+  'room:create': (config: Partial<RoomConfig>, callback: (response: CallbackResponse) => void) => void;
+  'room:join': (roomId: string, password?: string, callback?: (response: CallbackResponse) => void) => void;
+  'room:leave': (callback?: (response: CallbackResponse) => void) => void;
+  'room:ready': (isReady: boolean, callback?: (response: CallbackResponse) => void) => void;
+  'room:kick': (playerId: string, callback?: (response: CallbackResponse) => void) => void;
+  'room:list': (callback: (response: CallbackResponse) => void) => void;
   
   // 游戏相关
-  'game:start': (callback?: (success: boolean, error?: string) => void) => void;
-  'game:action': (action: GameAction, seq: number, callback?: (success: boolean, error?: string) => void) => void;
+  'game:start': (callback?: (response: { success: boolean; error?: string }) => void) => void;
+  'game:action': (action: GameAction, seq: number, callback?: (response: { success: boolean; error?: string }) => void) => void;
   
   // 交互响应
   'interact:response': (response: InteractResponse) => void;

@@ -87,12 +87,12 @@
               @click="joinRoom(room.id)"
             >
               <div class="room-info">
-                <span class="room-name">{{ room.name }}</span>
-                <span class="room-host">房主: {{ room.hostName }}</span>
+                <span class="room-name">{{ room.name || room.config?.name || `房间 ${room.id}` }}</span>
+                <span class="room-host">房主: {{ room.hostName || getHostName(room) }}</span>
               </div>
               <div class="room-status">
                 <span class="player-count">
-                  👥 {{ room.players.length }}/{{ room.maxPlayers }}
+                  👥 {{ room.players?.length || 0 }}/{{ room.maxPlayers || room.config?.maxPlayers || 6 }}
                 </span>
                 <span :class="['status-badge', room.status]">
                   {{ room.status === 'waiting' ? '等待中' : '游戏中' }}
@@ -198,7 +198,7 @@
           </div>
           <!-- 空位 -->
           <div 
-            v-for="i in (currentRoom.maxPlayers - currentRoom.players.length)" 
+            v-for="i in emptySlots" 
             :key="'empty-' + i"
             class="player-slot empty"
           >
@@ -306,10 +306,24 @@ const readyCount = computed(() => {
 const canStart = computed(() => {
   if (!currentRoom.value) return false;
   const players = currentRoom.value.players;
-  if (players.length < currentRoom.value.minPlayers) return false;
+  if (players.length < (currentRoom.value.minPlayers || 3)) return false;
   // 房主不需要准备，其他人都要准备
   return players.every(p => p.isHost || p.isReady);
 });
+
+const emptySlots = computed(() => {
+  if (!currentRoom.value) return 0;
+  const max = currentRoom.value.maxPlayers || currentRoom.value.config?.maxPlayers || 6;
+  const current = currentRoom.value.players?.length || 0;
+  return Math.max(0, max - current);
+});
+
+// 辅助函数：获取房主名称
+function getHostName(room: any): string {
+  if (room.hostName) return room.hostName;
+  const host = room.players?.find((p: any) => p.isHost || p.id === room.hostId);
+  return host?.name || '未知';
+}
 
 // 方法
 async function connectToServer() {
@@ -340,8 +354,12 @@ function disconnect() {
 async function refreshRooms() {
   loadingRooms.value = true;
   try {
-    rooms.value = await socketClient.getRoomList();
+    console.log('[Lobby] 刷新房间列表...');
+    const result = await socketClient.getRoomList();
+    console.log('[Lobby] 获取到房间列表:', result);
+    rooms.value = result;
   } catch (e: any) {
+    console.error('[Lobby] 获取房间列表失败:', e);
     error.value = e.message || '获取房间列表失败';
   } finally {
     loadingRooms.value = false;
@@ -353,14 +371,21 @@ async function createRoom() {
   error.value = '';
   
   try {
+    console.log('[Lobby] 尝试创建房间:', {
+      name: createConfig.value.name || `${playerName.value}的房间`,
+      maxPlayers: createConfig.value.maxPlayers,
+      isPrivate: createConfig.value.isPrivate,
+    });
     const room = await socketClient.createRoom({
       name: createConfig.value.name || `${playerName.value}的房间`,
       maxPlayers: createConfig.value.maxPlayers,
       isPrivate: createConfig.value.isPrivate,
       password: createConfig.value.password || undefined
     });
+    console.log('[Lobby] 房间创建成功:', room);
     addMessage(`房间已创建: ${room.id}`);
   } catch (e: any) {
+    console.error('[Lobby] 创建房间失败:', e);
     error.value = e.message || '创建房间失败';
   } finally {
     creating.value = false;

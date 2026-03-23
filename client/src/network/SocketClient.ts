@@ -97,11 +97,13 @@ class SocketClient {
       });
       
       // 收到玩家ID
-      this.socket.on('connect:success', (data: { playerId: string }) => {
-        console.log('[Socket] 收到玩家ID:', data.playerId);
-        this.playerId.value = data.playerId;
+      this.socket.on('connect:success', (data: any) => {
+        // 兼容两种格式：{ playerId: string } 或直接 string
+        const pid = typeof data === 'string' ? data : data?.playerId;
+        console.log('[Socket] 收到玩家ID:', pid);
+        this.playerId.value = pid || this.socket?.id || '';
         this.status.value = 'connected';
-        resolve(data.playerId);
+        resolve(this.playerId.value);
       });
       
       // 连接错误
@@ -166,12 +168,18 @@ class SocketClient {
         return;
       }
       
-      this.socket.emit('player:setName', name, (response: { success: boolean; error?: string }) => {
-        if (response.success) {
+      console.log('[SocketClient] 设置玩家名称:', name);
+      this.socket.emit('player:setName', name, (response: any) => {
+        console.log('[SocketClient] setPlayerName 响应:', response);
+        
+        // 兼容多种格式
+        if (response === true || response?.success) {
           this.playerName.value = name;
           resolve();
+        } else if (response === false) {
+          reject(new Error('设置名称失败'));
         } else {
-          reject(new Error(response.error || '设置名称失败'));
+          reject(new Error(response?.error || '设置名称失败'));
         }
       });
     });
@@ -183,16 +191,37 @@ class SocketClient {
   createRoom(config: { name?: string; maxPlayers?: number; isPrivate?: boolean; password?: string }): Promise<RoomInfo> {
     return new Promise((resolve, reject) => {
       if (!this.socket) {
+        console.error('[SocketClient] createRoom: 未连接到服务器');
         reject(new Error('未连接到服务器'));
         return;
       }
       
-      this.socket.emit('room:create', config, (response: { success: boolean; room?: RoomInfo; error?: string }) => {
-        if (response.success && response.room) {
-          this.currentRoom.value = response.room;
-          resolve(response.room);
+      console.log('[SocketClient] 发送 room:create 请求:', config);
+      
+      this.socket.emit('room:create', config, (response: any) => {
+        console.log('[SocketClient] room:create 响应:', response);
+        
+        // 支持两种格式：{ success, room, error } 或直接返回 room 对象
+        if (response) {
+          // 格式1: { success: true, room: {...} }
+          if (response.success !== undefined) {
+            if (response.success && response.room) {
+              this.currentRoom.value = response.room;
+              resolve(response.room);
+            } else {
+              reject(new Error(response.error || '创建房间失败'));
+            }
+          } 
+          // 格式2: 直接返回房间对象 { id, hostId, players, ... }
+          else if (response.id && response.players) {
+            this.currentRoom.value = response;
+            resolve(response);
+          }
+          else {
+            reject(new Error('未知响应格式'));
+          }
         } else {
-          reject(new Error(response.error || '创建房间失败'));
+          reject(new Error('创建房间失败'));
         }
       });
     });
@@ -208,12 +237,36 @@ class SocketClient {
         return;
       }
       
-      this.socket.emit('room:join', roomId, password, (response: { success: boolean; room?: RoomInfo; error?: string }) => {
-        if (response.success && response.room) {
-          this.currentRoom.value = response.room;
-          resolve(response.room);
+      console.log('[SocketClient] 加入房间:', roomId);
+      this.socket.emit('room:join', roomId, password, (response: any) => {
+        console.log('[SocketClient] room:join 响应:', response);
+        
+        // 兼容多种格式
+        if (response) {
+          // 格式1: { success: true, room: {...} }
+          if (response.success !== undefined) {
+            if (response.success && response.room) {
+              this.currentRoom.value = response.room;
+              resolve(response.room);
+            } else {
+              reject(new Error(response.error || '加入房间失败'));
+            }
+          }
+          // 格式2: 直接返回 true/false
+          else if (response === true) {
+            // 等待 room:joined 事件
+            resolve(this.currentRoom.value!);
+          }
+          // 格式3: 直接返回房间对象
+          else if (response.id && response.players) {
+            this.currentRoom.value = response;
+            resolve(response);
+          }
+          else {
+            reject(new Error('加入房间失败'));
+          }
         } else {
-          reject(new Error(response.error || '加入房间失败'));
+          reject(new Error('加入房间失败'));
         }
       });
     });
@@ -323,11 +376,23 @@ class SocketClient {
         return;
       }
       
-      this.socket.emit('room:list', (response: { success: boolean; rooms?: RoomInfo[]; error?: string }) => {
-        if (response.success && response.rooms) {
+      console.log('[SocketClient] 请求房间列表...');
+      this.socket.emit('room:list', (response: any) => {
+        console.log('[SocketClient] room:list 响应:', response);
+        
+        // 兼容多种格式
+        if (Array.isArray(response)) {
+          // 格式1: 直接返回数组
+          resolve(response);
+        } else if (response && response.success && response.rooms) {
+          // 格式2: { success: true, rooms: [...] }
+          resolve(response.rooms);
+        } else if (response && Array.isArray(response.rooms)) {
+          // 格式3: { rooms: [...] }
           resolve(response.rooms);
         } else {
-          reject(new Error(response.error || '获取房间列表失败'));
+          console.error('[SocketClient] 获取房间列表失败:', response);
+          reject(new Error(response?.error || '获取房间列表失败'));
         }
       });
     });
@@ -348,7 +413,11 @@ class SocketClient {
     // 玩家加入
     this.socket.on('room:playerJoined', (player: PlayerInfo) => {
       if (this.currentRoom.value) {
-        this.currentRoom.value.players.push(player);
+        // 检查玩家是否已存在，避免重复添加
+        const exists = this.currentRoom.value.players.some(p => p.id === player.id);
+        if (!exists) {
+          this.currentRoom.value.players.push(player);
+        }
       }
       this.emit('playerJoined', player);
     });

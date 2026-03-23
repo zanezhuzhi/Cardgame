@@ -122,6 +122,14 @@ export class RoomManager {
       return { success: false, roomDeleted: false };
     }
     
+    // 等待中的房间，房主离开直接解散
+    const isHost = room.hostId === playerId;
+    if (isHost && room.status === 'waiting') {
+      console.log(`[RoomManager] 房主 ${playerId} 离开等待中的房间 ${roomId}，解散房间`);
+      this.deleteRoom(roomId);
+      return { success: true, roomDeleted: true };
+    }
+    
     const result = room.removePlayer(playerId);
     this._playerRooms.delete(playerId);
     
@@ -180,11 +188,14 @@ export class RoomManager {
 
   getPublicRooms(): RoomInfo[] {
     const rooms: RoomInfo[] = [];
+    console.log(`[RoomManager] getPublicRooms: 总房间数=${this._rooms.size}`);
     for (const room of this._rooms.values()) {
+      console.log(`[RoomManager] 检查房间 ${room.id}: status=${room.status}, isPrivate=${room.config.isPrivate}`);
       if (room.status === 'waiting' && !room.config.isPrivate) {
         rooms.push(room.toRoomInfo());
       }
     }
+    console.log(`[RoomManager] 返回公开房间数: ${rooms.length}`);
     rooms.sort((a, b) => b.createdAt - a.createdAt);
     return rooms;
   }

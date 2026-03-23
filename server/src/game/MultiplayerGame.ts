@@ -62,6 +62,7 @@ const GAME_CONSTANTS = {
   MAX_SHIKIGAMI: 3,
   SHIKIGAMI_DRAW: 4,
   SHIKIGAMI_KEEP: 2,
+  SHIKIGAMI_SELECT_TIMEOUT: 20000, // 式神选择超时时间（毫秒）
 };
 
 // ============ 工具函数 ============
@@ -110,6 +111,12 @@ export class MultiplayerGame {
   /** 回合超时定时器 */
   private turnTimer?: NodeJS.Timeout;
   
+  /** 式神选择倒计时 */
+  private shikigamiSelectTimer?: NodeJS.Timeout;
+  
+  /** 式神选择开始时间 */
+  private shikigamiSelectStartTime?: number;
+  
   /** 式神选择状态 */
   private shikigamiSelections: Map<string, string[]> = new Map();
   
@@ -122,9 +129,86 @@ export class MultiplayerGame {
     
     // 初始化游戏状态
     this.state = this.createInitialState(players);
+    
+    // 注意：式神选择倒计时在 setOnStateChange 后由 start() 方法启动
+  }
+  
+  /**
+   * 启动游戏（设置回调后调用）
+   */
+  start(): void {
+    // 启动式神选择倒计时
+    this.startShikigamiSelectTimer();
+  }
+  
+  /**
+   * 启动式神选择倒计时
+   */
+  private startShikigamiSelectTimer(): void {
+    this.shikigamiSelectStartTime = Date.now();
+    
+    // 广播倒计时开始
+    this.notifyStateChange({
+      type: 'SHIKIGAMI_SELECT_START',
+      timeout: GAME_CONSTANTS.SHIKIGAMI_SELECT_TIMEOUT,
+    });
+    
+    // 设置超时自动随机选择
+    this.shikigamiSelectTimer = setTimeout(() => {
+      this.handleShikigamiSelectTimeout();
+    }, GAME_CONSTANTS.SHIKIGAMI_SELECT_TIMEOUT);
+  }
+  
+  /**
+   * 式神选择超时处理
+   */
+  private handleShikigamiSelectTimeout(): void {
+    console.log(`[MultiplayerGame] 式神选择超时，为未选择的玩家随机分配`);
+    
+    const allOptions = (this.state as any).shikigamiOptions || [];
+    
+    // 为未确认的玩家随机选择式神
+    for (let i = 0; i < this.state.players.length; i++) {
+      const player = this.state.players[i];
+      const selectedList = (player as any).selectedShikigami as ShikigamiCard[] || [];
+      
+      if (!player.isReady && selectedList.length < 2) {
+        // 获取该玩家的4个选项
+        const start = i * 4;
+        const playerOptions = allOptions.slice(start, start + 4);
+        
+        if (playerOptions.length > 0) {
+          // 过滤掉已选的，从剩余中随机选择
+          const remaining = playerOptions.filter(
+            (s: ShikigamiCard) => !selectedList.some(sel => sel.id === s.id)
+          );
+          const needed = 2 - selectedList.length;
+          const shuffled = shuffle(remaining);
+          const randomPicked = shuffled.slice(0, needed);
+          
+          // 合并已选和随机选的
+          const finalSelection = [...selectedList, ...randomPicked] as ShikigamiCard[];
+          player.shikigami = finalSelection;
+          player.isReady = true;
+          this.addLog(`⏰ ${player.name} 超时，自动分配式神：${finalSelection.map((s: ShikigamiCard) => s.name).join('、')}`);
+        }
+      }
+    }
+    
+    // 进入游戏阶段
+    this.startPlayingPhase();
   }
 
   // ============ 初始化 ============
+
+  /** 所有式神（洗牌后） */
+  private allShikigami: ShikigamiCard[] = [];
+  
+  /** 每个玩家的式神选项（playerId -> 4个式神） */
+  private playerShikigamiOptions: Map<string, ShikigamiCard[]> = new Map();
+  
+  /** 未被选择的式神（游戏开始时放入式神牌库） */
+  private unselectedShikigami: ShikigamiCard[] = [];
 
   /**
    * 创建初始游戏状态
@@ -138,8 +222,28 @@ export class MultiplayerGame {
     // 创建战场
     const field = this.createField();
     
-    // 为每个玩家分配式神选项
-    const shuffledShikigami = shuffle([...cardsData.shikigami]) as ShikigamiCard[];
+    // 洗牌所有式神（24个）
+    this.allShikigami = shuffle([...cardsData.shikigami]) as ShikigamiCard[];
+    
+    // 收集所有玩家的式神选项（用于全局状态广播）
+    const allShikigamiOptions: ShikigamiCard[] = [];
+    
+    // 为每个玩家分配4个式神选项
+    for (let i = 0; i < players.length; i++) {
+      const start = i * GAME_CONSTANTS.SHIKIGAMI_DRAW;
+      const end = start + GAME_CONSTANTS.SHIKIGAMI_DRAW;
+      const options = this.allShikigami.slice(start, end);
+      
+      // 存储到 Map 中
+      this.playerShikigamiOptions.set(players[i].id, options);
+      
+      // 添加到全局选项数组（顺序：玩家0的4个、玩家1的4个...）
+      allShikigamiOptions.push(...options);
+    }
+    
+    // 记录未分配的式神（超过玩家数*4的部分）
+    const usedCount = players.length * GAME_CONSTANTS.SHIKIGAMI_DRAW;
+    this.unselectedShikigami = this.allShikigami.slice(usedCount);
     
     return {
       roomId: this.roomId,
@@ -154,8 +258,10 @@ export class MultiplayerGame {
       lastUpdate: Date.now(),
       lastPlayerKilledYokai: true,
       pendingYokaiRefresh: false,
-      // 式神选取相关
-      shikigamiOptions: shuffledShikigami.slice(0, GAME_CONSTANTS.SHIKIGAMI_DRAW * players.length),
+      // 式神选择阶段的全局数据
+      shikigamiOptions: allShikigamiOptions,  // 所有式神选项（玩家0的4个 + 玩家1的4个 + ...）
+      shikigamiSelectTimeout: GAME_CONSTANTS.SHIKIGAMI_SELECT_TIMEOUT,  // 剩余时间（毫秒）
+      shikigamiSelectStartTime: Date.now(),  // 选择开始时间
     } as GameState;
   }
 
@@ -196,7 +302,7 @@ export class MultiplayerGame {
       totalCharm: 0,
       cardsPlayed: 0,
       isConnected: true,
-      isReady: true,
+      isReady: false,  // 式神选择阶段初始为 false，确认后才变 true
       shikigamiState: [],
       tempBuffs: [],
     };
@@ -383,7 +489,7 @@ export class MultiplayerGame {
   private startGame(): void {
     // 为每个玩家抓初始手牌
     for (const player of this.state.players) {
-      this.drawCards(player.id, GAME_CONSTANTS.STARTING_HAND_SIZE);
+      this.drawCards(player, GAME_CONSTANTS.STARTING_HAND_SIZE);
     }
     
     // 翻出第一个鬼王
@@ -474,7 +580,7 @@ export class MultiplayerGame {
     player.played = [];
     
     // 抓5张牌
-    this.drawCards(player.id, GAME_CONSTANTS.STARTING_HAND_SIZE);
+    this.drawCards(player, GAME_CONSTANTS.STARTING_HAND_SIZE);
     
     // 补充妖怪
     this.fillYokaiSlots();
@@ -517,6 +623,12 @@ export class MultiplayerGame {
    * 处理玩家动作
    */
   handleAction(playerId: string, action: GameAction): { success: boolean; error?: string } {
+    // 式神选择阶段的动作不需要检查回合（所有玩家同时选择）
+    const shikigamiActions = ['selectShikigami', 'deselectShikigami', 'confirmShikigamiSelection'];
+    if (shikigamiActions.includes(action.type)) {
+      return this.handleShikigamiAction(playerId, action);
+    }
+    
     // 验证是否轮到该玩家
     const currentPlayer = this.getCurrentPlayer();
     if (currentPlayer.id !== playerId) {
@@ -524,6 +636,7 @@ export class MultiplayerGame {
     }
     
     switch (action.type) {
+      // === 大写格式（兼容旧代码）===
       case 'PLAY_CARD':
         return this.handlePlayCard(playerId, action.cardInstanceId);
       
@@ -542,8 +655,427 @@ export class MultiplayerGame {
       case 'SELECT_SHIKIGAMI':
         return this.handleShikigamiSelection(playerId, action.selectedIds);
       
+      // === 小写格式（客户端使用）===
+      case 'playCard':
+        return this.handlePlayCard(playerId, action.cardInstanceId);
+      
+      case 'useShikigamiSkill':
+        return this.handleUseSkill(playerId, action.shikigamiId, action.targetId);
+      
+      case 'attackBoss':
+        return this.handleAttackBoss(playerId, action.damage);
+      
+      case 'allocateDamage':
+        return this.handleAllocateDamage(playerId, action.slotIndex);
+      
+      case 'retireYokai':
+        return this.handleRetireYokai(playerId, action.slotIndex);
+      
+      case 'banishYokai':
+        return this.handleBanishYokai(playerId, action.slotIndex);
+      
+      case 'decideYokaiRefresh':
+        return this.handleYokaiRefresh(action.refresh);
+      
+      case 'endTurn':
+        return this.handleEndTurn(playerId);
+      
+      case 'confirmShikigamiPhase':
+        return this.handleConfirmShikigamiPhase(playerId);
+      
       default:
-        return { success: false, error: '未知的操作类型' };
+        return { success: false, error: `未知的操作类型: ${(action as any).type}` };
+    }
+  }
+  
+  /**
+   * 处理式神选择阶段的动作
+   */
+  private handleShikigamiAction(playerId: string, action: GameAction): { success: boolean; error?: string } {
+    console.log(`[handleShikigamiAction] playerId=${playerId}, action=${JSON.stringify(action)}`);
+    console.log(`[handleShikigamiAction] 所有玩家IDs: ${this.state.players.map(p => p.id).join(', ')}`);
+    
+    if (this.state.phase !== 'shikigamiSelect') {
+      return { success: false, error: '当前不在式神选择阶段' };
+    }
+    
+    const player = this.getPlayer(playerId);
+    if (!player) {
+      console.log(`[handleShikigamiAction] 找不到玩家: ${playerId}`);
+      return { success: false, error: '玩家不存在' };
+    }
+    console.log(`[handleShikigamiAction] 找到玩家: ${player.name}, 已选式神数: ${player.selectedShikigami?.length || 0}`);
+    
+    switch (action.type) {
+      case 'selectShikigami': {
+        // 获取玩家的索引，计算该玩家可选的式神范围
+        const playerIndex = this.state.players.findIndex(p => p.id === playerId);
+        console.log(`[selectShikigami] playerId=${playerId}, playerIndex=${playerIndex}`);
+        if (playerIndex === -1) {
+          return { success: false, error: '找不到玩家' };
+        }
+        
+        // 计算该玩家可选的式神范围（每人4个）
+        const startIdx = playerIndex * 4;
+        const endIdx = startIdx + 4;
+        const allOptions = (this.state as any).shikigamiOptions || [];
+        const playerShikigamiOptions = allOptions.slice(startIdx, endIdx);
+        console.log(`[selectShikigami] allOptions.length=${allOptions.length}, startIdx=${startIdx}, playerOptions.length=${playerShikigamiOptions.length}`);
+        
+        // 检查式神是否在该玩家的可选范围内
+        const shikigami = playerShikigamiOptions.find((s: ShikigamiCard) => s.id === action.shikigamiId);
+        if (!shikigami) {
+          console.log(`[selectShikigami] 式神不在范围内: ${action.shikigamiId}`);
+          console.log(`[selectShikigami] 可选式神IDs: ${playerShikigamiOptions.map((s: ShikigamiCard) => s.id).join(', ')}`);
+          return { success: false, error: '该式神不在你的选择范围内' };
+        }
+        
+        // 初始化 selectedShikigami 数组（如果不存在）
+        if (!player.selectedShikigami) {
+          player.selectedShikigami = [];
+        }
+        const selectedList = player.selectedShikigami;
+        console.log(`[selectShikigami] 当前已选数量: ${selectedList.length}`);
+        
+        if (selectedList.length >= 2) {
+          return { success: false, error: '已选择2个式神' };
+        }
+        
+        // 检查是否已被该玩家选择
+        if (selectedList.some(s => s.id === action.shikigamiId)) {
+          return { success: false, error: '已选择该式神' };
+        }
+        
+        selectedList.push(shikigami as any);
+        this.addLog(`${player.name} 选择了式神 ${shikigami.name}`);
+        this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+        return { success: true };
+      }
+      
+      case 'deselectShikigami': {
+        // 初始化 selectedShikigami 数组（如果不存在）
+        if (!player.selectedShikigami) {
+          (player as any).selectedShikigami = [];
+        }
+        const selectedList = (player as any).selectedShikigami as ShikigamiCard[];
+        
+        const idx = selectedList.findIndex(s => s.id === action.shikigamiId);
+        if (idx === -1) {
+          return { success: false, error: '未选择该式神' };
+        }
+        const removed = selectedList.splice(idx, 1)[0];
+        this.addLog(`${player.name} 取消选择式神 ${removed.name}`);
+        this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+        return { success: true };
+      }
+      
+      case 'confirmShikigamiSelection': {
+        const selectedList = (player as any).selectedShikigami as ShikigamiCard[] || [];
+        if (selectedList.length < 2) {
+          return { success: false, error: '请选择2个式神' };
+        }
+        
+        // 将 selectedShikigami 复制到 shikigami（正式生效）
+        player.shikigami = [...selectedList];
+        player.isReady = true;
+        this.addLog(`${player.name} 确认了式神选择：${selectedList.map(s => s.name).join('、')}`);
+        
+        // 检查是否所有玩家都已确认
+        const allReady = this.state.players.every(p => p.isReady);
+        if (allReady) {
+          this.startPlayingPhase();
+        } else {
+          this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+        }
+        return { success: true };
+      }
+      
+      default:
+        return { success: false, error: '未知的式神操作' };
+    }
+  }
+  
+  /**
+   * 开始游戏阶段
+   */
+  private startPlayingPhase(): void {
+    // 清除式神选择倒计时
+    if (this.shikigamiSelectTimer) {
+      clearTimeout(this.shikigamiSelectTimer);
+      this.shikigamiSelectTimer = undefined;
+    }
+    
+    // 收集所有未被选择的式神
+    this.collectUnselectedShikigami();
+    
+    // 将未选择的式神洗牌后放入式神供应区
+    this.state.field.shikigamiSupply = shuffle(this.unselectedShikigami) as any;
+    this.addLog(`📚 ${this.unselectedShikigami.length} 个式神进入式神牌库`);
+    
+    // 清除玩家状态中的临时字段（选择阶段已结束）
+    for (const player of this.state.players) {
+      delete (player as any).shikigamiOptions;
+      delete (player as any).selectedShikigami;
+      player.isReady = false;
+    }
+    
+    this.state.phase = 'playing' as any;
+    this.state.turnPhase = 'ghostFire';
+    this.state.turnNumber = 1;
+    
+    // 为每个玩家抽初始手牌
+    for (const player of this.state.players) {
+      this.drawCards(player, 5);
+    }
+    
+    // 翻出第一个鬼王
+    this.revealBoss();
+    
+    // 填充妖怪槽位
+    this.fillYokaiSlots();
+    
+    this.addLog('=== 游戏开始 ===');
+    this.addLog(`第 ${this.state.turnNumber} 回合开始，${this.getCurrentPlayer().name} 的回合`);
+    
+    // 广播所有玩家的式神选择结果
+    const shikigamiSummary = this.state.players.map(p => ({
+      name: p.name,
+      shikigami: p.shikigami.map(s => s.name)
+    }));
+    
+    this.notifyStateChange({ 
+      type: 'GAME_START', 
+      state: this.state,
+      shikigamiSummary,
+    });
+  }
+  
+  /**
+   * 收集所有未被选择的式神
+   */
+  private collectUnselectedShikigami(): void {
+    // 获取所有玩家选择的式神ID
+    const selectedIds = new Set<string>();
+    for (const player of this.state.players) {
+      for (const shikigami of player.shikigami) {
+        selectedIds.add(shikigami.id);
+      }
+    }
+    
+    // 从每个玩家的选项中收集未被选择的式神
+    for (const [playerId, options] of this.playerShikigamiOptions) {
+      for (const shikigami of options) {
+        if (!selectedIds.has(shikigami.id)) {
+          this.unselectedShikigami.push(shikigami);
+        }
+      }
+    }
+  }
+  
+  /**
+   * 处理攻击鬼王
+   */
+  private handleAttackBoss(playerId: string, damage: number): { success: boolean; error?: string } {
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+    
+    if (this.state.turnPhase !== 'action') {
+      return { success: false, error: '当前阶段不能攻击' };
+    }
+    
+    if (!this.state.field.currentBoss) {
+      return { success: false, error: '没有鬼王可以攻击' };
+    }
+    
+    if (player.damage < damage) {
+      return { success: false, error: '伤害不足' };
+    }
+    
+    // 扣除伤害并对鬼王造成伤害
+    player.damage -= damage;
+    this.state.field.bossCurrentHp -= damage;
+    
+    this.addLog(`⚔️ ${player.name} 对鬼王造成 ${damage} 点伤害`);
+    
+    // 检查鬼王是否被击败
+    if (this.state.field.bossCurrentHp <= 0) {
+      this.handleBossDefeated(playerId);
+    }
+    
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+  
+  /**
+   * 处理分配伤害到妖怪
+   */
+  private handleAllocateDamage(playerId: string, slotIndex: number): { success: boolean; error?: string } {
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+    
+    if (this.state.turnPhase !== 'action') {
+      return { success: false, error: '当前阶段不能攻击' };
+    }
+    
+    const yokai = this.state.field.yokaiSlots[slotIndex];
+    if (!yokai) {
+      return { success: false, error: '该位置没有妖怪' };
+    }
+    
+    if (player.damage <= 0) {
+      return { success: false, error: '没有伤害可分配' };
+    }
+    
+    // 计算造成的伤害（最多等于妖怪当前HP）
+    const currentHp = yokai.hp || 0;
+    const damageDealt = Math.min(player.damage, currentHp);
+    
+    player.damage -= damageDealt;
+    yokai.hp = currentHp - damageDealt;
+    
+    this.addLog(`⚔️ ${player.name} 对 ${yokai.name} 造成 ${damageDealt} 点伤害`);
+    
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+  
+  /**
+   * 处理退治妖怪（放入弃牌堆）
+   */
+  private handleRetireYokai(playerId: string, slotIndex: number): { success: boolean; error?: string } {
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+    
+    const yokai = this.state.field.yokaiSlots[slotIndex];
+    if (!yokai) {
+      return { success: false, error: '该位置没有妖怪' };
+    }
+    
+    if ((yokai.hp || 0) > 0) {
+      return { success: false, error: '妖怪还没有被击杀' };
+    }
+    
+    // 移到弃牌堆
+    player.discard.push(yokai);
+    this.state.field.yokaiSlots[slotIndex] = null;
+    
+    // 更新声誉
+    if (yokai.charm) {
+      player.totalCharm += yokai.charm;
+    }
+    
+    this.addLog(`📥 ${player.name} 退治了 ${yokai.name}（+${yokai.charm || 0} 声誉）`);
+    
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+  
+  /**
+   * 处理超度妖怪（移出游戏）
+   */
+  private handleBanishYokai(playerId: string, slotIndex: number): { success: boolean; error?: string } {
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+    
+    const yokai = this.state.field.yokaiSlots[slotIndex];
+    if (!yokai) {
+      return { success: false, error: '该位置没有妖怪' };
+    }
+    
+    if ((yokai.hp || 0) > 0) {
+      return { success: false, error: '妖怪还没有被击杀' };
+    }
+    
+    // 移到超度区
+    this.state.field.exileZone.push(yokai);
+    this.state.field.yokaiSlots[slotIndex] = null;
+    
+    this.addLog(`🌟 ${player.name} 超度了 ${yokai.name}`);
+    
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+  
+  /**
+   * 处理确认式神阶段
+   */
+  private handleConfirmShikigamiPhase(playerId: string): { success: boolean; error?: string } {
+    if (this.state.turnPhase !== 'shikigami') {
+      return { success: false, error: '当前不在式神阶段' };
+    }
+    
+    // 进入行动阶段
+    this.state.turnPhase = 'action';
+    this.addLog(`${this.getCurrentPlayer().name} 进入行动阶段`);
+    
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+  
+  /**
+   * 处理鬼王被击败
+   */
+  private handleBossDefeated(playerId: string): void {
+    const player = this.getPlayer(playerId);
+    const boss = this.state.field.currentBoss;
+    if (!player || !boss) return;
+    
+    // 加声誉
+    if (boss.charm) {
+      player.totalCharm += boss.charm;
+    }
+    
+    this.addLog(`👑 ${player.name} 击败了鬼王 ${boss.name}（+${boss.charm || 0} 声誉）`);
+    
+    // 清除当前鬼王
+    this.state.field.currentBoss = null;
+    
+    // 翻出下一个鬼王
+    this.revealBoss();
+  }
+  
+  /**
+   * 翻出鬼王
+   */
+  private revealBoss(): void {
+    if (this.state.field.bossDeck.length === 0) {
+      this.addLog('所有鬼王都已被击败！游戏结束');
+      this.state.phase = 'ended' as any;
+      return;
+    }
+    
+    const boss = this.state.field.bossDeck.shift()!;
+    this.state.field.currentBoss = boss;
+    this.state.field.bossCurrentHp = boss.hp;
+    
+    this.addLog(`👹 鬼王 ${boss.name} 登场！（HP: ${boss.hp}）`);
+  }
+  
+  /**
+   * 填充妖怪槽位
+   */
+  private fillYokaiSlots(): void {
+    for (let i = 0; i < this.state.field.yokaiSlots.length; i++) {
+      if (!this.state.field.yokaiSlots[i] && this.state.field.yokaiDeck.length > 0) {
+        const yokai = this.state.field.yokaiDeck.shift()!;
+        this.state.field.yokaiSlots[i] = yokai;
+      }
+    }
+  }
+  
+  /**
+   * 抽牌
+   */
+  private drawCards(player: PlayerState, count: number): void {
+    for (let i = 0; i < count; i++) {
+      if (player.deck.length === 0) {
+        // 洗入弃牌堆
+        if (player.discard.length === 0) break;
+        player.deck = [...player.discard].sort(() => Math.random() - 0.5);
+        player.discard = [];
+      }
+      const card = player.deck.shift();
+      if (card) player.hand.push(card);
     }
   }
 
@@ -831,62 +1363,6 @@ export class MultiplayerGame {
   }
 
   /**
-   * 抓牌
-   */
-  private drawCards(playerId: string, count: number): void {
-    const player = this.getPlayer(playerId);
-    if (!player) return;
-    
-    for (let i = 0; i < count; i++) {
-      // 检查牌库是否为空
-      if (player.deck.length === 0) {
-        // 洗入弃牌堆
-        if (player.discard.length === 0) break;
-        player.deck = shuffle(player.discard);
-        player.discard = [];
-        this.addLog(`🔄 ${player.name} 洗牌`);
-      }
-      
-      const card = player.deck.pop();
-      if (card) {
-        player.hand.push(card);
-      }
-    }
-  }
-
-  /**
-   * 翻出鬼王
-   */
-  private revealBoss(): void {
-    const boss = this.state.field.bossDeck.pop();
-    if (!boss) return;
-    
-    this.state.field.currentBoss = boss;
-    this.state.field.bossCurrentHp = boss.hp || 10;
-    
-    this.addLog(`👹 鬼王登场：${boss.name}（HP: ${this.state.field.bossCurrentHp}）`);
-    
-    this.notifyStateChange({
-      type: 'BOSS_ARRIVAL',
-      boss,
-    });
-  }
-
-  /**
-   * 填充妖怪槽位
-   */
-  private fillYokaiSlots(): void {
-    for (let i = 0; i < GAME_CONSTANTS.YOKAI_SLOTS; i++) {
-      if (!this.state.field.yokaiSlots[i] && this.state.field.yokaiDeck.length > 0) {
-        const yokai = this.state.field.yokaiDeck.pop();
-        if (yokai) {
-          this.state.field.yokaiSlots[i] = yokai;
-        }
-      }
-    }
-  }
-
-  /**
    * 添加日志
    */
   private addLog(message: string): void {
@@ -951,6 +1427,35 @@ export class MultiplayerGame {
    */
   getState(): GameState {
     return this.state;
+  }
+  
+  /**
+   * 获取玩家视角的游戏状态（式神选择阶段使用）
+   * 和单人模式一样，使用 state.shikigamiOptions 和 state.selectedShikigami
+   */
+  getPlayerView(playerId: string): GameState {
+    // 复制基础状态
+    const viewState = JSON.parse(JSON.stringify(this.state)) as GameState;
+    
+    // 获取该玩家的式神选项
+    const playerOptions = this.playerShikigamiOptions.get(playerId) || [];
+    
+    // 设置单人模式风格的字段（客户端读取这些字段）
+    (viewState as any).shikigamiOptions = playerOptions;
+    (viewState as any).selectedShikigami = [];
+    
+    // 找到当前玩家并获取已选择的式神
+    const playerIndex = viewState.players.findIndex(p => p.id === playerId);
+    if (playerIndex >= 0) {
+      (viewState as any).selectedShikigami = viewState.players[playerIndex].shikigami || [];
+    }
+    
+    // 清除其他玩家的 shikigamiOptions（不泄露给当前玩家）
+    for (const player of viewState.players) {
+      delete (player as any).shikigamiOptions;
+    }
+    
+    return viewState;
   }
 
   /**

@@ -117,6 +117,7 @@ export interface OnmyojiCard {
 /** 游戏日志条目 */
 export interface GameLogEntry {
   type: string;
+  logSeq?: number;
   playerId?: string;
   playerName?: string;
   cardName?: string;
@@ -166,6 +167,9 @@ export interface PlayerState {
   cardsPlayed: number;
   isConnected: boolean;
   isReady: boolean;
+  /** 是否为 AI 座位 */
+  isAI?: boolean;
+  aiStrategy?: 'L1' | 'L2' | 'L3' | 'L4';
   shikigamiState: ShikigamiState[];
   tempBuffs: TempBuff[];
   // 式神选择阶段的临时字段
@@ -213,6 +217,7 @@ export interface GameState {
   lastUpdate: number;
   lastPlayerKilledYokai?: boolean;
   pendingYokaiRefresh?: boolean;
+  turnHadKill?: boolean;
   // 式神选择阶段倒计时
   shikigamiSelectTimeout?: number;
   shikigamiSelectStartTime?: number;

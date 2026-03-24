@@ -51,7 +51,7 @@ export class ConfirmSession {
   private cancelledBy: string | null = null;
   
   /** 确认超时时间（秒） */
-  private readonly CONFIRM_TIMEOUT = 15;
+  private readonly CONFIRM_TIMEOUT = 10;
   
   constructor(players: ConfirmPlayer[]) {
     this.sessionId = `confirm_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;

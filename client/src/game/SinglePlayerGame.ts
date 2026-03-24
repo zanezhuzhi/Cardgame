@@ -1019,7 +1019,9 @@ export class SinglePlayerGame {
     console.log('[ENGINE] discard instanceIds:', player.discard.map(c => c.instanceId));
     const yokaiIndex = player.discard.findIndex(c => c.instanceId === yokaiInstanceId);
     console.log('[ENGINE] yokaiIndex:', yokaiIndex);
-    if (yokaiIndex < 0 || (player.discard[yokaiIndex].hp || 0) < 2) {
+    const yk = yokaiIndex >= 0 ? player.discard[yokaiIndex] : null;
+    const ykLife = yk ? (yk.maxHp ?? yk.hp ?? 0) : 0;
+    if (yokaiIndex < 0 || ykLife < 2) {
       this.addLog(`❌ 目标妖怪不符合条件 (index: ${yokaiIndex})`);
       this.notifyChange();
       return false;
@@ -1072,7 +1074,9 @@ export class SinglePlayerGame {
     
     // 找到弃牌堆中的目标妖怪
     const yokaiIndex = player.discard.findIndex(c => c.instanceId === yokaiInstanceId);
-    if (yokaiIndex < 0 || (player.discard[yokaiIndex].hp || 0) < 4) {
+    const yk2 = yokaiIndex >= 0 ? player.discard[yokaiIndex] : null;
+    const ykLife2 = yk2 ? (yk2.maxHp ?? yk2.hp ?? 0) : 0;
+    if (yokaiIndex < 0 || ykLife2 < 4) {
       this.addLog(`❌ 目标妖怪不符合条件`);
       this.notifyChange();
       return false;
@@ -1291,7 +1295,13 @@ export class SinglePlayerGame {
         // 放到牌库顶
         player.deck.push(yokai);
       } else {
-        // 妖怪进入弃牌堆（成为御魂）
+        // 妖怪进入弃牌堆（成为御魂）：与多人模式一致，展示卡面生命而非场上剩余 0
+        const printed = yokai.maxHp ?? yokai.hp ?? 0;
+        if (printed > 0) {
+          yokai.maxHp = printed;
+          yokai.hp = printed;
+        }
+        delete (yokai as any).currentHp;
         player.discard.push(yokai);
       }
     }
@@ -1552,11 +1562,14 @@ export class SinglePlayerGame {
     return this.state.players[0]!;
   }
 
+  private nextLogSeq = 1;
+
   private addLog(message: string): void {
     this.state.log.push({
       type: 'game_start',
       message,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      logSeq: this.nextLogSeq++,
     });
   }
 

@@ -596,7 +596,7 @@ function startMatching() {
     
     // 10秒后自动完成匹配（服务端会处理AI填充）
     // 这里只是UI显示，实际逻辑由服务端控制
-    if (matchingTime.value >= 15) {
+    if (matchingTime.value >= 10) {
       // 超时处理（如果服务端没响应）
       console.warn('[Lobby] 匹配超时，等待服务端响应');
     }
@@ -642,7 +642,7 @@ function startConfirmPhase(data: {
   isInConfirmPhase.value = true;
   confirmSessionId.value = data.sessionId;
   confirmPlayers.value = data.players;
-  confirmCountdown.value = data.timeout || 15;
+  confirmCountdown.value = data.timeout || 10;
   hasConfirmed.value = false;
   
   // 开始倒计时
@@ -662,7 +662,7 @@ function stopConfirmPhase() {
   isInConfirmPhase.value = false;
   confirmSessionId.value = '';
   confirmPlayers.value = [];
-  confirmCountdown.value = 15;
+  confirmCountdown.value = 10;
   hasConfirmed.value = false;
 }
 
@@ -676,7 +676,7 @@ function confirmMatch() {
 
 function rejectMatch() {
   console.log('[Lobby] 拒绝匹配');
-  socketClient.send('match:reject', { sessionId: confirmSessionId.value });
+  socketClient.send('match:decline', { sessionId: confirmSessionId.value });
   stopConfirmPhase();
 }
 
@@ -781,6 +781,17 @@ onMounted(() => {
   socketClient.on('match:cancelled', () => {
     console.log('[Lobby] 匹配已取消');
     stopMatchingTimer();
+  });
+
+  // 服务端同步的匹配队列状态（策划 match:status）
+  socketClient.on('match:status', (data: { phase?: string; yourWaitSeconds?: number; queueSize?: number }) => {
+    if (data.phase === 'MATCHING' && typeof data.yourWaitSeconds === 'number') {
+      matchingTime.value = data.yourWaitSeconds;
+    }
+  });
+
+  socketClient.on('match:ready', (data: { sessionId?: string; roomId?: string }) => {
+    console.log('[Lobby] 全员确认，即将开局', data);
   });
   
   // 如果已经连接（比如从其他页面返回），立即获取在线人数

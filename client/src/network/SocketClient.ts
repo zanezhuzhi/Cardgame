@@ -577,6 +577,48 @@ class SocketClient {
       }
       this.emit('playerReconnected', playerId);
     });
+
+    // 在线人数更新（大厅显示）
+    this.socket.on('onlineCount' as any, (count: number) => {
+      this.emit('onlineCount', count);
+    });
+
+    // ===== 匹配相关事件透传 =====
+    this.socket.on('match:queued' as any, (data: any) => {
+      this.emit('match:queued', data);
+    });
+
+    this.socket.on('match:confirmPhase' as any, (data: any) => {
+      this.emit('match:confirmPhase', data);
+    });
+
+    this.socket.on('match:confirmUpdate' as any, (data: any) => {
+      this.emit('match:confirmUpdate', data);
+    });
+
+    this.socket.on('match:confirmFailed' as any, (data: any) => {
+      this.emit('match:confirmFailed', data);
+    });
+
+    this.socket.on('match:found' as any, (data: any) => {
+      this.emit('match:found', data);
+    });
+
+    this.socket.on('match:failed' as any, (data: any) => {
+      this.emit('match:failed', data);
+    });
+
+    this.socket.on('match:cancelled' as any, (data: any) => {
+      this.emit('match:cancelled', data);
+    });
+
+    this.socket.on('match:status' as any, (data: any) => {
+      this.emit('match:status', data);
+    });
+
+    this.socket.on('match:ready' as any, (data: any) => {
+      this.emit('match:ready', data);
+    });
   }
   
   /**

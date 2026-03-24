@@ -4,9 +4,9 @@
  * 
  * 负责AI玩家的行为逻辑
  * 
- * L1 策略（基础版）：
- * 1. 式神选择：随机选择前2个式神
- * 2. 回合行动：随机出牌 -> 随机退治妖怪 -> 结束回合
+ * L1 策略（基础版，对齐策划文档）：
+ * 1. 式神选择：固定选展示顺序前 2 个
+ * 2. 回合行动：随机出牌 -> 可击杀则攻击妖怪 -> 结束回合
  */
 
 import type { GameState, PlayerState, CardInstance, FieldState } from '@shared/types/game';
@@ -31,31 +31,29 @@ export interface AIDecision {
   salvage?: boolean;
 }
 
-/** AI 名称池 */
-const AI_NAMES = [
-  '百目鬼',
-  '鸦天狗',
-  '雪女',
-  '酒吞童子',
-  '茨木童子',
-  '妖狐',
-  '座敷童子',
-  '荒川之主',
-  '大天狗',
-  '般若',
-];
-
 /**
- * 生成随机AI玩家配置
+ * 生成匹配用 AI 配置（昵称：机器人1、机器人2…）
  */
 export function generateAIPlayer(index: number): AIPlayerConfig {
-  const name = AI_NAMES[index % AI_NAMES.length];
   return {
-    id: `ai_${Date.now()}_${index}`,
-    name: `[AI] ${name}`,
+    id: `ai_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`,
+    name: `机器人${index + 1}`,
     level: 'L1',
-    actionDelay: 800 + Math.random() * 400, // 800-1200ms
+    // 策划文档 6.2：每次动作间隔 random(1,2) 秒
+    actionDelay: 1000 + Math.random() * 1000,
   };
+}
+
+/**
+ * 未在 AI 管理器注册时的临时 L1（如旧房间数据）
+ */
+export function createEphemeralL1Ai(id: string, name: string): AIPlayer {
+  return new AIPlayer({
+    id,
+    name,
+    level: 'L1',
+    actionDelay: 1000 + Math.random() * 1000,
+  });
 }
 
 /**
@@ -70,16 +68,9 @@ export class AIPlayer {
   }
   
   /**
-   * 式神选择 (L1: 随机选择前2个)
+   * 式神选择 (L1: 固定选列表前 2 张，与文档 6.1 一致)
    */
   selectShikigami(availableShikigami: CardInstance[]): string[] {
-    if (this.config.level === 'L1') {
-      // L1: 随机打乱后选前2个
-      const shuffled = [...availableShikigami].sort(() => Math.random() - 0.5);
-      return shuffled.slice(0, 2).map(s => s.cardId);
-    }
-    
-    // TODO: L2/L3 策略
     return availableShikigami.slice(0, 2).map(s => s.cardId);
   }
   
@@ -124,11 +115,10 @@ export class AIPlayer {
   }
   
   /**
-   * 超度选择 (L1: 随机)
+   * 超度选择 (L1: 默认不超度，文档 6.2)
    */
   decideSalvage(): boolean {
-    // L1: 50% 概率超度
-    return Math.random() > 0.5;
+    return false;
   }
   
   /**
@@ -138,20 +128,19 @@ export class AIPlayer {
     // L1: 随机选择
     return validTargets[Math.floor(Math.random() * validTargets.length)];
   }
+
+  /** 当前伤害下可一次分配击杀的游荡妖怪槽位（供服务端 AI 调度，允许溢出） */
+  getKillableSlotIndices(player: PlayerState, field: FieldState): number[] {
+    return this.getKillableYokai(player, field);
+  }
   
   /**
-   * 获取可打出的手牌
+   * 获取可尝试打出的手牌（具体合法性由服务端校验；排除不可打出的类型）
    */
-  private getPlayableCards(player: PlayerState, field: FieldState): CardInstance[] {
-    // 简单判断：鬼火足够的牌
-    return player.hand.filter(card => {
-      // 御魂牌需要1点鬼火
-      if (card.cardType === 'spell') {
-        return player.ghostFire >= 1;
-      }
-      // 其他牌暂时都可以打
-      return true;
-    });
+  private getPlayableCards(player: PlayerState, _field: FieldState): CardInstance[] {
+    return player.hand.filter(
+      c => c.cardType !== 'token' && c.cardType !== 'penalty'
+    );
   }
   
   /**
@@ -159,14 +148,18 @@ export class AIPlayer {
    */
   private getKillableYokai(player: PlayerState, field: FieldState): number[] {
     const result: number[] = [];
-    
+    const d = player.damage;
+    if (d <= 0) return result;
+
     for (let i = 0; i < field.yokaiSlots.length; i++) {
       const yokai = field.yokaiSlots[i];
-      if (yokai && yokai.hp <= player.damage) {
+      const hp = yokai?.hp ?? 0;
+      // 仍需存活且本回合累计伤害足以在单次分配中击杀（允许溢出浪费）
+      if (yokai && hp > 0 && hp <= d) {
         result.push(i);
       }
     }
-    
+
     return result;
   }
   

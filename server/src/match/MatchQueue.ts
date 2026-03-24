@@ -191,9 +191,9 @@ export class MatchQueue {
     const matchedPlayers = this.queue.splice(0, this.MAX_PLAYERS);
     
     // 计算需要的AI数量
-    // 规则：至少3人，最多6人，用AI填充
+    // 规则：优先真人，空位用AI填充，凑满6人
     const humanCount = matchedPlayers.length;
-    const aiCount = Math.max(0, this.MIN_PLAYERS - humanCount);
+    const aiCount = Math.max(0, this.MAX_PLAYERS - humanCount);
     const totalPlayers = humanCount + aiCount;
     
     console.log(`[MatchQueue] 匹配完成: ${humanCount} 真人 + ${aiCount} AI = ${totalPlayers} 人`);

@@ -49,6 +49,10 @@ export interface PlayerState {
   // 状态
   isConnected: boolean;
   isReady: boolean;
+  /** 是否为 AI（匹配/机器人座位） */
+  isAI?: boolean;
+  /** AI 策略层级 */
+  aiStrategy?: 'L1' | 'L2' | 'L3' | 'L4';
   
   // 式神状态
   shikigamiState: ShikigamiState[];
@@ -133,8 +137,10 @@ export interface GameState {
   // ====== 妖怪刷新规则 ======
   /** 上一玩家是否击杀了妖怪（首回合默认true，不触发刷新选项） */
   lastPlayerKilledYokai?: boolean;
-  /** 是否等待当前玩家决定刷新妖怪 */
+  /** 是否等待当前玩家决定刷新妖怪（旧版；多人已改为自动强者离场） */
   pendingYokaiRefresh?: boolean;
+  /** 当前回合是否已达成「击杀」（游荡妖怪或鬼王生命曾扣至0；用于结算上一回合击杀判定） */
+  turnHadKill?: boolean;
   
   // ====== 玩家选择等待 ======
   /** 等待玩家做出选择（御魂效果、式神技能等） */
@@ -188,6 +194,8 @@ export type LogVisibility = 'public' | 'private';
 
 export interface GameLogEntry {
   type: GameLogType;
+  /** 单调递增序号，保证 v-for key 唯一（避免同 ms 内多条日志与 timestamp 碰撞） */
+  logSeq?: number;
   playerId?: string;
   playerName?: string;
   cardName?: string;

@@ -299,20 +299,36 @@ export class GameManager {
     
     this.addLog('ghost_fire', `${player.name} 获得1点鬼火（当前:${player.ghostFire}）`, player.id);
 
-    // ====== 妖怪刷新规则 ======
-    // 如果上一玩家未击杀任何妖怪，当前玩家可以选择刷新场上所有妖怪
+    // ====== 强者离场（与多人规则一致）：自动移走 HP 最高的 3 张并补满 ======
     if (this.state.lastPlayerKilledYokai === false) {
-      this.state.pendingYokaiRefresh = true;
-      this.addLog('phase_change', `上一玩家未击败妖怪，${player.name} 可选择刷新场上妖怪`, player.id);
+      this.state.pendingYokaiRefresh = false;
+      this.addLog('phase_change', '由于上一名玩家未击杀任何妖怪，最强的3名妖怪走开了。', player.id);
+      this.applyStrongestThreeYokaiLeaveSp();
       this.updateState();
-      // 等待玩家决定，不自动进入下一阶段
-      return;
     }
 
     this.updateState();
     
     // 自动进入下一阶段
     this.enterShikigamiPhase();
+  }
+
+  /** 牌库使用 pop 补充：牌库底为数组前端，用 unshift 垫底 */
+  private applyStrongestThreeYokaiLeaveSp(): void {
+    const slots = this.state.field.yokaiSlots;
+    const entries: { index: number; card: CardInstance; hp: number }[] = [];
+    for (let i = 0; i < slots.length; i++) {
+      const c = slots[i];
+      if (c) entries.push({ index: i, card: c, hp: c.hp || 0 });
+    }
+    if (entries.length === 0) return;
+    entries.sort((a, b) => (b.hp !== a.hp ? b.hp - a.hp : b.index - a.index));
+    const take = Math.min(3, entries.length);
+    for (const { index, card } of entries.slice(0, take)) {
+      this.state.field.yokaiSlots[index] = null;
+      this.state.field.yokaiDeck.unshift(card);
+    }
+    this.fillYokaiSlots();
   }
 
   /**
@@ -645,6 +661,8 @@ export class GameManager {
     ].reduce((sum, c) => sum + (c.charm || 0), 0);
 
     this.addLog('defeat_boss', `${player.name} 击败了鬼王 ${boss.name}！`, player.id);
+
+    this.currentTurnKilledYokai = true;
 
     // 清除当前鬼王
     this.state.field.currentBoss = null;

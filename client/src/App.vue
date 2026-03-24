@@ -6,7 +6,7 @@
         <h1>🎴 御魂传说</h1>
         <h2>多人对战模式</h2>
         <p class="tips">正在加载游戏状态...</p>
-        <button @click="router.push('/')" class="btn">返回大厅</button>
+        <button @click="returnToLobby" class="btn">返回大厅</button>
       </div>
     </div>
     
@@ -190,7 +190,7 @@
         <div class="info-side-panel">
           <div class="info-box-wrapper">
             <div class="info-box" ref="logRef" @click="handleLogLinkClick" @scroll="handleLogScroll">
-              <div v-for="(l,i) in logs" :key="i" class="info-line" :class="{ 'chat-line': l.type === 'chat' }" v-html="renderLogMessage(l)"></div>
+              <div v-for="(l,i) in logs" :key="logEntryRowKey(l, i)" class="info-line" :class="{ 'chat-line': l.type === 'chat' }" v-html="renderLogMessage(l, i)"></div>
             </div>
             <button v-if="hasNewMessage" class="new-message-btn" @click="scrollToBottom">
               有新消息 ↓
@@ -305,10 +305,10 @@
                 <div class="c-name">{{c.name}}</div>
                 <div class="c-stat" v-if="c.cardType === 'spell'">⚔️{{c.damage||1}}</div>
                 <div class="c-stat" v-else-if="c.cardType === 'yokai' || c.cardType === 'token'">
+                  <span class="c-hp-face">❤️{{ yokaiFaceOrPrintedHp(c) }}</span>
                   <template v-if="getHandCardEffects(c).length">
                     <span v-for="(eff, i) in getHandCardEffects(c)" :key="i">{{eff.icon}}{{eff.value}}</span>
                   </template>
-                  <template v-else>🎁</template>
                 </div>
                 <div class="c-stat" v-else-if="c.cardType === 'penalty'">💔{{c.charm||0}}</div>
                 <div class="c-stat" v-else>—</div>
@@ -398,7 +398,13 @@
             <div class="salvage-card-info">
               <div class="salvage-card-name">{{salvageChoiceModal.card?.name}}</div>
               <div class="salvage-card-stats">
-                ❤️{{salvageChoiceModal.card?.hp}} 
+                <template v-if="salvageChoiceModal.card?.cardType === 'yokai' || salvageChoiceModal.card?.cardType === 'token'">
+                  ❤️{{ yokaiFaceOrPrintedHp(salvageChoiceModal.card!) }}
+                </template>
+                <template v-else-if="salvageChoiceModal.card?.cardType === 'spell'">
+                  ⚔️{{ salvageChoiceModal.card?.damage || 1 }}
+                </template>
+                <template v-else>❤️{{ salvageChoiceModal.card?.hp ?? 0 }}</template>
                 <span v-if="salvageChoiceModal.card?.charm">👑{{salvageChoiceModal.card?.charm}}</span>
               </div>
               <div class="salvage-card-effect">{{salvageChoiceModal.card?.effect}}</div>
@@ -424,7 +430,7 @@
               <img v-if="getCardImage(y)" :src="getCardImage(y)" class="yokai-target-img" />
               <div class="yokai-target-info">
                 <div class="yokai-target-name">{{y.name}}</div>
-                <div class="yokai-target-stat">❤️{{y.hp}}</div>
+                <div class="yokai-target-stat">❤️{{ getYokaiCurrentHp(y) }}</div>
               </div>
             </div>
           </div>
@@ -446,7 +452,11 @@
               <img v-if="getCardImage(c)" :src="getCardImage(c)" class="card-art" />
               <div class="card-info">
                 <div class="c-name">{{c.name}}</div>
-                <div class="c-stat">❤️{{c.hp}}</div>
+                <div class="c-stat">
+                  <template v-if="c.cardType === 'spell'">⚔️{{c.damage||1}}</template>
+                  <template v-else-if="c.cardType === 'yokai' || c.cardType === 'token'">❤️{{ yokaiFaceOrPrintedHp(c) }}</template>
+                  <template v-else>❤️{{c.hp ?? 0}}</template>
+                </div>
               </div>
               <div class="select-check" v-if="cardSelectModal.selected.includes(c.instanceId)">✓</div>
             </div>
@@ -472,7 +482,7 @@
             <div v-for="c in targetModal.candidates" :key="c.instanceId"
                  class="target-card" @click="resolveTarget(c.instanceId)">
               <div class="c-name">{{c.name}}</div>
-              <div class="c-stat">❤️{{c.hp}}</div>
+              <div class="c-stat">❤️{{ getYokaiCurrentHp(c) }}</div>
             </div>
           </div>
         </div>
@@ -494,6 +504,12 @@
                 <div class="c-name">{{c.name}}</div>
                 <div class="c-stat">
                   <template v-if="c.cardType === 'spell' || c.type === 'spell'">⚔️{{c.damage||1}}</template>
+                  <template v-else-if="c.cardType === 'yokai' || c.cardType === 'token' || c.type === 'yokai'">
+                    <span class="c-hp-face">❤️{{ yokaiFaceOrPrintedHp(c) }}</span>
+                    <template v-if="getHandCardEffects(c).length">
+                      <span v-for="(eff, i) in getHandCardEffects(c)" :key="i">{{eff.icon}}{{eff.value}}</span>
+                    </template>
+                  </template>
                   <template v-else-if="getHandCardEffects(c).length">
                     <span v-for="(eff, i) in getHandCardEffects(c)" :key="i">{{eff.icon}}{{eff.value}}</span>
                   </template>
@@ -524,6 +540,12 @@
                 <div class="c-name">{{c.name}}</div>
                 <div class="c-stat">
                   <template v-if="c.cardType === 'spell'">⚔️{{c.damage||1}}</template>
+                  <template v-else-if="c.cardType === 'yokai' || c.cardType === 'token'">
+                    <span class="c-hp-face">❤️{{ yokaiFaceOrPrintedHp(c) }}</span>
+                    <template v-if="getHandCardEffects(c).length">
+                      <span v-for="(eff, i) in getHandCardEffects(c)" :key="i">{{eff.icon}}{{eff.value}}</span>
+                    </template>
+                  </template>
                   <template v-else-if="getHandCardEffects(c).length">
                     <span v-for="(eff, i) in getHandCardEffects(c)" :key="i">{{eff.icon}}{{eff.value}}</span>
                   </template>
@@ -554,6 +576,12 @@
                 <div class="c-name">{{c.name}}</div>
                 <div class="c-stat">
                   <template v-if="c.cardType === 'spell'">⚔️{{c.damage||1}}</template>
+                  <template v-else-if="c.cardType === 'yokai' || c.cardType === 'token'">
+                    <span class="c-hp-face">❤️{{ yokaiFaceOrPrintedHp(c) }}</span>
+                    <template v-if="getHandCardEffects(c).length">
+                      <span v-for="(eff, i) in getHandCardEffects(c)" :key="i">{{eff.icon}}{{eff.value}}</span>
+                    </template>
+                  </template>
                   <template v-else-if="getHandCardEffects(c).length">
                     <span v-for="(eff, i) in getHandCardEffects(c)" :key="i">{{eff.icon}}{{eff.value}}</span>
                   </template>
@@ -729,7 +757,7 @@
                    class="ref-card-img" />
               <div class="ref-card-name-overlay">{{logRefPopup.ref.name}}</div>
               <div class="ref-card-stats-overlay">
-                <span v-if="logRefPopup.ref.data.hp">❤️{{logRefPopup.ref.data.hp}}/{{logRefPopup.ref.data.hp}}</span>
+                <span v-if="yokaiFaceOrPrintedHp(logRefPopup.ref.data)">❤️{{ yokaiFaceOrPrintedHp(logRefPopup.ref.data) }}</span>
                 <span v-if="logRefPopup.ref.data.charm"> 👑{{logRefPopup.ref.data.charm}}</span>
               </div>
             </div>
@@ -889,6 +917,17 @@ onMounted(() => {
     console.log('[App] 多人模式：检测到游戏状态，直接进入游戏')
   }
 })
+
+async function returnToLobby() {
+  if (isMultiMode.value && socketClient.currentRoom.value) {
+    try {
+      await socketClient.leaveRoom()
+    } catch (error) {
+      console.warn('[App] 返回大厅前离开房间失败:', error)
+    }
+  }
+  router.push('/')
+}
 
 // 多人模式：监听游戏状态同步
 watch(() => socketClient.gameState.value, (newState) => {
@@ -1151,6 +1190,8 @@ const player = computed(() => {
 const isMyTurn = computed(() => {
   if (!state.value) return false
   if (isMultiMode.value) {
+    // 式神选择阶段全员同步选人，不进入回合制行动
+    if (state.value.phase === 'shikigamiSelect') return false
     return state.value.currentPlayerIndex === myPlayerIndex.value
   }
   return true // 单人模式始终是自己的回合
@@ -1158,6 +1199,18 @@ const isMyTurn = computed(() => {
 const yokai = computed(() => state.value?.field.yokaiSlots || [])
 const boss = computed(() => state.value?.field.currentBoss)
 const logs = computed(() => (state.value?.log || []).slice(-300))
+
+/** 客户端直接向 log 写入时使用（与服务器 logSeq 区分区间） */
+let clientDirectLogSeq = 1_000_000_000
+function takeClientDirectLogSeq(): number {
+  return clientDirectLogSeq++
+}
+
+/** v-for 行 key：禁止仅用 timestamp（同毫秒内多条日志会导致 Vue 复用错乱、出现多行相同内容） */
+function logEntryRowKey(l: any, i: number): string | number {
+  if (l.logSeq != null) return l.logSeq
+  return `i${i}-t${l.timestamp}-m${String(l.message || '').slice(0, 24)}`
+}
 
 // ====== 智能滚动系统 ======
 const hasNewMessage = ref(false)
@@ -1306,6 +1359,7 @@ function handleLocalGMCommand(command: string) {
       type: 'chat' as any,
       message: `⚙️ [GM] ${resultMsg}`,
       timestamp: Date.now(),
+      logSeq: takeClientDirectLogSeq(),
       visibility: 'private',
       playerId: player.value?.id,
     })
@@ -1319,6 +1373,7 @@ function addLocalChatLog(content: string) {
       type: 'chat' as any,
       message: `💬 [${pName}] ${content}`,
       timestamp: Date.now(),
+      logSeq: takeClientDirectLogSeq(),
       visibility: 'public',
       chatData: {
         senderId: player.value?.id || '',
@@ -1372,6 +1427,7 @@ function registerGMResultListener() {
         type: 'chat' as any,
         message: `⚙️ [GM] ${data.message}`,
         timestamp: Date.now(),
+        logSeq: takeClientDirectLogSeq(),
         visibility: 'private',
         playerId: player.value?.id,
       })
@@ -1386,7 +1442,8 @@ function handleGlobalClick() {
 }
 
 // 渲染日志消息（解析超链接 + 聊天消息样式）
-function renderLogMessage(log: any): string {
+// lineIndex：当前行在 logs 数组中的下标；用于点击时解析 refs（每条日志的 yokai_0 等键会重复，不能全局搜第一条）
+function renderLogMessage(log: any, lineIndex?: number): string {
   // 聊天消息使用专属样式
   if (log.type === 'chat' && log.chatData) {
     const name = escapeHtml(log.chatData.senderName)
@@ -1404,11 +1461,13 @@ function renderLogMessage(log: any): string {
   
   // 解析 {type:name} 格式的占位符
   let html = escapeHtml(log.message)
+  const lineAttr =
+    lineIndex != null && lineIndex >= 0 ? ` data-log-line="${lineIndex}"` : ''
   for (const [placeholder, ref] of Object.entries(log.refs as Record<string, any>)) {
     const pattern = `{${placeholder}}`
     const escapedPattern = escapeHtml(pattern)
-    const link = `<span class="log-link" data-ref-key="${placeholder}">${escapeHtml(ref.name)}</span>`
-    html = html.replace(escapedPattern, link)
+    const link = `<span class="log-link" data-ref-key="${escapeHtml(placeholder)}"${lineAttr}>${escapeHtml(ref.name)}</span>`
+    html = html.split(escapedPattern).join(link)
   }
   
   return html
@@ -1428,13 +1487,22 @@ function handleLogLinkClick(event: Event) {
   
   const refKey = target.dataset.refKey
   if (!refKey) return
-  
-  // 从最近的日志中查找引用对象
-  const recentLogs = logs.value
-  for (const log of recentLogs) {
-    if (log.refs && log.refs[refKey]) {
-      const ref = log.refs[refKey]
+
+  const lineStr = target.dataset.logLine
+  if (lineStr !== undefined && lineStr !== '') {
+    const idx = Number(lineStr)
+    const log = logs.value[idx]
+    const ref = log?.refs?.[refKey]
+    if (ref) {
       showLogRefPopup(event, ref)
+      return
+    }
+  }
+
+  // 兼容无 data-log-line 的旧 DOM
+  for (const log of logs.value) {
+    if (log.refs && log.refs[refKey]) {
+      showLogRefPopup(event, log.refs[refKey])
       return
     }
   }
@@ -1738,8 +1806,13 @@ function showTooltip(event: MouseEvent, card: CardInstance) {
   } else if (cardType === 'yokai' || cardType === 'token') {
     tooltip.typeLabel = cardType === 'yokai' ? '御魂' : '令牌'
     tooltip.typeClass = cardType === 'yokai' ? 'type-yokai' : 'type-token'
-    // 在手牌/牌库/弃牌堆中显示效果图标，而非血量
-    tooltip.stats = getCardEffectStats(card)
+    const cur = card.currentHp !== undefined ? card.currentHp : (card.hp ?? 0)
+    const face = yokaiFaceOrPrintedHp(card)
+    let hpShown: string | number = face
+    if (face > 0 && cur > 0 && cur < face) hpShown = `${cur}/${face}`
+    else if (face > 0 && cur <= 0) hpShown = face
+    const effMap = getCardEffectStats(card)
+    tooltip.stats = { hp: { icon: '❤️', value: hpShown }, ...(effMap || {}) }
     tooltip.effect = card.effect || (cardType === 'token' ? '可用于超度' : '无特殊效果')
     tooltip.passive = null
     tooltip.skill = null
@@ -2230,6 +2303,18 @@ const spellSelectModal = reactive({
   show: false
 })
 
+/** 妖怪卡面/印刷生命：击杀后退入弃牌堆等场景 hp 常为 0，界面与判定统一用 maxHp ?? hp */
+function yokaiFaceOrPrintedHp(c: { hp?: number; maxHp?: number }): number {
+  const m = c.maxHp;
+  if (m != null && m > 0) return m;
+  const h = c.hp;
+  if (h != null && h > 0) return h;
+  return 0;
+}
+function discardPileYokaiLife(c: { hp?: number; maxHp?: number }): number {
+  return yokaiFaceOrPrintedHp(c)
+}
+
 // 中级符咒条件：手牌有基础术式 + 弃牌堆有生命≥2的妖怪 + 本回合未获得过
 const canGetMediumSpell = computed(() => {
   const p = player.value
@@ -2240,7 +2325,9 @@ const canGetMediumSpell = computed(() => {
     if (!isMyTurn.value || state.value?.turnPhase !== 'action') return false
     if ((p as any).hasGainedMediumSpell) return false
     const hasBasicSpell = (p.hand || []).some(c => c.cardId === 'spell_001' || c.cardId === 'basic_spell' || c.name === '基础术式')
-    const hasYokaiHp2 = (p.discard || []).some(c => (c.cardType === 'yokai' || c.cardType === 'token') && (c.hp || 0) >= 2)
+    const hasYokaiHp2 = (p.discard || []).some(
+      c => (c.cardType === 'yokai' || c.cardType === 'token') && discardPileYokaiLife(c) >= 2
+    )
     return hasBasicSpell && hasYokaiHp2
   }
   
@@ -2248,7 +2335,9 @@ const canGetMediumSpell = computed(() => {
   if (!game) return false
   if (!game.canExchangeMediumSpell()) return false  // 本回合已获得过
   const hasBasicSpell = p.hand.some(c => c.cardId === 'spell_001' || c.name === '基础术式')
-  const hasYokaiHp2 = p.discard.some(c => (c.cardType === 'yokai' || c.cardType === 'token') && (c.hp || 0) >= 2)
+  const hasYokaiHp2 = p.discard.some(
+    c => (c.cardType === 'yokai' || c.cardType === 'token') && discardPileYokaiLife(c) >= 2
+  )
   return hasBasicSpell && hasYokaiHp2
 })
 
@@ -2262,7 +2351,9 @@ const canGetAdvancedSpell = computed(() => {
     if (!isMyTurn.value || state.value?.turnPhase !== 'action') return false
     if ((p as any).hasGainedAdvancedSpell) return false
     const hasMediumSpell = (p.hand || []).some(c => c.cardId === 'spell_002' || c.name === '中级符咒')
-    const hasYokaiHp4 = (p.discard || []).some(c => (c.cardType === 'yokai' || c.cardType === 'token') && (c.hp || 0) >= 4)
+    const hasYokaiHp4 = (p.discard || []).some(
+      c => (c.cardType === 'yokai' || c.cardType === 'token') && discardPileYokaiLife(c) >= 4
+    )
     return hasMediumSpell && hasYokaiHp4
   }
   
@@ -2270,7 +2361,9 @@ const canGetAdvancedSpell = computed(() => {
   if (!game) return false
   if (!game.canExchangeAdvancedSpell()) return false  // 本回合已获得过
   const hasMediumSpell = p.hand.some(c => c.cardId === 'spell_002' || c.name === '中级符咒')
-  const hasYokaiHp4 = p.discard.some(c => (c.cardType === 'yokai' || c.cardType === 'token') && (c.hp || 0) >= 4)
+  const hasYokaiHp4 = p.discard.some(
+    c => (c.cardType === 'yokai' || c.cardType === 'token') && discardPileYokaiLife(c) >= 4
+  )
   return hasMediumSpell && hasYokaiHp4
 })
 
@@ -2359,7 +2452,9 @@ function startSpellExchange(type: 'medium' | 'advanced') {
   
   // 找到符合条件的弃牌堆妖怪（深拷贝避免影响原数据）
   const validYokai = p.discard
-    .filter(c => (c.cardType === 'yokai' || c.cardType === 'token') && (c.hp || 0) >= requiredHp)
+    .filter(
+      c => (c.cardType === 'yokai' || c.cardType === 'token') && discardPileYokaiLife(c) >= requiredHp
+    )
     .map(c => ({ ...c }))  // 深拷贝
   
   if (validYokai.length === 0) {

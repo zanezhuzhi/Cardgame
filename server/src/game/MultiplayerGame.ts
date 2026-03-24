@@ -172,6 +172,9 @@ export class MultiplayerGame {
   
   /** 状态序列号（用于同步） */
   private stateSeq: number = 0;
+
+  /** 游戏日志条目的全局单调序号（仅内存，同步到客户端供稳定列表 key） */
+  private nextLogSeq: number = 1;
   
   /** 状态变更回调 */
   private onStateChange?: (state: GameState, event?: GameEvent) => void;
@@ -208,8 +211,48 @@ export class MultiplayerGame {
    * 启动游戏（设置回调后调用）
    */
   start(): void {
-    // 启动式神选择倒计时
+    // 启动式神选择倒计时（会先广播 SHIKIGAMI_SELECT_START）
     this.startShikigamiSelectTimer();
+    // AI 立即选满并确认（同步执行，避免未重启的旧 dist 或 setImmediate 顺序导致仍等超时）
+    this.runAiShikigamiSelection();
+  }
+
+  /** 匹配房 AI 座位（与 generateAIPlayer 生成的 id 一致） */
+  private isAiSeat(playerId: string): boolean {
+    return playerId.startsWith('ai_');
+  }
+
+  /**
+   * AI 自动从 4 张候选中选 2 张并立即确认（等价于真人点满后点确认）
+   */
+  private runAiShikigamiSelection(): void {
+    if (this.state.phase !== 'shikigamiSelect') return;
+
+    const allOptions = (this.state as any).shikigamiOptions as ShikigamiCard[] | undefined;
+    if (!allOptions?.length) return;
+
+    for (let i = 0; i < this.state.players.length; i++) {
+      if (this.state.phase !== 'shikigamiSelect') return;
+      const p = this.state.players[i];
+      if (!this.isAiSeat(p.id)) continue;
+      if (p.isReady) continue;
+
+      const startIdx = i * GAME_CONSTANTS.SHIKIGAMI_DRAW;
+      const pool = allOptions.slice(startIdx, startIdx + GAME_CONSTANTS.SHIKIGAMI_DRAW);
+      if (pool.length < 2) continue;
+
+      // L1：固定选展示顺序前 2 张（与策划文档 6.1 一致）
+      const pick = pool.slice(0, GAME_CONSTANTS.SHIKIGAMI_KEEP);
+      for (const card of pick) {
+        this.handleShikigamiAction(p.id, { type: 'selectShikigami', shikigamiId: card.id });
+      }
+      const confirmResult = this.handleShikigamiAction(p.id, { type: 'confirmShikigamiSelection' });
+      if (!confirmResult.success) {
+        console.warn(`[MultiplayerGame] AI ${p.name} 确认式神失败: ${confirmResult.error}`);
+      } else {
+        console.log(`[MultiplayerGame] AI ${p.name} 已自动确认式神`);
+      }
+    }
   }
   
   /**
@@ -342,6 +385,7 @@ export class MultiplayerGame {
       lastUpdate: Date.now(),
       lastPlayerKilledYokai: true,
       pendingYokaiRefresh: false,
+      turnHadKill: false,
       pendingDeathChoices: [],  // 待选择退治/超度的妖怪槽位
       killedBossThisTurn: false,  // 本回合是否击杀了鬼王
       pendingBossDeath: false,  // 待选择退治/超度的鬼王
@@ -372,6 +416,7 @@ export class MultiplayerGame {
       deck.push(this.createCardInstance(daruma, 'token'));
     }
 
+    const isAI = id.startsWith('ai_');
     return {
       id,
       name,
@@ -392,6 +437,8 @@ export class MultiplayerGame {
       isReady: false,  // 式神选择阶段初始为 false，确认后才变 true
       shikigamiState: [],
       tempBuffs: [],
+      isAI,
+      aiStrategy: isAI ? ('L1' as const) : undefined,
     };
   }
 
@@ -566,6 +613,37 @@ export class MultiplayerGame {
       effect: card.effect,
       image: card.image || '',
     };
+  }
+
+  /**
+   * 妖怪/令牌进入弃牌堆时恢复为卡面生命：场上用 hp 表示当前生命，击杀后 hp 常为 0；
+   * 若 maxHp 未带上，前端与部分判定会认为生命为 0。统一写回 maxHp 与 hp（印刷生命）。
+   */
+  private ensureYokaiDiscardFaceStats(card: CardInstance): void {
+    if (card.cardType !== 'yokai' && card.cardType !== 'token') return;
+
+    let printed =
+      (card.maxHp != null && card.maxHp > 0 ? card.maxHp : 0) ||
+      (card.hp != null && card.hp > 0 ? card.hp : 0);
+
+    if (!printed) {
+      const pool =
+        card.cardType === 'token'
+          ? ([...(cardsData.token as any[])] as any[])
+          : ([...(cardsData.yokai as any[])] as any[]);
+      const proto = pool.find(
+        (x: any) =>
+          x.id === card.cardId ||
+          x.cardId === card.cardId ||
+          (card.name && x.name === card.name)
+      );
+      if (proto) printed = proto.hp || proto.damage || 0;
+    }
+
+    if (printed > 0) {
+      card.maxHp = printed;
+      card.hp = printed;
+    }
   }
 
   // ============ 事件回调 ============
@@ -750,6 +828,7 @@ export class MultiplayerGame {
     player.damage = 0;
     player.cardsPlayed = 0;
     player.tempBuffs = [];
+    this.state.turnHadKill = false;
     
     // 进入鬼火阶段
     this.enterGhostFirePhase();
@@ -779,19 +858,47 @@ export class MultiplayerGame {
       playerId: player.id
     });
     
-    // 检查妖怪刷新选项
+    // 强者离场：上一玩家回合内无「击杀」时自动处理（策划 v0.3.2）
     console.log(`[enterGhostFirePhase] lastPlayerKilledYokai=${this.state.lastPlayerKilledYokai}`);
     if (this.state.lastPlayerKilledYokai === false) {
-      this.state.pendingYokaiRefresh = true;
-      // 妖怪刷新选项 - 公开消息
-      this.addLog(`⚠️ 上一玩家未击败妖怪，${player.name}可选择刷新场上的妖怪`);
+      this.state.pendingYokaiRefresh = false;
+      this.addLog('由于上一名玩家未击杀任何妖怪，最强的3名妖怪走开了。');
+      this.applyStrongestThreeYokaiLeave();
       this.notifyStateChange();
-      return;
     }
-    
-    // 直接进入行动阶段
+
     console.log('[enterGhostFirePhase] 进入行动阶段');
     this.enterActionPhase();
+  }
+
+  /** 本回合曾将游荡妖怪或鬼王击杀（生命扣至0），用于强者离场与结算 */
+  private markTurnHadKill(): void {
+    this.state.turnHadKill = true;
+  }
+
+  /**
+   * 将展示区 HP 最高的 3 张游荡妖怪（同 HP 取槽位下标更大）移入牌库底并补满 6 张
+   */
+  private applyStrongestThreeYokaiLeave(): void {
+    const slots = this.state.field.yokaiSlots;
+    const entries: { index: number; card: CardInstance; hp: number }[] = [];
+    for (let i = 0; i < slots.length; i++) {
+      const c = slots[i];
+      if (c) entries.push({ index: i, card: c, hp: c.hp || 0 });
+    }
+    if (entries.length === 0) return;
+
+    entries.sort((a, b) => {
+      if (b.hp !== a.hp) return b.hp - a.hp;
+      return b.index - a.index;
+    });
+    const take = Math.min(3, entries.length);
+    const chosen = entries.slice(0, take);
+    for (const { index, card } of chosen) {
+      this.state.field.yokaiSlots[index] = null;
+      this.state.field.yokaiDeck.push(card);
+    }
+    this.fillYokaiSlots();
   }
 
   /**
@@ -821,15 +928,10 @@ export class MultiplayerGame {
     const player = this.getCurrentPlayer();
     this.state.turnPhase = 'cleanup';
     
-    // 检查本回合是否击杀了妖怪或鬼王
-    // 方式1: 场上有空位（妖怪被击杀后移除）
-    const hasEmptySlot = this.state.field.yokaiSlots.some(s => s === null);
-    // 方式2: 本回合击杀了鬼王
-    const killedBoss = (this.state as any).killedBossThisTurn === true;
-    const killedAny = hasEmptySlot || killedBoss;
-    
-    // 重置本回合鬼王击杀标记
+    // 重置本回合鬼王击杀标记（ allocate 路径用于 UI 待选）
     (this.state as any).killedBossThisTurn = false;
+
+    const hadKillThisTurn = !!this.state.turnHadKill;
     
     // 检查食梦貘「沉睡」buff - 跳过清理阶段
     if (TempBuffHelper.shouldSkipCleanup(player)) {
@@ -838,7 +940,7 @@ export class MultiplayerGame {
       TempBuffHelper.clearBuffs(player);
       // 补充妖怪
       this.fillYokaiSlots();
-      this.state.lastPlayerKilledYokai = killedAny;
+      this.state.lastPlayerKilledYokai = hadKillThisTurn;
       this.nextTurn();
       return;
     }
@@ -879,8 +981,8 @@ export class MultiplayerGame {
     // 9. 补充妖怪
     this.fillYokaiSlots();
     
-    // 10. 记录是否击杀妖怪或鬼王
-    this.state.lastPlayerKilledYokai = killedAny;
+    // 10. 记录上一回合是否达成击杀（游荡妖怪/鬼王生命扣至0，强于离场规则）
+    this.state.lastPlayerKilledYokai = hadKillThisTurn;
     
     this.addLog(`🔄 ${player.name} 回合结束`);
     
@@ -927,6 +1029,11 @@ export class MultiplayerGame {
     const gmActions = ['gmAddTestCards', 'gmAddCard', 'gmSetShikigami', 'gmAddDamage', 'gmAddToDiscard'];
     if (gmActions.includes(action.type)) {
       return this.handleGmAction(playerId, action);
+    }
+
+    // 式神选择同步阶段：禁止对局内行动（避免 currentPlayerIndex===0 误当成「可出牌回合」）
+    if (this.state.phase === 'shikigamiSelect') {
+      return { success: false, error: '式神选择阶段不可进行此操作' };
     }
     
     // 式神获取相关action不检查回合（需要实时响应）
@@ -1249,6 +1356,7 @@ export class MultiplayerGame {
     
     // 检查鬼王是否被击败
     if (this.state.field.bossCurrentHp <= 0) {
+      this.markTurnHadKill();
       // 标记本回合击杀了鬼王，等待玩家选择退治/超度
       (this.state as any).killedBossThisTurn = true;
       (this.state as any).pendingBossDeath = true;
@@ -1290,6 +1398,7 @@ export class MultiplayerGame {
     
     // 检查妖怪是否被击杀
     if (yokai.hp <= 0) {
+      this.markTurnHadKill();
       // 添加到待选择列表
       const pendingList = (this.state as any).pendingDeathChoices || [];
       if (!pendingList.includes(slotIndex)) {
@@ -1320,6 +1429,7 @@ export class MultiplayerGame {
     }
     
     // 移到弃牌堆（声誉会在notifyStateChange时自动重新计算）
+    this.ensureYokaiDiscardFaceStats(yokai);
     player.discard.push(yokai);
     this.state.field.yokaiSlots[slotIndex] = null;
     
@@ -1766,7 +1876,9 @@ export class MultiplayerGame {
     }
     
     const yokai = player.discard[yokaiIdx];
-    if ((yokai.hp || 0) < 2) {
+    // 弃牌堆妖怪可能为「已击杀」残留 hp=0，判定时用卡面生命（maxHp）
+    const yokaiLife = yokai.maxHp ?? yokai.hp ?? 0;
+    if (yokaiLife < 2) {
       return { success: false, error: '妖怪生命值不足' };
     }
     
@@ -1829,7 +1941,8 @@ export class MultiplayerGame {
     }
     
     const yokai = player.discard[yokaiIdx];
-    if ((yokai.hp || 0) < 4) {
+    const yokaiLifeAdv = yokai.maxHp ?? yokai.hp ?? 0;
+    if (yokaiLifeAdv < 4) {
       return { success: false, error: '妖怪生命值不足' };
     }
     
@@ -2459,6 +2572,7 @@ export class MultiplayerGame {
               const idx = this.state.field.yokaiSlots.findIndex(y => y?.instanceId === target.instanceId);
               if (idx !== -1) {
                 this.state.field.yokaiSlots[idx] = null;
+                this.ensureYokaiDiscardFaceStats(target);
                 player.discard.push(target);
                 this.addLog(`   ✨ 御魂：退治${target.name}`);
               }
@@ -2927,7 +3041,9 @@ export class MultiplayerGame {
     player.damage -= damage;
     
     // 击败妖怪（声誉会在notifyStateChange时自动重新计算）
+    this.markTurnHadKill();
     this.state.field.yokaiSlots[slotIndex] = null;
+    this.ensureYokaiDiscardFaceStats(yokai);
     player.discard.push(yokai);
     
     this.addLog(`💀 ${player.name} 击败 ${yokai.name}，获得 ${yokai.charm || 0} 声誉`);
@@ -2946,7 +3062,8 @@ export class MultiplayerGame {
    */
   private defeatBoss(player: PlayerState): void {
     const boss = this.state.field.currentBoss!;
-    
+    this.markTurnHadKill();
+
     // 鬼王进入弃牌堆（声誉会在notifyStateChange时自动重新计算）
     player.discard.push(boss as any);
     
@@ -2973,28 +3090,11 @@ export class MultiplayerGame {
    */
   private handleYokaiRefresh(refresh: boolean): { success: boolean; error?: string } {
     if (!this.state.pendingYokaiRefresh) {
-      return { success: false, error: '当前不需要决定妖怪刷新' };
+      return { success: false, error: '妖怪刷新已改为回合开始自动「强者离场」，无需手动选择' };
     }
-    
-    if (refresh) {
-      // 将场上妖怪放入牌库底部
-      for (let i = 0; i < GAME_CONSTANTS.YOKAI_SLOTS; i++) {
-        const yokai = this.state.field.yokaiSlots[i];
-        if (yokai) {
-          this.state.field.yokaiDeck.unshift(yokai);
-          this.state.field.yokaiSlots[i] = null;
-        }
-      }
-      // 重新填充
-      this.fillYokaiSlots();
-      this.addLog(`🔄 刷新场上妖怪！`);
-    } else {
-      this.addLog(`➡️ 保持场上妖怪不变`);
-    }
-    
+
     this.state.pendingYokaiRefresh = false;
     this.enterActionPhase();
-    
     return { success: true };
   }
 
@@ -3074,6 +3174,7 @@ export class MultiplayerGame {
     
     const target = this.state.field.yokaiSlots[idx]!;
     this.state.field.yokaiSlots[idx] = null;
+    this.ensureYokaiDiscardFaceStats(target);
     player.discard.push(target);
     this.addLog(`   ✨ 御魂：退治${target.name}`);
     
@@ -3101,6 +3202,7 @@ export class MultiplayerGame {
       const yokai = this.state.field.yokaiSlots[slotIndex];
       if (yokai && (yokai.hp || 0) <= 0) {
         // 默认选择退治（放入弃牌堆）
+        this.ensureYokaiDiscardFaceStats(yokai);
         player.discard.push(yokai);
         this.state.field.yokaiSlots[slotIndex] = null;
         this.addLog(`📥 ${player.name} 自动退治了 ${yokai.name}（+${yokai.charm || 0} 声誉）`);
@@ -3176,12 +3278,27 @@ export class MultiplayerGame {
       type: 'game_start',
       message: processedMessage,
       timestamp: Date.now(),
+      logSeq: this.nextLogSeq++,
       visibility: options?.visibility || 'public',
       playerId: options?.playerId,
       refs: Object.keys(finalRefs).length > 0 ? finalRefs : undefined,
     });
     
     // 保留最近100条日志
+    if (this.state.log.length > 100) {
+      this.state.log = this.state.log.slice(-100);
+    }
+  }
+
+  /**
+   * 推入聊天等外部写入的日志（与 addLog 共用 logSeq，避免前端列表 key 重复）
+   */
+  appendChatLogEntry(entry: GameLogEntry): void {
+    const row: GameLogEntry = {
+      ...entry,
+      logSeq: this.nextLogSeq++,
+    };
+    this.state.log.push(row);
     if (this.state.log.length > 100) {
       this.state.log = this.state.log.slice(-100);
     }

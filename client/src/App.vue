@@ -189,7 +189,30 @@
         <!-- 右侧信息区 -->
         <div class="info-side-panel">
           <div class="info-box" @click="handleLogLinkClick">
-            <div v-for="(l,i) in logs.slice(-8)" :key="i" class="info-line" v-html="renderLogMessage(l)"></div>
+            <div v-for="(l,i) in logs.slice(-8)" :key="i" class="info-line" :class="{ 'chat-line': l.type === 'chat' }" v-html="renderLogMessage(l)"></div>
+          </div>
+          <!-- 聊天输入栏 -->
+          <div class="chat-input-bar">
+            <button class="chat-emoji-btn" @click.stop="showEmojiPanel = !showEmojiPanel" title="表情">😀</button>
+            <input
+              ref="chatInputRef"
+              class="chat-input"
+              v-model="chatInputText"
+              :placeholder="chatInputPlaceholder"
+              :disabled="chatCooldownRemaining > 0 && !chatInputText.startsWith('/')"
+              maxlength="100"
+              @keydown.enter.exact.prevent="handleChatSend"
+              @input="handleChatInputChange"
+            />
+            <button
+              class="chat-send-btn"
+              :disabled="!chatInputText.trim() || (chatCooldownRemaining > 0 && !chatInputText.startsWith('/'))"
+              @click="handleChatSend"
+            >发送</button>
+            <!-- 表情面板 -->
+            <div v-if="showEmojiPanel" class="emoji-panel" @click.stop>
+              <span v-for="e in emojiList" :key="e" class="emoji-item" @click="insertEmoji(e)">{{ e }}</span>
+            </div>
           </div>
           <div class="action-buttons">
             <button class="side-btn" :class="{ disabled: !canGetAnySpell }" @click="handleGetSpell">
@@ -636,7 +659,7 @@
 
     <!-- 卡牌悬浮提示（全局，始终可用） -->
     <Teleport to="body">
-      <div class="card-tooltip" v-if="tooltip.show" :style="tooltipStyle">
+      <div class="card-tooltip" v-if="tooltip.show && !anyModalOpen" :style="tooltipStyle">
         <div class="tooltip-header">
           <span class="tooltip-name">{{tooltip.card?.name}}</span>
           <span class="tooltip-type" :class="tooltip.typeClass">{{tooltip.typeLabel}}</span>
@@ -819,6 +842,7 @@ onMounted(() => {
   document.addEventListener('dragstart', e => e.preventDefault())
   document.addEventListener('selectstart', e => e.preventDefault())
   document.addEventListener('contextmenu', e => e.preventDefault())
+  document.addEventListener('click', handleGlobalClick)
   
   // 禁用Ctrl+滚轮缩放
   document.addEventListener('wheel', (e) => {
@@ -886,6 +910,8 @@ if (typeof window !== 'undefined') {
 
 // 组件卸载时的清理
 onUnmounted(() => {
+  document.removeEventListener('click', handleGlobalClick)
+  if (chatCooldownTimer) clearInterval(chatCooldownTimer)
   // 清除倒计时
   if (countdownInterval) {
     clearInterval(countdownInterval)
@@ -1092,8 +1118,181 @@ const logRefPopup = ref<{
   y: number;
 }>({ show: false, ref: null, x: 0, y: 0 })
 
-// 渲染日志消息（解析超链接）
+// ====== 聊天系统 ======
+const chatInputRef = ref<HTMLInputElement | null>(null)
+const chatInputText = ref('')
+const showEmojiPanel = ref(false)
+const chatCooldownRemaining = ref(0)
+let chatCooldownTimer: ReturnType<typeof setInterval> | null = null
+
+const emojiList = [
+  '😀','😂','😅','😭','😡','🤔','😎','🥺',
+  '😏','😤','😱','🤣','👍','👎','❤️','💔',
+  '🔥','✨','🎉','💪','😴','🙏','👀','💬',
+]
+
+const chatInputPlaceholder = computed(() => {
+  if (chatInputText.value.startsWith('/')) return '输入GM指令...'
+  if (chatCooldownRemaining.value > 0) return `冷却中 (${chatCooldownRemaining.value}s)`
+  return '说点什么...'
+})
+
+// GM指令历史
+const gmCommandHistory = ref<string[]>([])
+let gmHistoryIndex = -1
+
+function handleChatInputChange() {
+  // 实时更新 placeholder 逻辑（通过 computed 已处理）
+}
+
+function handleChatSend() {
+  const text = chatInputText.value.trim()
+  if (!text) return
+
+  if (text.startsWith('/')) {
+    // GM 指令
+    const command = text.slice(1)
+    gmCommandHistory.value.unshift(text)
+    if (gmCommandHistory.value.length > 20) gmCommandHistory.value.pop()
+    gmHistoryIndex = -1
+
+    if (isMultiMode.value) {
+      socketClient.sendGMCommand(command).catch(err => {
+        console.error('[Chat] GM指令失败:', err)
+      })
+    } else {
+      // 单人模式本地处理GM指令
+      handleLocalGMCommand(command)
+    }
+  } else {
+    // 聊天消息
+    if (chatCooldownRemaining.value > 0) return
+
+    if (isMultiMode.value) {
+      socketClient.sendChat(text).catch(err => {
+        console.error('[Chat] 发送失败:', err)
+      })
+    } else {
+      // 单人模式本地添加聊天记录
+      addLocalChatLog(text)
+    }
+
+    // 启动冷却
+    startChatCooldown()
+  }
+
+  chatInputText.value = ''
+  showEmojiPanel.value = false
+}
+
+function handleLocalGMCommand(command: string) {
+  const [cmd, ...args] = command.split(' ')
+  let resultMsg = ''
+  switch (cmd.toLowerCase()) {
+    case 'help':
+      resultMsg = '可用指令: /help, /status, /ping'
+      break
+    case 'status':
+      resultMsg = `游戏阶段: ${state.value?.phase || '未知'}，回合: ${state.value?.turnNumber || 0}`
+      break
+    case 'ping':
+      resultMsg = `Pong! 本地时间: ${new Date().toLocaleTimeString()}`
+      break
+    default:
+      resultMsg = `未知指令 /${cmd}，输入 /help 查看可用指令`
+  }
+  // 在日志中显示GM结果
+  if (state.value) {
+    state.value.log.push({
+      type: 'chat' as any,
+      message: `⚙️ [GM] ${resultMsg}`,
+      timestamp: Date.now(),
+      visibility: 'private',
+      playerId: player.value?.id,
+    })
+  }
+}
+
+function addLocalChatLog(content: string) {
+  if (state.value) {
+    const pName = player.value?.name || '玩家'
+    state.value.log.push({
+      type: 'chat' as any,
+      message: `💬 [${pName}] ${content}`,
+      timestamp: Date.now(),
+      visibility: 'public',
+      chatData: {
+        senderId: player.value?.id || '',
+        senderName: pName,
+        rawContent: content,
+      },
+    })
+  }
+}
+
+function startChatCooldown() {
+  chatCooldownRemaining.value = 5
+  if (chatCooldownTimer) clearInterval(chatCooldownTimer)
+  chatCooldownTimer = setInterval(() => {
+    chatCooldownRemaining.value--
+    if (chatCooldownRemaining.value <= 0) {
+      chatCooldownRemaining.value = 0
+      if (chatCooldownTimer) {
+        clearInterval(chatCooldownTimer)
+        chatCooldownTimer = null
+      }
+    }
+  }, 1000)
+}
+
+function insertEmoji(emoji: string) {
+  const input = chatInputRef.value
+  if (input) {
+    const start = input.selectionStart || chatInputText.value.length
+    const end = input.selectionEnd || chatInputText.value.length
+    chatInputText.value = chatInputText.value.slice(0, start) + emoji + chatInputText.value.slice(end)
+    nextTick(() => {
+      input.focus()
+      const pos = start + emoji.length
+      input.setSelectionRange(pos, pos)
+    })
+  } else {
+    chatInputText.value += emoji
+  }
+  showEmojiPanel.value = false
+}
+
+// 监听GM指令结果（多人模式）
+socketClient.on('gmResult', (data: { message: string; success: boolean }) => {
+  if (state.value) {
+    state.value.log.push({
+      type: 'chat' as any,
+      message: `⚙️ [GM] ${data.message}`,
+      timestamp: Date.now(),
+      visibility: 'private',
+      playerId: player.value?.id,
+    })
+  }
+})
+
+// 点击外部关闭表情面板
+function handleGlobalClick() {
+  showEmojiPanel.value = false
+}
+
+// 渲染日志消息（解析超链接 + 聊天消息样式）
 function renderLogMessage(log: any): string {
+  // 聊天消息使用专属样式
+  if (log.type === 'chat' && log.chatData) {
+    const name = escapeHtml(log.chatData.senderName)
+    const content = escapeHtml(log.chatData.rawContent)
+    return `💬 <span class="chat-sender">[${name}]</span> <span class="chat-content">${content}</span>`
+  }
+  // GM指令结果
+  if (log.type === 'chat' && log.message?.startsWith('⚙️')) {
+    return `<span class="gm-result">${escapeHtml(log.message)}</span>`
+  }
+
   if (!log.refs || Object.keys(log.refs).length === 0) {
     return escapeHtml(log.message)
   }
@@ -1504,6 +1703,13 @@ function showBossTooltip(event: MouseEvent, boss: any) {
   
   tooltip.show = true
 }
+
+// 任意弹窗打开时自动隐藏 tooltip
+const anyModalOpen = computed(() =>
+  hintModal.show || choiceModal.show || cardSelectModal.show ||
+  salvageChoiceModal.show || targetModal.show || shikigamiModal.show ||
+  spellSelectModal.show
+)
 
 // 隐藏悬浮提示
 function hideTooltip() {
@@ -3187,6 +3393,106 @@ async function confirmReplaceShikigami() {
   color:#fff;
   font-size:14px;
 }
+/* ── 聊天输入栏 ── */
+.chat-input-bar{
+  display:flex;
+  align-items:center;
+  gap:calc(var(--s) * 8);
+  padding:calc(var(--s) * 4) calc(var(--s) * 8);
+  background:#1A1A2E;
+  border:1px solid #D4A574;
+  border-radius:calc(var(--s) * 4);
+  position:relative;
+  flex-shrink:0;
+}
+.chat-emoji-btn{
+  width:calc(var(--s) * 32);
+  height:calc(var(--s) * 32);
+  background:transparent;
+  border:1px solid #D4A574;
+  border-radius:calc(var(--s) * 4);
+  color:#FFD700;
+  cursor:pointer;
+  font-size:calc(var(--s) * 18);
+  display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;
+  padding:0;
+}
+.chat-emoji-btn:hover{background:#2D1F3D}
+.chat-input{
+  flex:1;
+  height:calc(var(--s) * 32);
+  min-width:0;
+  background:#151525;
+  border:1px solid #3A3A5A;
+  border-radius:calc(var(--s) * 4);
+  color:#fff;
+  font-size:calc(var(--s) * 14);
+  padding:0 calc(var(--s) * 8);
+  outline:none;
+  box-sizing:border-box;
+}
+.chat-input::placeholder{color:#666680}
+.chat-input:focus{border-color:#D4A574}
+.chat-send-btn{
+  width:calc(var(--s) * 56);
+  height:calc(var(--s) * 32);
+  background:#D4A574;
+  border:none;
+  border-radius:calc(var(--s) * 4);
+  color:#1A1A2E;
+  font-size:calc(var(--s) * 14);
+  font-weight:bold;
+  cursor:pointer;
+  flex-shrink:0;
+  padding:0;
+}
+.chat-send-btn:hover:not(:disabled){background:#E8B885}
+.chat-send-btn:disabled{background:#5A5A6A;color:#8A8A9A;cursor:not-allowed}
+/* 表情面板 */
+.emoji-panel{
+  position:absolute;
+  bottom:calc(100% + calc(var(--s) * 6));
+  left:0;
+  width:calc(var(--s) * 300);
+  max-height:calc(var(--s) * 240);
+  background:#1A1A2E;
+  border:1px solid #D4A574;
+  border-radius:calc(var(--s) * 8);
+  padding:calc(var(--s) * 10);
+  display:grid;
+  grid-template-columns:repeat(8,1fr);
+  gap:calc(var(--s) * 4);
+  overflow-y:auto;
+  z-index:100;
+}
+.emoji-item{
+  width:calc(var(--s) * 32);
+  height:calc(var(--s) * 32);
+  display:flex;align-items:center;justify-content:center;
+  font-size:calc(var(--s) * 20);
+  cursor:pointer;
+  border-radius:calc(var(--s) * 4);
+  user-select:none;
+}
+.emoji-item:hover{background:#2D1F3D}
+
+/* 聊天消息样式区分 */
+.info-line.chat-line{
+  background:#2A1F35;
+}
+.info-line :deep(.chat-sender){
+  color:#FFD700;
+  font-weight:bold;
+}
+.info-line :deep(.chat-content){
+  color:#E0E0E0;
+}
+.info-line :deep(.gm-result){
+  color:#90CAF9;
+  font-style:italic;
+}
+
 .action-buttons{
   display:flex;
   gap:calc(var(--s) * 20);

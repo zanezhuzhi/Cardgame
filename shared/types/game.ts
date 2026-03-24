@@ -169,7 +169,8 @@ export type GameLogType =
   | 'exile'
   | 'boss_arrival'
   | 'penalty'
-  | 'game_end';
+  | 'game_end'
+  | 'chat';
 
 /** 日志引用对象类型 */
 export type LogRefType = 'card' | 'shikigami' | 'boss' | 'player';
@@ -194,9 +195,15 @@ export interface GameLogEntry {
   value?: number;
   message: string;
   timestamp: number;
-  // 新增字段 - 消息同步控制
+  // 消息同步控制
   visibility?: LogVisibility;           // 可见性：public=所有人，private=仅自己
   refs?: Record<string, LogRef>;        // 引用对象映射 {占位符: 对象信息}
+  // 聊天专属数据
+  chatData?: {
+    senderId: string;
+    senderName: string;
+    rawContent: string;
+  };
 }
 
 // ============ 游戏动作 ============

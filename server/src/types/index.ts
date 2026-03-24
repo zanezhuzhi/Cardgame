@@ -124,6 +124,13 @@ export interface GameLogEntry {
   value?: number;
   message: string;
   timestamp: number;
+  visibility?: 'public' | 'private';
+  refs?: Record<string, any>;
+  chatData?: {
+    senderId: string;
+    senderName: string;
+    rawContent: string;
+  };
 }
 
 /** 式神状态 */
@@ -296,6 +303,9 @@ export interface ServerToClientEvents {
   // 交互请求
   'interact:request': (request: InteractRequest) => void;
   
+  // 聊天
+  'gm:result': (data: { message: string; success: boolean }) => void;
+  
   // 玩家状态
   'player:disconnected': (playerId: string, timeout: number) => void;
   'player:reconnected': (playerId: string) => void;
@@ -331,6 +341,10 @@ export interface ClientToServerEvents {
   
   // 交互响应
   'interact:response': (response: InteractResponse) => void;
+  
+  // 聊天
+  'chat:send': (data: { content: string; roomId: string }, callback?: (response: { success: boolean; error?: string }) => void) => void;
+  'gm:command': (data: { command: string; roomId: string }, callback?: (response: { success: boolean; error?: string }) => void) => void;
   
   // 心跳
   'ping': (timestamp: number) => void;

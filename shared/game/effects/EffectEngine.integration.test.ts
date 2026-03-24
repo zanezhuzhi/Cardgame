@@ -131,7 +131,7 @@ describe('效果引擎集成测试', () => {
       expect(player.damage).toBe(2);
     });
 
-    it('日女巳时：三选一（抓牌+2/鬼火+2/伤害+2）', async () => {
+    it('日女巳时：三选一（鬼火+1/抓牌+2/伤害+2）', async () => {
       const player = createMockPlayer();
       player.deck.push(
         createCardInstance('c1', '卡1', 1),
@@ -143,9 +143,9 @@ describe('效果引擎集成测试', () => {
       const effectDef = YOKAI_EFFECT_DEFS.find(d => d.cardId === 'yokai_011');
       expect(effectDef).toBeDefined();
       
-      // 选择抓牌+2（选项0）
+      // 选择抓牌+2（选项1：鬼火+1/抓牌+2/伤害+2）
       const ctx = createMockContext(player, gameState);
-      ctx.onChoice = async () => 0;
+      ctx.onChoice = async () => 1;
       
       await effectEngine.execute(effectDef!.effects, ctx);
       expect(player.hand.length).toBe(2);

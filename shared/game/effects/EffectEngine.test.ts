@@ -46,6 +46,7 @@ function makePlayer(overrides: Partial<PlayerState> = {}): PlayerState {
     shikigamiState: [],
     totalCharm: 0,
     cardsPlayed: 0,
+    tempBuffs: [],
     ...overrides,
   };
 }
@@ -401,15 +402,14 @@ describe('妖怪效果定义完整性', () => {
     expect((killEffect as any).maxHp).toBe(4);
   });
 
-  it('涅槃之火 (yokai_018) 条件式：打出过御魂时额外鬼火+1', async () => {
+  it('涅槃之火 (yokai_018) 添加技能消耗减少buff', async () => {
     const engine = new EffectEngine();
     const player = makePlayer({ ghostFire: 1 });
-    player.played = [makeCard({ cardType: 'yokai' })]; // 已打出过御魂
     const ctx = makeCtx(player);
     const def = getYokaiEffectDef('yokai_018')!;
     await engine.execute(def.effects, ctx);
-    // 基础+1，条件满足再+1 = 3
-    expect(player.ghostFire).toBe(3);
+    expect(player.ghostFire).toBe(1);
+    expect(player.tempBuffs.some(b => b.type === 'SKILL_COST_REDUCE')).toBe(true);
   });
 
   it('镇墓兽 (yokai_026) 全效果：抓牌+1, 伤害+2, 鬼火+2', async () => {

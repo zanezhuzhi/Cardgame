@@ -22,8 +22,8 @@ import type {
 // 导入卡牌数据（直接从JSON）
 import cardsData from '../../../shared/data/cards.json';
 
-// 导入御魂效果执行器
-import { executeYokaiEffect as executeYokaiEffectHandler } from '../../../shared/game/effects/YokaiEffects';
+// 导入御魂效果执行器及弃置触发辅助函数
+import { executeYokaiEffect as executeYokaiEffectHandler, onTreeDemonDiscard, onSanmiDiscard } from '../../../shared/game/effects/YokaiEffects';
 
 // 导入式神技能执行器
 import { executeSkill as executeShikigamiSkill } from '../../../shared/game/effects/ShikigamiSkills';
@@ -391,6 +391,21 @@ export class SinglePlayerGame {
       this.addLog('🧪 [TEST3] 添加测试卡牌：手牌(基础+中级)、弃牌堆(妖怪hp3+hp5)');
     }
     // END TEST3
+
+    // TEST4: 手牌添加御魂妖怪（测试赤舌/唐纸伞妖/天邪鬼绿效果）
+    // 关闭方式：将 TEST4_ENABLED 改为 false
+    const TEST4_ENABLED = true;
+    if (TEST4_ENABLED) {
+      const player = this.getPlayer();
+      const testYokai: CardInstance[] = [
+        { instanceId: generateId(), cardId: 'yokai_001', cardType: 'yokai', name: '赤舌', hp: 2, maxHp: 2, damage: 0, charm: 1 },
+        { instanceId: generateId(), cardId: 'yokai_002', cardType: 'yokai', name: '唐纸伞妖', hp: 2, maxHp: 2, damage: 0, charm: 0 },
+        { instanceId: generateId(), cardId: 'yokai_003', cardType: 'yokai', name: '天邪鬼绿', hp: 2, maxHp: 2, damage: 0, charm: 0 },
+      ];
+      player.hand.push(...testYokai);
+      this.addLog('🧪 [TEST4] 添加测试御魂：赤舌、唐纸伞妖、天邪鬼绿');
+    }
+    // END TEST4
     
     // 翻出第一个鬼王（麒麟，无来袭效果）
     this.revealBoss();
@@ -729,6 +744,16 @@ export class SinglePlayerGame {
         this.addLog(`🔄 轮入道效果：再次执行御魂效果！`);
         await this.executeYokaiEffect(card);
         this.consumeTempBuff('DOUBLE_YOKAI_EFFECT');
+      }
+      
+      // 薙魂延迟触发：打出3张御魂时鬼火+2
+      if (this.hasTempBuff('NAGINATA_SOUL_PENDING')) {
+        const yokaiCount = player.played.filter(c => c.cardType === 'yokai').length;
+        if (yokaiCount >= 3) {
+          player.ghostFire = Math.min(player.ghostFire + 2, GAME_CONSTANTS.MAX_GHOST_FIRE);
+          this.consumeTempBuff('NAGINATA_SOUL_PENDING');
+          this.addLog(`🔥 薙魂触发：已打出${yokaiCount}张御魂，鬼火+2`);
+        }
       }
     }
 
@@ -1403,8 +1428,19 @@ export class SinglePlayerGame {
       }
     }
     
-    // 清理阶段：手牌 + 已打出 → 弃牌堆
-    player.discard.push(...player.hand, ...player.played);
+    // 清理阶段：手牌 + 已打出 → 弃牌堆（含弃置触发）
+    const cardsToDiscard = [...player.hand, ...player.played];
+    for (const card of cardsToDiscard) {
+      player.discard.push(card);
+      if (card.name === '树妖') {
+        onTreeDemonDiscard(player, card);
+        this.addLog(`🌳 树妖弃置触发：抓牌+2`);
+      }
+      if (card.name === '三味') {
+        onSanmiDiscard(player, card);
+        this.addLog(`🎵 三味弃置触发：抓牌+3`);
+      }
+    }
     player.hand = [];
     player.played = [];
     

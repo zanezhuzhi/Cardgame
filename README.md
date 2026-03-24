@@ -1,263 +1,86 @@
-# 🎴 百鬼夜行 - Cardgame
+# 百鬼夜行 - Cardgame
 
-> 阴阳师题材卡牌游戏 | Onmyoji-themed Card Game
+> 项目核心索引（开发上下文入口）
 
-![Version](https://img.shields.io/badge/version-v1.0-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+---
 
-## 📖 项目简介
+## 项目结构（核心）
 
-百鬼夜行是一款以日本阴阳师为背景的卡牌策略游戏。玩家扮演阴阳师，通过收集式神、使用阴阳术，击败游荡的妖怪和强大的鬼王，累积声望成为最强大阴阳师。
-
-## 🎮 游戏特色
-
-- 🦊 **式神系统** - 收集并使用式神，发动独特技能
-- 👹 **鬼王挑战** - 击败强大的鬼王获得丰厚奖励
-- � **卡牌构筑** - 打造专属牌组，制定独特策略
-- ⚡ **鬼火资源** - 合理分配鬼火，最大化回合收益
-
-## 🛠️ 技术栈
-
-- **前端**: Vue 3 + TypeScript + Vite
-- **样式**: CSS3 (响应式设计，基于1920x1080)
-- **游戏引擎**: 自研单人游戏逻辑
-
-## 🚀 快速开始
-
-### 环境要求
-- Node.js >= 16
-- npm >= 8
-
-### 安装运行
-
-```bash
-# 克隆仓库
-git clone https://github.com/zanezhuzhi/Cardgame.git
-cd Cardgame
-
-# 安装依赖
-cd client
-npm install
-
-# 启动开发服务器
-npm run dev
-```
-
-访问 http://localhost:5173 开始游戏！
-
-## 📁 项目结构
-
-```
+```text
 Cardgame/
-├── client/                 # 前端项目
-│   ├── src/
-│   │   ├── App.vue        # 主界面
-│   │   ├── game/          # 游戏逻辑
-│   │   └── styles/        # 样式文件
-│   └── public/
-│       └── images/        # 游戏图片资源
-├── 策划文档/               # 设计文档
-│   ├── 界面ass/           # UI设计稿
-│   └── 数据表/            # 卡牌数据
-└── README.md
-```
-
-## 🎨 美术资源
-
-美术资源存放在 `client/public/images/` 目录下：
-
-| 目录 | 说明 | 命名规则 |
-|------|------|----------|
-| `/cards/` | 式神卡牌 | `001.webp` - `099.webp` |
-| `/yokai/` | 妖怪图片 | `101.webp` - `199.webp` |
-| `/boss/` | 鬼王图片 | `201.webp` - `299.webp` |
-| `/spells/` | 阴阳术 | `601.webp` - `699.webp` |
-
-## 📋 版本历史
-
-- **v2.0** - 多人联机模式（开发中）
-- **v1.5** - 单人模式完整体验，所有游戏界面定稿
-- **v1.0** - 玩法主界面完成，基于Figma设计稿的完整UI布局
-- **v0.1.0** - 早期原型
-
-## 🌐 多人模式开发原则
-
-> ⚠️ **核心原则**：多人模式 **只添加后端同步逻辑**，**不改变用户界面样式**！
-
-| 单人模式 (v1.5) | 多人模式 (v2.0) |
-|----------------|-----------------|
-| ✅ 完整的游戏界面 | 直接复用，不修改 |
-| ✅ 所有交互样式 | 直接复用，不修改 |
-| ✅ 卡牌/式神/鬼王 UI | 直接复用，不修改 |
-
-**多人模式新增的后端逻辑**：
-- 🔄 数据同步 - 服务器权威状态
-- ⏱️ 限时同步 - 回合计时、操作超时
-- 🌍 全局数据联动 - 多玩家状态广播
-- 📡 WebSocket 通信 - 实时事件推送
-
-**单人模式 UI 已预留多人兼容设计**，多人模式只需对接数据源。
-
-详见：[多人系统架构规划](docs/MULTIPLAYER_ARCHITECTURE.md)
-
-## 👥 团队
-
-- 策划 & 开发: [@zanezhuzhi](https://github.com/zanezhuzhi)
-- 美术: (招募中)
-
-## 📄 许可证
-
-本项目采用 [MIT License](LICENSE) 开源协议。
-
----
-
-<p align="center">Made with ❤️ for card game lovers</p>
-
-## 🔄 协作开发规范
-
-> ⚠️ **重要：每次开发前必须先同步远程更新！**
-
-```bash
-# 开始工作前先拉取最新代码
-git pull origin main
-
-# 完成工作后推送
-git add -A
-git commit -m "你的提交信息"
-git push
+├── client/                        # 前端 Vue3
+│   └── src/
+│       ├── App.vue                # 游戏主界面（日志/聊天/交互）
+│       ├── views/Lobby.vue        # 大厅
+│       ├── network/SocketClient.ts# Socket 客户端
+│       ├── game/                  # 单人逻辑与适配器
+│       └── router/index.ts
+├── server/                        # 后端 Node + Socket.io
+│   └── src/
+│       ├── socket/SocketServer.ts # 事件入口（含聊天+GM指令）
+│       ├── game/MultiplayerGame.ts# 多人游戏逻辑
+│       ├── room/                  # 房间系统
+│       └── types/index.ts
+├── shared/                        # 共享类型/数据/效果引擎
+│   ├── types/                     # game/cards/network 类型
+│   ├── data/cards.json            # 卡牌数据源
+│   └── game/effects/              # EffectEngine + 各类效果
+├── docs/                          # 技术文档
+│   ├── design/testset.md          # 测试条件与GM测试入口
+│   ├── MULTIPLAYER_ARCHITECTURE.md
+│   └── MULTIPLAYER_SCENARIOS.md
+├── 策划文档/                       # 规则权威来源
+│   ├── 游戏规则说明书.md
+│   ├── 交互设计.md
+│   └── 界面ass/信息交互.md
+└── PROGRESS.md                    # 进度跟踪
 ```
 
 ---
 
-## 🔄 开发流程规范
+## 文档索引
 
-> **必须遵循的开发流程，确保规则一致性和代码质量**
+### 规则（先看）
+- `策划文档/游戏规则说明书.md`：完整规则与胜负判定
+- `策划文档/交互设计.md`：UI/UX 与交互约束
+- `策划文档/界面ass/信息交互.md`：日志、聊天、GM输入设计
 
-### 核心原则
+### 技术（再看）
+- `docs/design/testset.md`：测试开关、测试流程、GM测试
+- `docs/MULTIPLAYER_ARCHITECTURE.md`：多人架构
+- `PROGRESS.md`：当前开发进度
 
-| 原则 | 说明 |
-|------|------|
-| **文档先行** | 所有规则调整先变更策划文档，再编写代码 |
-| **TDD驱动** | 代码编写完成后，必须运行测试验证 |
-| **规则权威** | 代码实现必须与策划文档保持一致 |
-| **索引优先** | 上下文丢失时，先读 README.md 获取索引 |
-| **进度同步** | 功能完成后更新 PROGRESS.md |
-
-### 标准流程
-
-```
-规则/功能变更：文档先行 → 代码实现 → TDD测试 → 更新进度
-Bug修复：定位问题 → 检查文档 → 修复代码 → TDD验证
-新增卡牌：确认数据 → 更新文档 → 实现效果 → 编写测试
-```
-
-### 🔧 功能实现标准流程
-
-> **每个新功能必须按以下顺序完成**
-
-| 步骤 | 内容 | 产出 |
-|:----:|------|------|
-| **1** | **编写代码** | 实现功能逻辑（类型定义、核心方法、UI渲染） |
-| **2** | **创建核心验证内容** | 定义验证点（边界条件、预期行为、错误处理） |
-| **3** | **建立 Red/Green TDD 用例** | 编写测试用例，先失败(Red)后通过(Green) |
-| **4** | **自动化测试** | 运行 `npm test` 直至全部通过 |
-| **5** | **创建 GM 指令** | 添加调试指令协助手工测试 |
-| **6** | **提交并重启** | Git提交 + 重启服务端/客户端，人工跟进测试 |
-
-```bash
-# 测试命令
-cd shared && npm test              # 运行shared测试
-cd server && npm test              # 运行server测试
-npm test -- --watch               # 监听模式
-
-# 重启服务
-cd server && npm run dev          # 重启服务端
-cd client && npm run dev          # 重启客户端
-```
+### 关键代码
+- `client/src/App.vue`
+- `client/src/network/SocketClient.ts`
+- `client/src/game/SinglePlayerGame.ts`
+- `server/src/socket/SocketServer.ts`
+- `server/src/game/MultiplayerGame.ts`
+- `shared/types/game.ts`
+- `shared/game/effects/EffectEngine.ts`
 
 ---
 
-## 📚 文档索引
-
-> **上下文丢失时请优先检索本节列出的文档**
-
-### 策划文档（规则权威来源）
-
-| 文档 | 路径 | 核心内容 |
-|------|------|----------|
-| **游戏规则说明书** | `策划文档/游戏规则说明书.md` | 完整游戏规则、回合流程、伤害分配(6.2)、卡牌使用规则(6.1)、式神系统(6.5-6.6) |
-| **交互设计** | `策划文档/交互设计.md` | UI/UX规范、视觉状态定义、弹窗系统、御魂目标要求、已实现功能清单 |
-
-### 技术文档
-
-| 文档 | 路径 | 核心内容 |
-|------|------|----------|
-| **开发进度** | `PROGRESS.md` | 模块完成度、待办事项、版本历史 |
-| 多人架构设计 | `docs/MULTIPLAYER_ARCHITECTURE.md` | 服务端架构、网络协议、房间管理 |
-| **测试条件集** | `docs/design/testset.md` | 测试开关、GM指令API、测试场景 |
-| 信息交互规范 | `策划文档/界面ass/信息交互.md` | 日志可见性、超链接引用规则 |
-
-### 关键代码位置
-
-| 模块 | 路径 | 说明 |
-|------|------|------|
-| **单人游戏引擎** | `client/src/game/SinglePlayerGame.ts` | 单人沙盒核心逻辑、伤害系统、卡牌使用判定 |
-| 式神技能 | `shared/game/effects/ShikigamiSkills.ts` | 24个式神的技能实现 |
-| 御魂效果 | `shared/game/effects/YokaiEffects.ts` | 38个妖怪的御魂效果 |
-| 鬼王效果 | `shared/game/effects/BossEffects.ts` | 10个鬼王的效果 |
-| 卡牌数据 | `shared/data/cards.json` | 全部卡牌原始定义 |
-| 类型定义 | `shared/types/` | `cards.ts`(卡牌), `game.ts`(状态), `network.ts`(协议) |
-
----
-
-## 快速开始
-
-### 环境要求
-- Node.js >= 18
-- npm >= 9
-
-### 安装与运行
+## 快速启动
 
 ```bash
 # 安装依赖
 cd shared && npm install
+cd ../server && npm install
 cd ../client && npm install
 
-# 运行单人沙盒（开发调试用）
-cd client && npm run dev
-# 访问 http://localhost:5174
-
-# 运行测试
-cd shared && npm test
+# 启动
+cd ../server && npm run dev
+cd ../client && npm run dev
 ```
 
 ---
 
-## 🧪 开发测试
+## 开发流程（固定）
 
-> 测试条件用于开发调试，正式发布前需关闭
+文档先行 -> 代码实现 -> 测试验证 -> 更新进度
 
-**测试文档**：[`docs/design/testset.md`](docs/design/testset.md)
+- 规则变更：先改策划文档，再改代码
+- 功能完成：补测试（自动化 + GM手测）
+- 提交前：至少跑相关模块测试
 
-**操作方式**：在代码中搜索 `TEST*_ENABLED`，设置为 `true`/`false` 启用/关闭
-
----
-
-## 游戏规则概述
-
-> 完整规则请查阅 `策划文档/游戏规则说明书.md`
-
-| 模式 | 人数 | 说明 |
-|------|:----:|------|
-| 标准模式 | 3-4人 | 移除🔷标记卡牌 |
-| 多人模式 | 5-6人 | 使用全部卡牌 |
-
-**回合流程**：鬼火阶段 → 行动阶段（打牌/技能/分配伤害/更换式神）→ 清理阶段
-
-**胜利条件**：击败最终鬼王后，声誉最高者获胜
-
----
-
-## License
-
-Private - All Rights Reserved

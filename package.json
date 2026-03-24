@@ -1,5 +1,8 @@
 {
   "devDependencies": {
     "xlsx": "^0.18.5"
+  },
+  "dependencies": {
+    "replicate": "^1.4.0"
   }
 }

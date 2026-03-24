@@ -18,6 +18,7 @@ import {
   GameAction,
   GameState,
   GameEvent,
+  GameLogEntry,
   ErrorCodes,
 } from '../types/index';
 
@@ -36,6 +37,15 @@ export class SocketServer {
   
   /** 重连超时时间 */
   private reconnectTimeout: number = 60000; // 1分钟
+
+  /** 玩家聊天冷却记录 (socketId -> lastChatTimestamp) */
+  private chatCooldowns: Map<string, number> = new Map();
+  
+  /** 聊天冷却时间 (ms) */
+  private readonly CHAT_COOLDOWN = 5000;
+  
+  /** 聊天消息最大长度 */
+  private readonly CHAT_MAX_LENGTH = 100;
 
   constructor(httpServer: HTTPServer) {
     // 创建 Socket.io 服务器
@@ -94,6 +104,7 @@ export class SocketServer {
       this.bindPlayerEvents(socket);
       this.bindRoomEvents(socket);
       this.bindGameEvents(socket);
+      this.bindChatEvents(socket);
       this.bindPingEvents(socket);
       
       // 断开连接处理
@@ -349,6 +360,127 @@ export class SocketServer {
   }
 
   /**
+   * 绑定聊天与GM指令事件
+   */
+  private bindChatEvents(socket: TypedSocket): void {
+    // 聊天消息
+    socket.on('chat:send' as any, (data: { content: string; roomId: string }, callback?: (response: { success: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId;
+      if (!roomId) {
+        callback?.({ success: false, error: '不在房间中' });
+        return;
+      }
+
+      const content = data.content?.trim();
+      if (!content) {
+        callback?.({ success: false, error: '消息不能为空' });
+        return;
+      }
+      if (content.length > this.CHAT_MAX_LENGTH) {
+        callback?.({ success: false, error: `消息不能超过${this.CHAT_MAX_LENGTH}字符` });
+        return;
+      }
+
+      // 冷却检查
+      const now = Date.now();
+      const lastChat = this.chatCooldowns.get(socket.id) || 0;
+      if (now - lastChat < this.CHAT_COOLDOWN) {
+        const remaining = Math.ceil((this.CHAT_COOLDOWN - (now - lastChat)) / 1000);
+        callback?.({ success: false, error: `发言冷却中，${remaining}秒后可再次发言` });
+        return;
+      }
+      this.chatCooldowns.set(socket.id, now);
+
+      const senderName = socket.data.playerName || `玩家${socket.id.substring(0, 4)}`;
+      const room = this.roomManager.getRoom(roomId);
+
+      // 构造聊天日志条目
+      const chatLog: GameLogEntry = {
+        type: 'chat',
+        playerId: socket.id,
+        playerName: senderName,
+        message: `💬 [${senderName}] ${content}`,
+        timestamp: now,
+        visibility: 'public',
+        chatData: {
+          senderId: socket.id,
+          senderName,
+          rawContent: content,
+        },
+      };
+
+      // 如果游戏正在进行，写入 state.log 并通过 stateSync 广播
+      if (room?.game) {
+        const state = room.game.getState();
+        state.log.push(chatLog);
+        this.broadcastGameState(roomId, state);
+      } else {
+        // 游戏未开始时（大厅阶段），直接广播聊天事件
+        this.io.to(roomId).emit('game:event' as any, { type: 'CHAT_MESSAGE', log: chatLog });
+      }
+
+      callback?.({ success: true });
+    });
+
+    // GM 指令
+    socket.on('gm:command' as any, (data: { command: string; roomId: string }, callback?: (response: { success: boolean; error?: string }) => void) => {
+      const roomId = socket.data.roomId;
+      if (!roomId) {
+        callback?.({ success: false, error: '不在房间中' });
+        return;
+      }
+
+      const command = data.command?.trim();
+      if (!command) {
+        callback?.({ success: false, error: '指令不能为空' });
+        return;
+      }
+
+      const [cmd, ...args] = command.split(' ');
+      const result = this.executeGMCommand(cmd, args, socket);
+
+      socket.emit('gm:result' as any, {
+        message: result.message,
+        success: result.success,
+      });
+
+      callback?.(result);
+    });
+  }
+
+  /**
+   * 执行GM指令
+   */
+  private executeGMCommand(cmd: string, args: string[], socket: TypedSocket): { success: boolean; message: string; error?: string } {
+    switch (cmd.toLowerCase()) {
+      case 'help':
+        return {
+          success: true,
+          message: '可用指令: /help, /status, /ping',
+        };
+
+      case 'status': {
+        const room = this.roomManager.getRoom(socket.data.roomId || '');
+        if (!room) {
+          return { success: false, message: '未找到房间', error: '未找到房间' };
+        }
+        const playerCount = room.playerCount;
+        const status = room.status;
+        return {
+          success: true,
+          message: `房间状态: ${status}，玩家数: ${playerCount}`,
+        };
+      }
+
+      case 'ping':
+        return { success: true, message: `Pong! 服务器时间: ${new Date().toLocaleTimeString()}` };
+
+      default:
+        return { success: false, message: `未知指令 /${cmd}，输入 /help 查看可用指令`, error: `未知指令: ${cmd}` };
+    }
+  }
+
+  /**
    * 绑定心跳事件
    */
   private bindPingEvents(socket: TypedSocket): void {
@@ -387,8 +519,9 @@ export class SocketServer {
       }
     }
     
-    // 清理玩家名称
+    // 清理玩家名称和聊天冷却
     this.playerNames.delete(socket.id);
+    this.chatCooldowns.delete(socket.id);
   }
 
   /**

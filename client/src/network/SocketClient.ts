@@ -367,6 +367,56 @@ class SocketClient {
   }
   
   /**
+   * 发送聊天消息
+   */
+  sendChat(content: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket) {
+        reject(new Error('未连接到服务器'));
+        return;
+      }
+      const roomId = this.currentRoom.value?.id;
+      if (!roomId) {
+        reject(new Error('不在房间中'));
+        return;
+      }
+
+      this.socket.emit('chat:send' as any, { content, roomId }, (response: { success: boolean; error?: string }) => {
+        if (response?.success) {
+          resolve();
+        } else {
+          reject(new Error(response?.error || '发送失败'));
+        }
+      });
+    });
+  }
+
+  /**
+   * 发送GM指令
+   */
+  sendGMCommand(command: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket) {
+        reject(new Error('未连接到服务器'));
+        return;
+      }
+      const roomId = this.currentRoom.value?.id;
+      if (!roomId) {
+        reject(new Error('不在房间中'));
+        return;
+      }
+
+      this.socket.emit('gm:command' as any, { command, roomId }, (response: { success: boolean; error?: string }) => {
+        if (response?.success) {
+          resolve();
+        } else {
+          reject(new Error(response?.error || '指令执行失败'));
+        }
+      });
+    });
+  }
+
+  /**
    * 获取房间列表
    */
   getRoomList(): Promise<RoomInfo[]> {
@@ -497,6 +547,11 @@ class SocketClient {
       this.emit('gameEnded', winners, scores);
     });
     
+    // GM指令结果
+    this.socket.on('gm:result' as any, (data: { message: string; success: boolean }) => {
+      this.emit('gmResult', data);
+    });
+
     // 玩家断线
     this.socket.on('player:disconnected', (playerId: string, timeout: number) => {
       if (this.currentRoom.value) {

@@ -358,6 +358,31 @@
         </div>
       </div>
 
+      <!-- 弹窗：超度选择（唐纸伞妖等御魂效果） -->
+      <div class="modal" v-if="salvageChoiceModal.show">
+        <div class="modal-box salvage-choice-modal">
+          <p class="modal-title">👁️ 查看牌库顶牌</p>
+          <p class="modal-hint">{{salvageChoiceModal.prompt}}</p>
+          <div class="salvage-card-preview">
+            <img v-if="getCardImage(salvageChoiceModal.card)" 
+                 :src="getCardImage(salvageChoiceModal.card)" 
+                 class="salvage-card-img" />
+            <div class="salvage-card-info">
+              <div class="salvage-card-name">{{salvageChoiceModal.card?.name}}</div>
+              <div class="salvage-card-stats">
+                ❤️{{salvageChoiceModal.card?.hp}} 
+                <span v-if="salvageChoiceModal.card?.charm">👑{{salvageChoiceModal.card?.charm}}</span>
+              </div>
+              <div class="salvage-card-effect">{{salvageChoiceModal.card?.effect}}</div>
+            </div>
+          </div>
+          <div class="salvage-choice-btns">
+            <button class="btn primary" @click="handleSalvageChoice(true)">✨ 超度</button>
+            <button class="btn secondary" @click="handleSalvageChoice(false)">↩️ 不超度</button>
+          </div>
+        </div>
+      </div>
+
       <!-- 弹窗：卡牌选择（弃牌/超度选择等） -->
       <div class="modal" v-if="cardSelectModal.show">
         <div class="modal-box card-select-modal">
@@ -821,6 +846,13 @@ watch(() => socketClient.gameState.value, (newState) => {
   if (isMultiMode.value && newState) {
     console.log('[App] 多人模式：收到状态更新', newState.phase, newState.turnPhase)
     nextTick(() => { if(logRef.value) logRef.value.scrollTop = logRef.value.scrollHeight })
+    
+    // 监听 pendingChoice：超度选择弹窗（唐纸伞妖等御魂效果）
+    if (newState.pendingChoice?.type === 'salvageChoice' && newState.pendingChoice.playerId === myPlayerId.value) {
+      salvageChoiceModal.show = true
+      salvageChoiceModal.card = newState.pendingChoice.card || null
+      salvageChoiceModal.prompt = newState.pendingChoice.prompt || '是否超度这张卡牌？'
+    }
   }
 }, { deep: true })
 
@@ -982,6 +1014,17 @@ const cardSelectModal = reactive<{
   selected: [],
   resolve: null,
   onConfirm: null
+})
+
+// 超度选择弹窗（唐纸伞妖等御魂效果）
+const salvageChoiceModal = reactive<{
+  show: boolean
+  card: CardInstance | null
+  prompt: string
+}>({
+  show: false,
+  card: null,
+  prompt: ''
 })
 
 // 目标选择弹窗
@@ -1670,6 +1713,16 @@ function resolveCardSelect() {
     cardSelectModal.show = false
     cardSelectModal.resolve = null
   }
+}
+
+// 超度选择处理（唐纸伞妖等御魂效果）
+function handleSalvageChoice(doSalvage: boolean) {
+  socketClient.emit('game:salvageResponse', {
+    playerId: myPlayerId.value,
+    salvage: doSalvage
+  })
+  salvageChoiceModal.show = false
+  salvageChoiceModal.card = null
 }
 
 function handleCardSelectConfirm() {
@@ -3673,6 +3726,39 @@ async function confirmReplaceShikigami() {
 .choice-options{display:flex;flex-direction:column;gap:8px}
 .choice-btn{padding:10px 14px;background:linear-gradient(135deg,#667eea,#764ba2);border:none;border-radius:6px;color:#fff;font-size:12px;cursor:pointer;transition:all .15s}
 .choice-btn:hover{transform:scale(1.02);box-shadow:0 3px 12px rgba(102,126,234,.4)}
+
+/* 超度选择弹窗（唐纸伞妖等御魂效果） */
+.salvage-choice-modal{min-width:300px}
+.modal-hint{font-size:12px;color:#aaa;margin-bottom:12px}
+.salvage-card-preview{
+  display:flex;gap:15px;
+  background:rgba(0,0,0,.3);
+  border-radius:8px;padding:12px;
+  margin-bottom:15px;
+}
+.salvage-card-img{
+  width:100px;height:140px;
+  border-radius:6px;object-fit:cover;
+  border:2px solid #667eea;
+  box-shadow:0 4px 15px rgba(102,126,234,.3);
+}
+.salvage-card-info{flex:1;display:flex;flex-direction:column;gap:6px}
+.salvage-card-name{font-size:16px;font-weight:bold;color:#f0e6d3}
+.salvage-card-stats{font-size:13px;color:#ddd}
+.salvage-card-effect{font-size:11px;color:#bbb;line-height:1.4;overflow-y:auto;max-height:60px}
+.salvage-choice-btns{display:flex;gap:10px;justify-content:center}
+.salvage-choice-btns .btn{
+  flex:1;padding:10px 16px;border:none;border-radius:6px;
+  font-size:13px;cursor:pointer;transition:all .15s;
+}
+.salvage-choice-btns .btn.primary{
+  background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;
+}
+.salvage-choice-btns .btn.primary:hover{transform:scale(1.02);box-shadow:0 3px 12px rgba(102,126,234,.4)}
+.salvage-choice-btns .btn.secondary{
+  background:rgba(100,100,100,.6);color:#ddd;
+}
+.salvage-choice-btns .btn.secondary:hover{background:rgba(120,120,120,.7)}
 
 /* 卡牌选择弹窗 */
 .card-select-modal{min-width:320px}

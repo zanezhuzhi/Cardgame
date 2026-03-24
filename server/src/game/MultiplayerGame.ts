@@ -2242,8 +2242,9 @@ export class MultiplayerGame {
         this.addLog(`🃏 ${player.name} 打出 ${card.name} (+${card.damage}伤害)`);
       }
     }
-    // 御魂卡：累加伤害 + 执行效果
-    else if ((card.cardType === 'yokai' || card.cardType === 'boss') && card.damage) {
+    // 御魂卡：执行御魂效果（伤害由效果内部处理）
+    else if (card.cardType === 'yokai' || card.cardType === 'boss' || card.name?.includes('伞妖') || (card as any).type === 'yokai') {
+      console.log(`[DEBUG] 御魂卡触发: ${card.name}, cardType=${card.cardType}, type=${(card as any).type}`);
       // 检查轮入道双倍效果
       let damageMultiplier = 1;
       if (TempBuffHelper.consumeNextYokaiDouble(player)) {
@@ -2251,10 +2252,15 @@ export class MultiplayerGame {
         this.addLog(`🔄 轮入道效果：御魂效果×2！`);
       }
       
-      player.damage += card.damage * damageMultiplier;
-      this.addLog(`🎴 ${player.name} 打出御魂 ${card.name} (+${card.damage * damageMultiplier}伤害)`);
+      // 如果卡牌有基础伤害字段，先累加
+      if (card.damage) {
+        player.damage += card.damage * damageMultiplier;
+        this.addLog(`🎴 ${player.name} 打出御魂 ${card.name} (+${card.damage * damageMultiplier}伤害)`);
+      } else {
+        this.addLog(`🎴 ${player.name} 打出御魂 ${card.name}`);
+      }
       
-      // 执行御魂效果
+      // 执行御魂效果（效果内部可能有额外伤害）
       this.executeYokaiEffect(player, card, damageMultiplier);
     }
     // 其他卡牌
@@ -2414,9 +2420,29 @@ export class MultiplayerGame {
           break;
           
         case '唐纸伞妖':
-          // 伤害+1，查看牌库顶（简化：只加伤害）
+          // 伤害+1，查看牌库顶牌，可选超度
           player.damage += 1;
           this.addLog(`   ✨ 御魂：伤害+1`);
+          
+          // 如果牌库有牌，设置等待玩家选择是否超度
+          if (player.deck.length > 0) {
+            const topCard = player.deck[0];
+            this.state.pendingChoice = {
+              type: 'salvageChoice',
+              playerId: player.id,
+              card: topCard,
+              prompt: `查看牌库顶牌【${topCard.name}】，是否超度？`
+            };
+            this.addLog(`   👁️ 查看牌库顶牌：${topCard.name}`, { 
+              visibility: 'private', 
+              playerId: player.id 
+            });
+          } else {
+            this.addLog(`   ⚠️ 牌库为空，无法查看`, { 
+              visibility: 'private', 
+              playerId: player.id 
+            });
+          }
           break;
           
         case '天邪鬼绿':
@@ -2958,6 +2984,48 @@ export class MultiplayerGame {
     
     this.state.pendingYokaiRefresh = false;
     this.enterActionPhase();
+    
+    return { success: true };
+  }
+
+  /**
+   * 处理超度选择响应（唐纸伞妖等卡牌效果）
+   * @param playerId 玩家ID
+   * @param doSalvage 是否超度
+   */
+  public handleSalvageResponse(playerId: string, doSalvage: boolean): { success: boolean; error?: string } {
+    // 验证是否有等待的超度选择
+    if (!this.state.pendingChoice || this.state.pendingChoice.type !== 'salvageChoice') {
+      return { success: false, error: '没有待处理的超度选择' };
+    }
+    
+    // 验证是否是正确的玩家
+    if (this.state.pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+    
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+    
+    const topCard = this.state.pendingChoice.card;
+    if (!topCard) {
+      this.state.pendingChoice = undefined;
+      return { success: false, error: '卡牌信息丢失' };
+    }
+    
+    if (doSalvage) {
+      // 执行超度：牌库顶 → 超度区
+      const card = player.deck.shift();
+      if (card) {
+        player.exiled.push(card);
+        this.addLog(`   ✨ ${player.name} 超度了 ${card.name}`);
+      }
+    } else {
+      this.addLog(`   ↩️ ${player.name} 选择不超度`, { visibility: 'private', playerId });
+    }
+    
+    // 清除等待状态
+    this.state.pendingChoice = undefined;
     
     return { success: true };
   }

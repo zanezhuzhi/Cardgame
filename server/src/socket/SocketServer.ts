@@ -326,6 +326,26 @@ export class SocketServer {
         callback?.({ success: false, error: result.error });
       }
     });
+
+    // 超度选择响应（唐纸伞妖等卡牌效果）
+    socket.on('game:salvageResponse' as any, (data: { playerId: string; salvage: boolean } | boolean, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+      
+      // 兼容两种格式：{ playerId, salvage } 或直接 boolean
+      const doSalvage = typeof data === 'boolean' ? data : data.salvage;
+      const result = room.game.handleSalvageResponse(socket.id, doSalvage);
+      
+      if (result.success) {
+        // 广播游戏状态更新
+        this.broadcastGameState(room);
+      }
+      
+      callback?.(result);
+    });
   }
 
   /**

@@ -135,6 +135,21 @@ export interface GameState {
   lastPlayerKilledYokai?: boolean;
   /** 是否等待当前玩家决定刷新妖怪 */
   pendingYokaiRefresh?: boolean;
+  
+  // ====== 玩家选择等待 ======
+  /** 等待玩家做出选择（御魂效果、式神技能等） */
+  pendingChoice?: {
+    /** 选择类型 */
+    type: 'salvageChoice' | 'cardSelect' | 'yokaiTarget';
+    /** 等待的玩家ID */
+    playerId: string;
+    /** 选择相关的卡牌信息 */
+    card?: CardInstance;
+    /** 提示文本 */
+    prompt?: string;
+    /** 可选项 */
+    options?: string[];
+  };
 }
 
 // ============ 游戏日志 ============

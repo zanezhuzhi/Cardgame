@@ -188,8 +188,13 @@
         
         <!-- 右侧信息区 -->
         <div class="info-side-panel">
-          <div class="info-box" ref="logRef" @click="handleLogLinkClick" @scroll="handleLogScroll">
-            <div v-for="(l,i) in logs" :key="i" class="info-line" :class="{ 'chat-line': l.type === 'chat' }" v-html="renderLogMessage(l)"></div>
+          <div class="info-box-wrapper">
+            <div class="info-box" ref="logRef" @click="handleLogLinkClick" @scroll="handleLogScroll">
+              <div v-for="(l,i) in logs" :key="i" class="info-line" :class="{ 'chat-line': l.type === 'chat' }" v-html="renderLogMessage(l)"></div>
+            </div>
+            <button v-if="hasNewMessage" class="new-message-btn" @click="scrollToBottom">
+              有新消息 ↓
+            </button>
           </div>
           <!-- 聊天输入栏 -->
           <div class="chat-input-bar">
@@ -240,7 +245,7 @@
           </div>
         </div>
         <div class="deck-discard-area">
-          <div class="pile-box deck-box" @click="showDeck=true">
+          <div class="pile-box deck-box deck-no-click" title="牌库顺序未知">
             <b>{{player?.deck?.length||0}}</b>
             <span>牌库</span>
           </div>
@@ -402,6 +407,26 @@
           <div class="salvage-choice-btns">
             <button class="btn primary" @click="handleSalvageChoice(true)">✨ 超度</button>
             <button class="btn secondary" @click="handleSalvageChoice(false)">↩️ 不超度</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 弹窗：妖怪目标选择（天邪鬼绿等御魂效果） -->
+      <div class="modal" v-if="yokaiTargetModal.show">
+        <div class="modal-box yokai-target-modal">
+          <p class="modal-title">🎯 {{yokaiTargetModal.prompt}}</p>
+          <div class="yokai-target-grid">
+            <div v-for="y in yokaiTargetModal.candidates" :key="y.instanceId"
+                 class="yokai-target-card"
+                 @click="handleYokaiTargetChoice(y.instanceId)"
+                 @mouseenter="showTooltip($event, y)"
+                 @mouseleave="hideTooltip">
+              <img v-if="getCardImage(y)" :src="getCardImage(y)" class="yokai-target-img" />
+              <div class="yokai-target-info">
+                <div class="yokai-target-name">{{y.name}}</div>
+                <div class="yokai-target-stat">❤️{{y.hp}}</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -869,13 +894,26 @@ onMounted(() => {
 watch(() => socketClient.gameState.value, (newState) => {
   if (isMultiMode.value && newState) {
     console.log('[App] 多人模式：收到状态更新', newState.phase, newState.turnPhase)
-    nextTick(() => { if(logRef.value) logRef.value.scrollTop = logRef.value.scrollHeight })
+    // 移除强制滚动，由 watch(logs) 智能处理
     
     // 监听 pendingChoice：超度选择弹窗（唐纸伞妖等御魂效果）
     if (newState.pendingChoice?.type === 'salvageChoice' && newState.pendingChoice.playerId === myPlayerId.value) {
       salvageChoiceModal.show = true
       salvageChoiceModal.card = newState.pendingChoice.card || null
       salvageChoiceModal.prompt = newState.pendingChoice.prompt || '是否超度这张卡牌？'
+    }
+    
+    // 监听 pendingChoice：妖怪目标选择弹窗（天邪鬼绿等御魂效果）
+    if (newState.pendingChoice?.type === 'yokaiTarget' && newState.pendingChoice.playerId === myPlayerId.value) {
+      const targetIds = newState.pendingChoice.options || []
+      const candidates = newState.field.yokaiSlots.filter(
+        (y): y is CardInstance => y !== null && targetIds.includes(y.instanceId)
+      )
+      if (candidates.length > 0) {
+        yokaiTargetModal.show = true
+        yokaiTargetModal.candidates = candidates
+        yokaiTargetModal.prompt = newState.pendingChoice.prompt || '选择目标'
+      }
     }
   }
 }, { deep: true })
@@ -1053,6 +1091,17 @@ const salvageChoiceModal = reactive<{
   prompt: ''
 })
 
+// 妖怪目标选择弹窗（天邪鬼绿等御魂效果）
+const yokaiTargetModal = reactive<{
+  show: boolean
+  candidates: CardInstance[]
+  prompt: string
+}>({
+  show: false,
+  candidates: [],
+  prompt: ''
+})
+
 // 目标选择弹窗
 const targetModal = reactive<{
   show: boolean
@@ -1111,10 +1160,9 @@ const boss = computed(() => state.value?.field.currentBoss)
 const logs = computed(() => (state.value?.log || []).slice(-300))
 
 // ====== 智能滚动系统 ======
-const isUserScrolling = ref(false)
-let scrollTimer: ReturnType<typeof setTimeout> | null = null
+const hasNewMessage = ref(false)
 
-// 检测用户是否在底部
+// 检测用户是否在底部（最新消息是否在可视区域）
 function isAtBottom(): boolean {
   if (!logRef.value) return true
   const el = logRef.value
@@ -1124,26 +1172,41 @@ function isAtBottom(): boolean {
 
 // 用户滚动时的处理
 function handleLogScroll() {
-  isUserScrolling.value = !isAtBottom()
-  
-  // 如果用户停止滚动2秒且在底部，重置状态
-  if (scrollTimer) clearTimeout(scrollTimer)
-  scrollTimer = setTimeout(() => {
-    if (isAtBottom()) {
-      isUserScrolling.value = false
-    }
-  }, 2000)
+  // 如果用户滚动到底部，清除新消息提示
+  if (isAtBottom()) {
+    hasNewMessage.value = false
+  }
 }
 
-// 监听日志变化，自动滚动到底部（除非用户在查看历史）
-watch(logs, () => {
-  if (!isUserScrolling.value) {
-    nextTick(() => {
+// 滚动到底部（点击"有新消息"按钮时调用）
+function scrollToBottom() {
+  if (logRef.value) {
+    logRef.value.scrollTop = logRef.value.scrollHeight
+    hasNewMessage.value = false
+  }
+}
+
+// 监听日志变化
+watch(logs, (newLogs, oldLogs) => {
+  // 只在新增消息时处理
+  if (!newLogs || newLogs.length === 0) return
+  if (oldLogs && newLogs.length <= oldLogs.length) return
+  
+  // 在DOM更新前先判断是否在底部
+  const wasAtBottom = isAtBottom()
+  
+  nextTick(() => {
+    if (wasAtBottom) {
+      // 之前在底部，自动滚动到新消息
       if (logRef.value) {
         logRef.value.scrollTop = logRef.value.scrollHeight
       }
-    })
-  }
+    } else {
+      // 不在底部，显示新消息提示
+      hasNewMessage.value = true
+      console.log('[智能滚动] 显示新消息提示')
+    }
+  })
 }, { deep: true })
 
 // 日志引用对象点击状态
@@ -1298,18 +1361,24 @@ function insertEmoji(emoji: string) {
   showEmojiPanel.value = false
 }
 
-// 监听GM指令结果（多人模式）
-socketClient.on('gmResult', (data: { message: string; success: boolean }) => {
-  if (state.value) {
-    state.value.log.push({
-      type: 'chat' as any,
-      message: `⚙️ [GM] ${data.message}`,
-      timestamp: Date.now(),
-      visibility: 'private',
-      playerId: player.value?.id,
-    })
-  }
-})
+// 监听GM指令结果（多人模式）- 使用标志防止重复注册
+let gmResultListenerRegistered = false
+function registerGMResultListener() {
+  if (gmResultListenerRegistered) return
+  gmResultListenerRegistered = true
+  socketClient.on('gmResult', (data: { message: string; success: boolean }) => {
+    if (state.value) {
+      state.value.log.push({
+        type: 'chat' as any,
+        message: `⚙️ [GM] ${data.message}`,
+        timestamp: Date.now(),
+        visibility: 'private',
+        playerId: player.value?.id,
+      })
+    }
+  })
+}
+registerGMResultListener()
 
 // 点击外部关闭表情面板
 function handleGlobalClick() {
@@ -1894,7 +1963,7 @@ function startGame() {
   // 单人模式：创建本地游戏实例
   game = new SinglePlayerGame(playerName.value||'阴阳师', s => {
     localState.value = s
-    nextTick(() => { if(logRef.value) logRef.value.scrollTop = logRef.value.scrollHeight })
+    // 移除强制滚动，由 watch(logs) 智能处理
   })
   
   // 绑定选择回调
@@ -1965,6 +2034,15 @@ function handleSalvageChoice(doSalvage: boolean) {
   })
   salvageChoiceModal.show = false
   salvageChoiceModal.card = null
+}
+
+// 妖怪目标选择处理（天邪鬼绿等御魂效果）
+function handleYokaiTargetChoice(targetId: string) {
+  socketClient.emit('game:yokaiTargetResponse', {
+    targetId: targetId
+  })
+  yokaiTargetModal.show = false
+  yokaiTargetModal.candidates = []
 }
 
 function handleCardSelectConfirm() {
@@ -3308,6 +3386,39 @@ async function confirmReplaceShikigami() {
 .info-box::-webkit-scrollbar-thumb:hover{
   background:#E5B685;
 }
+/* 信息区包装器 - 用于定位新消息按钮 */
+.info-box-wrapper{
+  flex:1;
+  position:relative;
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+}
+/* 新消息提示按钮 */
+.new-message-btn{
+  position:absolute;
+  bottom:calc(var(--s) * 10);
+  left:50%;
+  transform:translateX(-50%);
+  background:linear-gradient(135deg, #D4A574 0%, #B8956A 100%);
+  color:#1A1A2E;
+  border:none;
+  border-radius:calc(var(--s) * 16);
+  padding:calc(var(--s) * 8) calc(var(--s) * 20);
+  font-size:calc(var(--s) * 16);
+  font-weight:bold;
+  cursor:pointer;
+  box-shadow:0 2px 8px rgba(0,0,0,0.3);
+  animation:bounce 0.6s ease infinite;
+  z-index:10;
+}
+.new-message-btn:hover{
+  background:linear-gradient(135deg, #E5B685 0%, #C9A67B 100%);
+}
+@keyframes bounce{
+  0%,100%{transform:translateX(-50%) translateY(0);}
+  50%{transform:translateX(-50%) translateY(-4px);}
+}
 .info-line{
   background:#2D1F3D;
   border:1px solid #D4A574;
@@ -4118,6 +4229,31 @@ async function confirmReplaceShikigami() {
 }
 .salvage-choice-btns .btn.secondary:hover{background:rgba(120,120,120,.7)}
 
+/* 妖怪目标选择弹窗（天邪鬼绿等御魂效果） */
+.yokai-target-modal{min-width:350px}
+.yokai-target-grid{
+  display:flex;flex-wrap:wrap;gap:15px;
+  justify-content:center;padding:15px;
+}
+.yokai-target-card{
+  width:120px;padding:10px;
+  background:rgba(0,0,0,.4);
+  border:2px solid #4a4a6a;border-radius:8px;
+  cursor:pointer;transition:all .2s;
+  text-align:center;
+}
+.yokai-target-card:hover{
+  border-color:#D4A574;transform:scale(1.05);
+  box-shadow:0 4px 15px rgba(212,165,116,.4);
+}
+.yokai-target-img{
+  width:100%;height:80px;object-fit:cover;
+  border-radius:6px;margin-bottom:8px;
+}
+.yokai-target-info{display:flex;flex-direction:column;gap:4px}
+.yokai-target-name{font-size:13px;font-weight:bold;color:#f0e6d3}
+.yokai-target-stat{font-size:12px;color:#ff6b6b}
+
 /* 卡牌选择弹窗 */
 .card-select-modal{min-width:320px}
 .card-select-grid{display:flex;flex-wrap:wrap;gap:15px;justify-content:center;max-height:300px;overflow-y:auto;padding:15px}
@@ -4244,6 +4380,9 @@ async function confirmReplaceShikigami() {
 /* 牌库/弃牌堆查看弹窗 */
 .pile-box{cursor:pointer;transition:all .2s}
 .pile-box:hover{background:#2D1F3D;border-color:#FFD700}
+/* 牌库禁止点击 - 玩家无法知道牌库顺序 */
+.pile-box.deck-no-click{cursor:not-allowed;opacity:0.85}
+.pile-box.deck-no-click:hover{background:inherit;border-color:#D4A574}
 .pile-view-panel{
   background:linear-gradient(180deg,#1a1a2e 0%,#0d0d1a 100%);
   border:3px solid #D4A574;

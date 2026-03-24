@@ -47,6 +47,14 @@
       
       <!-- 已连接状态：显示大厅 -->
       <div v-else-if="!currentRoom" class="lobby-panel">
+        <!-- 玩家信息区（左上角） -->
+        <div class="player-profile">
+          <div class="player-avatar-block" :style="{ background: avatarColor }">
+            <span class="avatar-initial">{{ playerName?.charAt(0)?.toUpperCase() || 'P' }}</span>
+          </div>
+          <div class="player-name-display">{{ playerName }}</div>
+        </div>
+        
         <!-- 模式选择 -->
         <div class="mode-tabs">
           <button 
@@ -158,8 +166,79 @@
         
         <!-- 底部操作 -->
         <div class="lobby-footer">
-          <button class="btn secondary" @click="disconnect">断开连接</button>
-          <button class="btn secondary" @click="playSinglePlayer">单人模式</button>
+          <div class="footer-left">
+            <div class="online-count">
+              <span class="online-dot"></span>
+              <span>在线: {{ onlineCount }} 人</span>
+            </div>
+            <button class="btn secondary" @click="disconnect">断开连接</button>
+          </div>
+          <div class="footer-right">
+            <button class="btn secondary" @click="playSinglePlayer">单人模式</button>
+            <button class="btn primary large match-btn" @click="startMatching" :disabled="isMatching">
+              <span v-if="!isMatching">🎮 开始游戏</span>
+              <span v-else>匹配中... {{ matchingTime }}s</span>
+            </button>
+          </div>
+        </div>
+        
+        <!-- 匹配中遮罩 -->
+        <div v-if="isMatching" class="matching-overlay">
+          <div class="matching-modal">
+            <div class="matching-spinner"></div>
+            <h3>正在匹配</h3>
+            <p class="matching-timer">{{ matchingTime }} 秒</p>
+            <p class="matching-hint">正在寻找其他玩家...</p>
+            <button class="btn secondary" @click="cancelMatching">取消匹配</button>
+          </div>
+        </div>
+        
+        <!-- 确认阶段弹窗 -->
+        <div v-if="isInConfirmPhase" class="matching-overlay">
+          <div class="confirm-modal">
+            <h3>🎯 找到对局！</h3>
+            <p class="confirm-timer">{{ confirmCountdown }} 秒内确认</p>
+            
+            <!-- 玩家列表 -->
+            <div class="confirm-players">
+              <div 
+                v-for="player in confirmPlayers" 
+                :key="player.id"
+                :class="['confirm-player', { 
+                  confirmed: player.confirmed, 
+                  ai: player.isAI,
+                  me: player.id === playerId
+                }]"
+              >
+                <div class="confirm-avatar" :style="{ background: getPlayerColor(player.name) }">
+                  <span v-if="player.isAI">🤖</span>
+                  <span v-else>{{ player.name?.charAt(0)?.toUpperCase() || 'P' }}</span>
+                </div>
+                <div class="confirm-info">
+                  <span class="confirm-name">
+                    {{ player.name }}
+                    <span v-if="player.id === playerId" class="me-tag">(我)</span>
+                    <span v-if="player.isAI" class="ai-tag">AI</span>
+                  </span>
+                  <span class="confirm-status">
+                    {{ player.confirmed ? '✅ 已确认' : '⏳ 等待确认' }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 操作按钮 -->
+            <div class="confirm-actions">
+              <button 
+                class="btn primary large" 
+                @click="confirmMatch" 
+                :disabled="hasConfirmed"
+              >
+                {{ hasConfirmed ? '✅ 已确认' : '🎮 确认参战' }}
+              </button>
+              <button class="btn secondary" @click="rejectMatch">取消</button>
+            </div>
+          </div>
         </div>
       </div>
       
@@ -277,6 +356,38 @@ const createConfig = ref({
 const joinRoomId = ref('');
 const joinPassword = ref('');
 
+// ===== 匹配相关状态 =====
+const isMatching = ref(false);
+const matchingTime = ref(0);
+const matchingTimer = ref<number | null>(null);
+const onlineCount = ref(0);
+
+// ===== 确认阶段状态 =====
+interface ConfirmPlayer {
+  id: string;
+  name: string;
+  isAI: boolean;
+  confirmed: boolean;
+}
+const isInConfirmPhase = ref(false);
+const confirmSessionId = ref('');
+const confirmPlayers = ref<ConfirmPlayer[]>([]);
+const confirmCountdown = ref(15);
+const confirmTimer = ref<number | null>(null);
+const hasConfirmed = ref(false);
+
+// 玩家头像颜色（基于名称生成固定色块）
+const avatarColor = computed(() => {
+  const name = playerName.value || 'Player';
+  // 使用名称生成固定的HSL颜色
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const h = Math.abs(hash % 360);
+  return `linear-gradient(135deg, hsl(${h}, 70%, 50%), hsl(${(h + 30) % 360}, 60%, 40%))`;
+});
+
 // 计算属性
 const connectionStatus = computed(() => socketClient.status.value);
 const isConnected = computed(() => socketClient.status.value === 'connected');
@@ -325,6 +436,17 @@ function getHostName(room: any): string {
   return host?.name || '未知';
 }
 
+// 辅助函数：基于名称生成颜色
+function getPlayerColor(name: string): string {
+  if (!name) return 'linear-gradient(135deg, #666, #444)';
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const h = Math.abs(hash % 360);
+  return `linear-gradient(135deg, hsl(${h}, 70%, 50%), hsl(${(h + 30) % 360}, 60%, 40%))`;
+}
+
 // 方法
 async function connectToServer() {
   if (!playerName.value.trim()) {
@@ -340,6 +462,8 @@ async function connectToServer() {
     await socketClient.setPlayerName(playerName.value.trim());
     localStorage.setItem('playerName', playerName.value.trim());
     await refreshRooms();
+    // 连接成功后获取在线人数
+    socketClient.send('getOnlineCount', {});
   } catch (e: any) {
     error.value = e.message || '连接失败';
   } finally {
@@ -453,6 +577,109 @@ function addMessage(msg: string) {
   }
 }
 
+// ===== 匹配相关方法 =====
+function startMatching() {
+  if (isMatching.value) return;
+  
+  console.log('[Lobby] startMatching 被调用, isConnected:', socketClient.isConnected);
+  
+  isMatching.value = true;
+  matchingTime.value = 0;
+  
+  // 通知服务端开始匹配
+  console.log('[Lobby] 发送 match:start 事件');
+  socketClient.send('match:start', {});
+  
+  // 开始计时
+  matchingTimer.value = window.setInterval(() => {
+    matchingTime.value++;
+    
+    // 10秒后自动完成匹配（服务端会处理AI填充）
+    // 这里只是UI显示，实际逻辑由服务端控制
+    if (matchingTime.value >= 15) {
+      // 超时处理（如果服务端没响应）
+      console.warn('[Lobby] 匹配超时，等待服务端响应');
+    }
+  }, 1000);
+}
+
+function cancelMatching() {
+  if (!isMatching.value) return;
+  
+  isMatching.value = false;
+  matchingTime.value = 0;
+  
+  if (matchingTimer.value) {
+    clearInterval(matchingTimer.value);
+    matchingTimer.value = null;
+  }
+  
+  // 通知服务端取消匹配
+  socketClient.send('match:cancel', {});
+}
+
+function stopMatchingTimer() {
+  if (matchingTimer.value) {
+    clearInterval(matchingTimer.value);
+    matchingTimer.value = null;
+  }
+  isMatching.value = false;
+  matchingTime.value = 0;
+}
+
+// ===== 确认阶段方法 =====
+function startConfirmPhase(data: { 
+  sessionId: string; 
+  players: ConfirmPlayer[]; 
+  timeout: number;
+}) {
+  console.log('[Lobby] 进入确认阶段:', data);
+  
+  // 停止匹配计时器
+  stopMatchingTimer();
+  
+  // 设置确认阶段状态
+  isInConfirmPhase.value = true;
+  confirmSessionId.value = data.sessionId;
+  confirmPlayers.value = data.players;
+  confirmCountdown.value = data.timeout || 15;
+  hasConfirmed.value = false;
+  
+  // 开始倒计时
+  confirmTimer.value = window.setInterval(() => {
+    confirmCountdown.value--;
+    if (confirmCountdown.value <= 0) {
+      stopConfirmPhase();
+    }
+  }, 1000);
+}
+
+function stopConfirmPhase() {
+  if (confirmTimer.value) {
+    clearInterval(confirmTimer.value);
+    confirmTimer.value = null;
+  }
+  isInConfirmPhase.value = false;
+  confirmSessionId.value = '';
+  confirmPlayers.value = [];
+  confirmCountdown.value = 15;
+  hasConfirmed.value = false;
+}
+
+function confirmMatch() {
+  if (hasConfirmed.value) return;
+  
+  console.log('[Lobby] 确认匹配');
+  hasConfirmed.value = true;
+  socketClient.send('match:confirm', { sessionId: confirmSessionId.value });
+}
+
+function rejectMatch() {
+  console.log('[Lobby] 拒绝匹配');
+  socketClient.send('match:reject', { sessionId: confirmSessionId.value });
+  stopConfirmPhase();
+}
+
 // 事件监听
 onMounted(() => {
   // 玩家加入
@@ -484,6 +711,13 @@ onMounted(() => {
     messages.value = [];
   });
   
+  // 房间被解散
+  socketClient.on('disbanded', (reason: string) => {
+    console.log('[Lobby] 房间被解散:', reason);
+    error.value = reason || '房间已解散';
+    messages.value = [];
+  });
+  
   // 断线
   socketClient.on('playerDisconnected', (playerId: string) => {
     const player = currentRoom.value?.players.find(p => p.id === playerId);
@@ -499,6 +733,66 @@ onMounted(() => {
       addMessage(`${player.name} 重连了`);
     }
   });
+  
+  // ===== 匹配相关事件 =====
+  // 在线人数更新
+  socketClient.on('onlineCount', (count: number) => {
+    onlineCount.value = count;
+  });
+  
+  // 进入确认阶段
+  socketClient.on('match:confirmPhase', (data: { sessionId: string; players: ConfirmPlayer[]; timeout: number }) => {
+    console.log('[Lobby] 进入确认阶段:', data);
+    startConfirmPhase(data);
+  });
+  
+  // 确认状态更新
+  socketClient.on('match:confirmUpdate', (data: { sessionId: string; playerId: string; confirmed: boolean; players: ConfirmPlayer[] }) => {
+    console.log('[Lobby] 确认状态更新:', data);
+    if (data.sessionId === confirmSessionId.value) {
+      confirmPlayers.value = data.players;
+    }
+  });
+  
+  // 确认阶段失败（超时或有人取消）
+  socketClient.on('match:confirmFailed', (data: { reason: string }) => {
+    console.log('[Lobby] 确认阶段失败:', data);
+    stopConfirmPhase();
+    error.value = data.reason || '确认失败';
+  });
+  
+  // 匹配成功（所有人确认后）- 进入游戏
+  socketClient.on('match:found', (data: { roomId: string; players: any[] }) => {
+    console.log('[Lobby] 匹配成功，进入游戏:', data);
+    stopConfirmPhase();
+    stopMatchingTimer();
+    router.push('/game?mode=multi');
+  });
+  
+  // 匹配失败
+  socketClient.on('match:failed', (data: { reason: string }) => {
+    console.log('[Lobby] 匹配失败:', data);
+    stopMatchingTimer();
+    stopConfirmPhase();
+    error.value = data.reason || '匹配失败';
+  });
+  
+  // 匹配取消
+  socketClient.on('match:cancelled', () => {
+    console.log('[Lobby] 匹配已取消');
+    stopMatchingTimer();
+  });
+  
+  // 如果已经连接（比如从其他页面返回），立即获取在线人数
+  if (socketClient.isConnected) {
+    socketClient.send('getOnlineCount', {});
+  }
+});
+
+onUnmounted(() => {
+  // 清理计时器
+  stopMatchingTimer();
+  stopConfirmPhase();
 });
 </script>
 
@@ -1050,5 +1344,294 @@ onMounted(() => {
   .tab {
     flex: 1 1 50%;
   }
+}
+
+/* ===== 玩家信息区 ===== */
+.player-profile {
+  position: absolute;
+  top: 15px;
+  left: 15px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 15px;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid #555;
+  border-radius: 10px;
+  z-index: 10;
+}
+
+.player-avatar-block {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+.avatar-initial {
+  font-size: 24px;
+  font-weight: bold;
+  color: white;
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+}
+
+.player-name-display {
+  font-size: 16px;
+  font-weight: bold;
+  color: #ffd700;
+}
+
+/* ===== 大厅底部改造 ===== */
+.lobby-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 15px 20px;
+  border-top: 1px solid #333;
+}
+
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.footer-right {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.online-count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #888;
+}
+
+.online-dot {
+  width: 8px;
+  height: 8px;
+  background: #4CAF50;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.match-btn {
+  min-width: 150px;
+  font-size: 18px !important;
+  padding: 15px 30px !important;
+  background: linear-gradient(135deg, #ff6b6b, #ee5a5a) !important;
+  border: 2px solid #ff8a8a !important;
+  animation: matchBtnGlow 2s infinite;
+}
+
+.match-btn:hover:not(:disabled) {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 5px 20px rgba(255,107,107,0.4);
+}
+
+@keyframes matchBtnGlow {
+  0%, 100% { box-shadow: 0 0 10px rgba(255,107,107,0.3); }
+  50% { box-shadow: 0 0 20px rgba(255,107,107,0.6); }
+}
+
+/* ===== 匹配遮罩 ===== */
+.matching-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.matching-modal {
+  background: linear-gradient(135deg, #1a1a2e 0%, #2d1f3d 100%);
+  border: 2px solid #d4a574;
+  border-radius: 16px;
+  padding: 40px 60px;
+  text-align: center;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+}
+
+.matching-spinner {
+  width: 60px;
+  height: 60px;
+  margin: 0 auto 20px;
+  border: 4px solid #333;
+  border-top-color: #d4a574;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.matching-modal h3 {
+  margin: 0 0 15px;
+  font-size: 24px;
+  color: #ffd700;
+}
+
+.matching-timer {
+  font-size: 48px;
+  font-weight: bold;
+  color: #d4a574;
+  margin: 10px 0;
+  font-family: monospace;
+}
+
+.matching-hint {
+  color: #888;
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+/* ===== 确认阶段弹窗 ===== */
+.confirm-modal {
+  background: linear-gradient(135deg, #1a1a2e 0%, #2d1f3d 100%);
+  border: 2px solid #4caf50;
+  border-radius: 16px;
+  padding: 30px 40px;
+  text-align: center;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5), 0 0 30px rgba(76,175,80,0.3);
+  min-width: 400px;
+  max-width: 500px;
+}
+
+.confirm-modal h3 {
+  margin: 0 0 10px;
+  font-size: 28px;
+  color: #4caf50;
+}
+
+.confirm-timer {
+  font-size: 20px;
+  color: #ffd700;
+  margin: 10px 0 20px;
+  font-weight: bold;
+}
+
+.confirm-players {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.confirm-player {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 15px;
+  background: rgba(0,0,0,0.3);
+  border-radius: 8px;
+  border: 1px solid #333;
+  transition: all 0.3s ease;
+}
+
+.confirm-player.confirmed {
+  border-color: #4caf50;
+  background: rgba(76,175,80,0.1);
+}
+
+.confirm-player.me {
+  border-color: #ffd700;
+  background: rgba(255,215,0,0.1);
+}
+
+.confirm-player.ai {
+  border-color: #9e9e9e;
+  background: rgba(158,158,158,0.1);
+}
+
+.confirm-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: bold;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+
+.confirm-info {
+  flex: 1;
+  text-align: left;
+}
+
+.confirm-name {
+  display: block;
+  font-size: 14px;
+  color: #f0e6d3;
+  margin-bottom: 2px;
+}
+
+.confirm-name .me-tag {
+  color: #ffd700;
+  font-size: 12px;
+}
+
+.confirm-name .ai-tag {
+  color: #9e9e9e;
+  font-size: 12px;
+  margin-left: 5px;
+  background: rgba(158,158,158,0.2);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.confirm-status {
+  font-size: 12px;
+  color: #888;
+}
+
+.confirm-player.confirmed .confirm-status {
+  color: #4caf50;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 15px;
+  justify-content: center;
+}
+
+.confirm-actions .btn.primary {
+  background: linear-gradient(135deg, #4caf50, #43a047) !important;
+  border-color: #66bb6a !important;
+  min-width: 150px;
+}
+
+.confirm-actions .btn.primary:disabled {
+  background: linear-gradient(135deg, #2e7d32, #256629) !important;
+  border-color: #388e3c !important;
+  opacity: 0.8;
 }
 </style>

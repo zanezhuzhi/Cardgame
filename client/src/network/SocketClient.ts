@@ -507,6 +507,14 @@ class SocketClient {
       this.emit('kicked');
     });
     
+    // 房间被解散（房主离开）
+    this.socket.on('room:disbanded' as any, (data: { reason: string }) => {
+      console.log('[Socket] 房间被解散:', data.reason);
+      this.currentRoom.value = null;
+      this.gameState.value = null;
+      this.emit('disbanded', data.reason);
+    });
+    
     // 房间错误
     this.socket.on('room:error', (code: string, message: string) => {
       this.emit('roomError', code, message);
@@ -618,6 +626,18 @@ class SocketClient {
         console.error(`[Socket] 事件处理器错误 (${event}):`, error);
       }
     });
+  }
+  
+  /**
+   * 发送 socket 消息（用于匹配等自定义事件）
+   */
+  public send(event: string, data?: any): void {
+    if (!this.socket?.connected) {
+      console.warn(`[Socket] 未连接，无法发送事件: ${event}`);
+      return;
+    }
+    console.log(`[Socket] 发送事件: ${event}`, data);
+    this.socket.emit(event as any, data);
   }
   
   /**

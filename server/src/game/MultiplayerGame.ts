@@ -2446,21 +2446,31 @@ export class MultiplayerGame {
           break;
           
         case '天邪鬼绿':
-          // 退治1个生命≤4的游荡妖怪（简化：自动选择最低HP的）
+          // 退治1个生命≤4的游荡妖怪 - 让玩家选择目标
           {
-            const targets = this.state.field.yokaiSlots
-              .map((y, idx) => ({ yokai: y, idx }))
-              .filter(t => t.yokai && (t.yokai.hp || 0) <= 4 && (t.yokai.hp || 0) > 0);
-            if (targets.length > 0) {
-              const target = targets.reduce((a, b) => 
-                (a.yokai?.hp || 99) < (b.yokai?.hp || 99) ? a : b
-              );
-              const yokai = this.state.field.yokaiSlots[target.idx];
-              if (yokai) {
-                player.discard.push(yokai);
-                this.state.field.yokaiSlots[target.idx] = null;
-                this.addLog(`   ✨ 御魂：退治${yokai.name}`);
+            const validTargets = this.state.field.yokaiSlots
+              .filter((y): y is CardInstance => y !== null && (y.hp || 0) <= 4 && (y.hp || 0) > 0);
+            
+            if (validTargets.length === 0) {
+              this.addLog(`   ⚠️ 御魂：场上没有符合条件的妖怪`);
+            } else if (validTargets.length === 1) {
+              // 只有一个目标时自动选择
+              const target = validTargets[0];
+              const idx = this.state.field.yokaiSlots.findIndex(y => y?.instanceId === target.instanceId);
+              if (idx !== -1) {
+                this.state.field.yokaiSlots[idx] = null;
+                player.discard.push(target);
+                this.addLog(`   ✨ 御魂：退治${target.name}`);
               }
+            } else {
+              // 多个目标时让玩家选择
+              this.state.pendingChoice = {
+                type: 'yokaiTarget',
+                playerId: player.id,
+                prompt: '选择要退治的妖怪（生命≤4）',
+                options: validTargets.map(y => y.instanceId),
+              };
+              this.addLog(`   🎯 御魂：选择退治目标...`);
             }
           }
           break;
@@ -3026,6 +3036,50 @@ export class MultiplayerGame {
     
     // 清除等待状态
     this.state.pendingChoice = undefined;
+    
+    return { success: true };
+  }
+
+  /**
+   * 处理妖怪目标选择响应（天邪鬼绿等卡牌效果）
+   * @param playerId 玩家ID
+   * @param targetId 选择的目标妖怪instanceId
+   */
+  public handleYokaiTargetResponse(playerId: string, targetId: string): { success: boolean; error?: string } {
+    // 验证是否有等待的目标选择
+    if (!this.state.pendingChoice || this.state.pendingChoice.type !== 'yokaiTarget') {
+      return { success: false, error: '没有待处理的目标选择' };
+    }
+    
+    // 验证是否是正确的玩家
+    if (this.state.pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+    
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+    
+    // 验证目标是否合法
+    const validOptions = this.state.pendingChoice.options || [];
+    if (!validOptions.includes(targetId)) {
+      return { success: false, error: '非法的目标选择' };
+    }
+    
+    // 找到并退治目标妖怪
+    const idx = this.state.field.yokaiSlots.findIndex(y => y?.instanceId === targetId);
+    if (idx === -1) {
+      this.state.pendingChoice = undefined;
+      return { success: false, error: '目标妖怪不存在' };
+    }
+    
+    const target = this.state.field.yokaiSlots[idx]!;
+    this.state.field.yokaiSlots[idx] = null;
+    player.discard.push(target);
+    this.addLog(`   ✨ 御魂：退治${target.name}`);
+    
+    // 清除等待状态
+    this.state.pendingChoice = undefined;
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
     
     return { success: true };
   }

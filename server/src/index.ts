@@ -280,6 +280,30 @@ async function main(): Promise<void> {
   // 创建 Socket.io 服务
   const socketServer = new SocketServer(httpServer);
   
+  // 调试端点：查看 Socket 连接状态
+  app.get('/api/debug/sockets', (req, res) => {
+    const onlineCount = socketServer.getOnlineCount();
+    const io = (socketServer as any).io;
+    const sockets: any[] = [];
+    
+    if (io && io.sockets && io.sockets.sockets) {
+      io.sockets.sockets.forEach((socket: any, id: string) => {
+        sockets.push({
+          id,
+          connected: socket.connected,
+          playerName: socket.data?.playerName,
+          roomId: socket.data?.roomId,
+        });
+      });
+    }
+    
+    res.json({
+      onlineCount,
+      socketsCount: sockets.length,
+      sockets,
+    });
+  });
+  
   // 启动服务器
   httpServer.listen(PORT, HOST, () => {
     console.log(`[Server] HTTP 服务已启动`);

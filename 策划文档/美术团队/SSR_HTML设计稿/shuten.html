@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>酒吞童子 - 御魂传说 SSR</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { display: flex; justify-content: center; align-items: center; min-height: 100vh; background: #0a0a14; }
+        .card { width: 400px; height: 560px; background: linear-gradient(180deg, #1a1a2e 0%, #3d1f2e 50%, #1a1a2e 100%); border: 8px solid #d4a574; border-radius: 8px; position: relative; overflow: hidden; box-shadow: 0 0 30px rgba(212, 165, 116, 0.4); }
+        .card::before { content: ''; position: absolute; top: -2px; left: -2px; right: -2px; bottom: -2px; border: 2px solid #ffd700; border-radius: 10px; opacity: 0.6; animation: goldGlow 3s ease-in-out infinite; }
+        @keyframes goldGlow { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.8; } }
+        .fire-particles { position: absolute; width: 100%; height: 100%; pointer-events: none; }
+        .fire { position: absolute; background: radial-gradient(ellipse, #ff6b00, #8b0000, transparent); border-radius: 50%; animation: flicker 1s ease-in-out infinite alternate; }
+        .fire:nth-child(1) { width: 60px; height: 100px; bottom: 50px; left: 20px; animation-delay: 0s; }
+        .fire:nth-child(2) { width: 80px; height: 120px; bottom: 30px; right: 30px; animation-delay: 0.3s; }
+        .fire:nth-child(3) { width: 40px; height: 80px; bottom: 60px; left: 100px; animation-delay: 0.6s; }
+        @keyframes flicker { 0% { transform: scale(1) translateY(0); opacity: 0.7; } 100% { transform: scale(1.1) translateY(-10px); opacity: 1; } }
+        .rarity { position: absolute; top: 15px; left: 15px; font-size: 14px; color: #ffd700; text-shadow: 0 0 10px #ffd700; font-weight: bold; }
+        .charm { position: absolute; top: 15px; right: 15px; background: linear-gradient(135deg, #d4a574, #ffd700); color: #1a1a2e; padding: 4px 12px; border-radius: 12px; font-weight: bold; }
+        .name-box { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); background: linear-gradient(180deg, #3d1f2e 0%, #1a1a2e 100%); border: 2px solid #d4a574; border-radius: 4px; padding: 8px 24px; text-align: center; }
+        .name-box h2 { color: #ffd700; font-size: 22px; font-weight: bold; letter-spacing: 4px; }
+        .name-box .skill { color: #ffb7c5; font-size: 12px; margin-top: 4px; letter-spacing: 2px; }
+        .character { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); width: 360px; height: 440px; }
+        .particles { position: absolute; width: 100%; height: 100%; pointer-events: none; }
+        .particle { position: absolute; width: 4px; height: 4px; background: #ffd700; border-radius: 50%; animation: float 3s ease-in-out infinite; }
+        .particle:nth-child(1) { top: 150px; left: 40px; animation-delay: 0s; }
+        .particle:nth-child(2) { top: 250px; right: 50px; animation-delay: 0.5s; }
+        .particle:nth-child(3) { top: 350px; left: 80px; animation-delay: 1s; }
+        @keyframes float { 0%, 100% { transform: translateY(0); opacity: 0.6; } 50% { transform: translateY(-15px); opacity: 1; } }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="fire-particles">
+            <div class="fire"></div><div class="fire"></div><div class="fire"></div>
+        </div>
+        <div class="particles"><div class="particle"></div><div class="particle"></div><div class="particle"></div></div>
+        <div class="rarity">SSR</div><div class="charm">+3</div>
+        <div class="character">
+            <svg viewBox="0 0 360 440">
+                <defs>
+                    <linearGradient id="gourdGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#8b4513"/><stop offset="50%" style="stop-color:#654321"/><stop offset="100%" style="stop-color:#8b4513"/>
+                    </linearGradient>
+                    <linearGradient id="armorGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" style="stop-color:#5c1a1a"/><stop offset="100%" style="stop-color:#3d0d0d"/>
+                    </linearGradient>
+                    <linearGradient id="skinGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" style="stop-color:#8b7355"/><stop offset="100%" style="stop-color:#6b5344"/>
+                    </linearGradient>
+                    <filter id="glow"><feGaussianBlur stdDeviation="4" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                </defs>
+                <!-- 酒葫芦 -->
+                <ellipse cx="280" cy="200" rx="45" ry="60" fill="url(#gourdGrad)" stroke="#d4a574" stroke-width="2"/>
+                <ellipse cx="280" cy="140" rx="20" ry="15" fill="url(#gourdGrad)"/>
+                <path d="M280 130 Q285 110 280 90" stroke="#d4a574" stroke-width="3" fill="none"/>
+                <!-- 葫芦酒光 -->
+                <ellipse cx="280" cy="200" rx="35" ry="50" fill="none" stroke="#ffd700" stroke-width="2" opacity="0.8" filter="url(#glow)"/>
+                <text x="280" y="210" text-anchor="middle" fill="#ffd700" font-size="24" filter="url(#glow)">酒</text>
+                <!-- 身体 -->
+                <ellipse cx="160" cy="220" rx="70" ry="100" fill="url(#skinGrad)"/>
+                <!-- 鬼族战甲 -->
+                <path d="M90 180 Q60 220 70 320 Q80 380 100 400 L220 400 Q240 380 250 320 Q260 220 230 180 Q200 160 160 160 Q120 160 90 180" fill="url(#armorGrad)"/>
+                <!-- 肩部骨刺 -->
+                <path d="M85 180 L60 150 L80 175" fill="#d4a574"/>
+                <path d="M235 180 L260 150 L240 175" fill="#d4a574"/>
+                <!-- 手臂骨刺 -->
+                <path d="M70 250 L40 240 L65 245" fill="#d4a574"/>
+                <path d="M250 250 L280 240 L255 245" fill="#d4a574"/>
+                <!-- 鬼角 -->
+                <path d="M120 100 Q110 60 100 30 Q105 25 115 35 Q125 60 130 100" fill="#d4a574" stroke="#ffd700" stroke-width="1"/>
+                <path d="M200 100 Q210 60 220 30 Q215 25 205 35 Q195 60 190 100" fill="#d4a574" stroke="#ffd700" stroke-width="1"/>
+                <!-- 角上年轮纹 -->
+                <path d="M105 60 Q115 55 120 65" stroke="#654321" stroke-width="1" fill="none"/>
+                <path d="M200 60 Q190 55 185 65" stroke="#654321" stroke-width="1" fill="none"/>
+                <!-- 脸部 -->
+                <ellipse cx="160" cy="120" rx="50" ry="55" fill="url(#skinGrad)"/>
+                <!-- 狂放表情 -->
+                <path d="M130 110 Q140 100 150 115" stroke="#1a1a2e" stroke-width="3" fill="none"/>
+                <path d="M170 115 Q180 100 190 110" stroke="#1a1a2e" stroke-width="3" fill="none"/>
+                <circle cx="140" cy="120" r="6" fill="#1a1a2e"/><circle cx="180" cy="120" r="6" fill="#1a1a2e"/>
+                <circle cx="140" cy="120" r="3" fill="#ffd700" filter="url(#glow)"/>
+                <circle cx="180" cy="120" r="3" fill="#ffd700" filter="url(#glow)"/>
+                <!-- 胡须 -->
+                <path d="M140 155 Q130 170 125 185" stroke="#4a4a4a" stroke-width="3" fill="none"/>
+                <path d="M180 155 Q190 170 195 185" stroke="#4a4a4a" stroke-width="3" fill="none"/>
+                <!-- 豪饮姿态 - 一手指向葫芦 -->
+                <path d="M230 220 Q280 200 300 180" stroke="url(#skinGrad)" stroke-width="25" fill="none" stroke-linecap="round"/>
+            </svg>
+        </div>
+        <div class="name-box"><h2>酒吞童子</h2><div class="skill">「酒葫芦」</div></div>
+    </div>
+</body>
+</html>

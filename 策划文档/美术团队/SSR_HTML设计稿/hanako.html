@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>花鸟卷 - 御魂传说 SSR</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { display: flex; justify-content: center; align-items: center; min-height: 100vh; background: #0a0a14; }
+        .card { width: 400px; height: 560px; background: linear-gradient(180deg, #1a1a2e 0%, #2d1f3d 30%, #1e3a5f 70%, #1a1a2e 100%); border: 8px solid #d4a574; border-radius: 8px; position: relative; overflow: hidden; box-shadow: 0 0 30px rgba(212, 165, 116, 0.4); }
+        .card::before { content: ''; position: absolute; top: -2px; left: -2px; right: -2px; bottom: -2px; border: 2px solid #ffd700; border-radius: 10px; opacity: 0.6; animation: goldGlow 3s ease-in-out infinite; }
+        @keyframes goldGlow { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.8; } }
+        /* 画卷装饰 -->
+        .scroll-left { position: absolute; left: -20px; top: 100px; width: 50px; height: 350px; background: linear-gradient(90deg, #d4a574, #8b6914, #d4a574); border-radius: 25px; box-shadow: 0 0 20px rgba(212, 165, 116, 0.5); }
+        .scroll-right { position: absolute; right: -20px; top: 100px; width: 50px; height: 350px; background: linear-gradient(90deg, #d4a574, #8b6914, #d4a574); border-radius: 25px; box-shadow: 0 0 20px rgba(212, 165, 116, 0.5); }
+        /* 花朵装饰 -->
+        .flowers { position: absolute; width: 100%; height: 100%; pointer-events: none; }
+        .flower { position: absolute; border-radius: 50%; animation: bloom 3s ease-in-out infinite; }
+        .flower:nth-child(1) { width: 30px; height: 30px; top: 60px; left: 50px; background: radial-gradient(circle, #ffb7c5, #ff69b4); animation-delay: 0s; }
+        .flower:nth-child(2) { width: 25px; height: 25px; top: 150px; right: 70px; background: radial-gradient(circle, #ff69b4, #ff1493); animation-delay: 0.5s; }
+        .flower:nth-child(3) { width: 20px; height: 20px; bottom: 150px; left: 80px; background: radial-gradient(circle, #87ceeb, #4169e1); animation-delay: 1s; }
+        .flower:nth-child(4) { width: 28px; height: 28px; bottom: 100px; right: 60px; background: radial-gradient(circle, #98fb98, #228b22); animation-delay: 1.5s; }
+        .flower:nth-child(5) { width: 15px; height: 15px; top: 250px; left: 40px; background: radial-gradient(circle, #ffd700, #ffa500); animation-delay: 2s; }
+        @keyframes bloom { 0%, 100% { transform: scale(1) rotate(0deg); opacity: 0.8; } 50% { transform: scale(1.2) rotate(180deg); opacity: 1; } }
+        /* 鸟类 -->
+        .bird { position: absolute; font-size: 20px; animation: fly 4s ease-in-out infinite; }
+        .bird:nth-child(1) { top: 100px; right: 80px; animation-delay: 0s; }
+        .bird:nth-child(2) { top: 180px; left: 60px; animation-delay: 1s; }
+        .bird:nth-child(3) { bottom: 180px; right: 70px; animation-delay: 2s; }
+        @keyframes fly { 0%, 100% { transform: translateY(0) translateX(0); } 25% { transform: translateY(-10px) translateX(5px); } 75% { transform: translateY(5px) translateX(-5px); } }
+        .rarity { position: absolute; top: 15px; left: 15px; font-size: 14px; color: #ffd700; text-shadow: 0 0 10px #ffd700; font-weight: bold; }
+        .charm { position: absolute; top: 15px; right: 15px; background: linear-gradient(135deg, #d4a574, #ffd700); color: #1a1a2e; padding: 4px 12px; border-radius: 12px; font-weight: bold; }
+        .name-box { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); background: linear-gradient(180deg, rgba(45, 31, 61, 0.9), #1a1a2e); border: 2px solid #d4a574; border-radius: 4px; padding: 8px 24px; text-align: center; }
+        .name-box h2 { color: #ffd700; font-size: 22px; font-weight: bold; letter-spacing: 4px; }
+        .name-box .skill { color: #ffb7c5; font-size: 12px; margin-top: 4px; letter-spacing: 2px; }
+        .character { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); width: 280px; height: 400px; }
+        .particles { position: absolute; width: 100%; height: 100%; pointer-events: none; }
+        .particle { position: absolute; width: 4px; height: 4px; background: #ffb7c5; border-radius: 50%; animation: float 4s ease-in-out infinite; }
+        .particle:nth-child(1) { top: 80px; left: 40px; animation-delay: 0s; }
+        .particle:nth-child(2) { top: 200px; right: 50px; animation-delay: 0.5s; }
+        .particle:nth-child(3) { top: 350px; left: 70px; animation-delay: 1s; }
+        @keyframes float { 0%, 100% { transform: translateY(0); opacity: 0.6; } 50% { transform: translateY(-15px); opacity: 1; } }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <!-- 画卷卷轴 -->
+        <div class="scroll-left"></div>
+        <div class="scroll-right"></div>
+        <!-- 花朵 -->
+        <div class="flowers">
+            <div class="flower"></div><div class="flower"></div><div class="flower"></div><div class="flower"></div><div class="flower"></div>
+        </div>
+        <!-- 鸟类 -->
+        <div class="bird">&#x1F426;</div>
+        <div class="bird">&#x1F426;</div>
+        <div class="bird">&#x1F426;</div>
+        <div class="particles"><div class="particle"></div><div class="particle"></div><div class="particle"></div></div>
+        <div class="rarity">SSR</div><div class="charm">+3</div>
+        <div class="character">
+            <svg viewBox="0 0 280 400">
+                <defs>
+                    <linearGradient id="inkGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" style="stop-color:#e8e8e8;stop-opacity:0.9"/><stop offset="100%" style="stop-color:#c0c0c0;stop-opacity:0.6"/>
+                    </linearGradient>
+                    <linearGradient id="robeGrad3" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" style="stop-color:#ffe4e1"/><stop offset="100%" style="stop-color:#ffb6c1"/>
+                    </linearGradient>
+                    <filter id="watercolor"><feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="3" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="10" xChannelSelector="R" yChannelSelector="G"/></filter>
+                    <filter id="glow3"><feGaussianBlur stdDeviation="2" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                </defs>
+                <!-- 水墨化身体 - 半透明效果 -->
+                <ellipse cx="140" cy="180" rx="55" ry="90" fill="url(#inkGrad)" filter="url(#watercolor)" opacity="0.7"/>
+                <!-- 粉色和服 -->
+                <path d="M85 140 Q55 180 60 280 Q65 360 85 390 L195 390 Q215 360 220 280 Q225 180 195 140 Q170 120 140 120 Q110 120 85 140" fill="url(#robeGrad3)" opacity="0.9"/>
+                <!-- 和服花纹 -->
+                <circle cx="100" cy="200" r="15" fill="none" stroke="#ff69b4" stroke-width="1" opacity="0.5"/>
+                <circle cx="180" cy="250" r="20" fill="none" stroke="#87ceeb" stroke-width="1" opacity="0.5"/>
+                <circle cx="120" cy="320" r="12" fill="none" stroke="#98fb98" stroke-width="1" opacity="0.5"/>
+                <!-- 宽袖 -->
+                <path d="M85 160 Q40 180 30 240 Q25 280 45 300 Q65 290 75 250 Q85 210 85 180" fill="url(#robeGrad3)" opacity="0.9"/>
+                <path d="M195 160 Q240 180 250 240 Q255 280 235 300 Q215 290 205 250 Q195 210 195 180" fill="url(#robeGrad3)" opacity="0.9"/>
+                <!-- 金色腰带 -->
+                <rect x="80" y="240" width="120" height="18" fill="#ffd700" opacity="0.8"/>
+                <!-- 画卷环绕 - 半透明 -->
+                <path d="M50 100 Q20 200 50 350" stroke="#d4a574" stroke-width="8" fill="none" opacity="0.6"/>
+                <path d="M230 100 Q260 200 230 350" stroke="#d4a574" stroke-width="8" fill="none" opacity="0.6"/>
+                <!-- 展开的画卷背景 -->
+                <rect x="30" y="80" width="220" height="280" fill="none" stroke="#d4a574" stroke-width="2" rx="5" opacity="0.4"/>
+                <!-- 画卷内容 - 花鸟 -->
+                <circle cx="80" cy="150" r="20" fill="#ffb7c5" opacity="0.3"/>
+                <circle cx="200" cy="200" r="15" fill="#87ceeb" opacity="0.3"/>
+                <circle cx="140" cy="280" r="25" fill="#98fb98" opacity="0.3"/>
+                <!-- 脸部 -->
+                <ellipse cx="140" cy="100" rx="35" ry="42" fill="#fff5ee" opacity="0.95"/>
+                <!-- 温柔表情 -->
+                <path d="M125 95 Q130 92 135 95" stroke="#1a1a2e" stroke-width="1.5" fill="none"/>
+                <path d="M145 95 Q150 92 155 95" stroke="#1a1a2e" stroke-width="1.5" fill="none"/>
+                <ellipse cx="130" cy="98" rx="4" ry="3" fill="#1a1a2e"/>
+                <ellipse cx="150" cy="98" rx="4" ry="3" fill="#1a1a2e"/>
+                <circle cx="131" cy="97" r="1.5" fill="#ffd700" filter="url(#glow3)"/>
+                <circle cx="151" cy="97" r="1.5" fill="#ffd700" filter="url(#glow3)"/>
+                <!-- 微笑 -->
+                <path d="M132 112 Q140 118 148 112" stroke="#ff69b4" stroke-width="2" fill="none"/>
+                <!-- 发型 -->
+                <path d="M105 70 Q100 50 110 40 Q130 30 140 35 Q150 30 170 40 Q180 50 175 70" fill="#1a1a2e"/>
+                <path d="M105 70 Q95 100 100 130" stroke="#1a1a2e" stroke-width="8" fill="none"/>
+                <path d="M175 70 Q185 100 180 130" stroke="#1a1a2e" stroke-width="8" fill="none"/>
+                <!-- 发饰 -->
+                <circle cx="140" cy="45" r="8" fill="#ffd700"/>
+                <!-- 持笔姿态 -->
+                <path d="M195 200 Q220 180 240 160" stroke="#fff5ee" stroke-width="12" fill="none" stroke-linecap="round"/>
+                <!-- 毛笔 -->
+                <line x1="240" y1="160" x2="260" y2="140" stroke="#8b4513" stroke-width="4"/>
+                <path d="M260 140 L265 130 L268 145 Z" fill="#1a1a2e"/>
+            </svg>
+        </div>
+        <div class="name-box"><h2>花鸟卷</h2><div class="skill">「画境」</div></div>
+    </div>
+</body>
+</html>

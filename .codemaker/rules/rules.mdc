@@ -1,0 +1,422 @@
+---
+description: AI coding guidance and rules for this repository.
+alwaysApply: true
+---
+
+<rule>
+
+# 御魂传说 - AI 编码规范
+
+## 1. 项目概览
+
+### 1.1 技术栈
+| 层级 | 技术 |
+|------|------|
+| **前端** | Vue 3 + TypeScript + Vite + Socket.io-client + Pixi.js |
+| **后端** | Node.js + Express + TypeScript + Socket.io |
+| **共享层** | TypeScript 类型定义 + 效果引擎 |
+| **测试** | Vitest |
+| **包管理** | npm (各子目录独立 package.json) |
+
+### 1.2 目录结构
+```
+Cardgame/
+├── client/              # Vue 3 前端
+│   └── src/
+│       ├── game/        # 单人游戏逻辑
+│       ├── network/     # Socket.io 客户端
+│       ├── components/  # Vue 组件
+│       └── App.vue      # 主应用
+├── server/              # Express + Socket.io 后端
+│   └── src/
+│       ├── game/        # MultiplayerGame 核心
+│       ├── room/        # 房间管理
+│       └── socket/      # Socket 事件处理
+├── shared/              # 前后端共享代码
+│   ├── types/           # 类型定义 (GameState, PlayerState, CardInstance)
+│   ├── game/effects/    # 效果引擎 (EffectEngine, YokaiEffects, ShikigamiSkills)
+│   └── data/            # 游戏数据 (cards.json)
+├── 策划文档/             # 设计文档、卡牌数据、开发规范
+└── docs/                # 技术文档
+```
+
+---
+
+## 2. 命名规范
+
+### 2.1 文件命名
+- **类文件**: `PascalCase.ts` (如 `MultiplayerGame.ts`, `EffectEngine.ts`)
+- **工具文件**: `camelCase.ts` (如 `loader.ts`)
+- **Vue组件**: `PascalCase.vue` (如 `App.vue`, `RootApp.vue`)
+- **测试文件**: `*.test.ts` (如 `YokaiEffects.test.ts`)
+- **类型定义**: `camelCase.ts` (如 `game.ts`, `cards.ts`, `network.ts`)
+
+### 2.2 代码命名
+- **类/接口**: `PascalCase` (如 `PlayerState`, `GameState`, `MultiplayerGame`)
+- **函数/方法**: `camelCase` (如 `handleAction`, `drawCards`, `executeYokaiEffect`)
+- **变量**: `camelCase` (如 `ghostFire`, `currentPlayer`, `turnPhase`)
+- **类型别名**: `PascalCase` (如 `CardType`, `TurnPhase`, `GameAction`)
+- **枚举值**: `UPPER_SNAKE_CASE` (如 `ErrorCode.ROOM_NOT_FOUND`)
+
+### 2.3 特殊约定
+- **允许中文标识符**: 在效果映射和测试中允许使用中文命名
+  ```typescript
+  // ✅ 允许
+  function aiDecide_唐纸伞妖(topCard: CardInstance): number { ... }
+  registerEffect('天邪鬼青', handler);
+  describe('招福达摩', () => { ... });
+  ```
+
+---
+
+## 3. 核心类型引用
+
+### 3.1 游戏状态类型
+```typescript
+// 从 shared/types 导入
+import type {
+  GameState,        // 完整游戏状态
+  PlayerState,      // 玩家状态
+  FieldState,       // 场地状态
+  CardInstance,     // 卡牌实例
+  CardType,         // 'spell' | 'yokai' | 'boss' | 'shikigami' | ...
+  TurnPhase,        // 'ghostFire' | 'action' | 'cleanup'
+  GameAction,       // 玩家操作类型
+  GameEvent,        // 游戏事件类型
+} from '@shared/types';
+```
+
+### 3.2 效果系统类型
+```typescript
+// 从 shared/game/effects/types 导入
+import type {
+  EffectContext,    // 效果执行上下文
+  CardEffect,       // 卡牌效果定义
+  AtomEffect,       // 原子效果
+  ChoiceEffect,     // 选择效果
+  ConditionalEffect,// 条件效果
+} from '@shared/game/effects/types';
+```
+
+### 3.3 关键接口速查
+```typescript
+interface PlayerState {
+  id: string;
+  name: string;
+  ghostFire: number;      // 当前鬼火
+  maxGhostFire: number;   // 鬼火上限
+  hand: CardInstance[];   // 手牌
+  deck: CardInstance[];   // 牌库
+  discard: CardInstance[];// 弃牌堆
+  exiled: CardInstance[]; // 超度区
+  shikigami: ShikigamiCard[];      // 式神
+  shikigamiState: ShikigamiState[];// 式神状态
+  damage: number;         // 累计伤害
+  reputation: number;     // 声誉
+  tempBuffs: TempBuff[];  // 临时效果
+}
+
+interface CardInstance {
+  instanceId: string;     // 唯一实例ID
+  cardId: string;         // 卡牌ID (如 'yokai_002')
+  cardType: CardType;     // 卡牌类型
+  name: string;           // 卡牌名称
+  hp: number;             // 当前HP
+  maxHp: number;          // 最大HP
+  damage?: number;        // 伤害值
+  charm?: number;         // 声誉值
+  effect?: string;        // 效果描述
+}
+```
+
+---
+
+## 4. 卡牌开发流程
+
+> **重要**: 所有卡牌效果开发必须遵循 `策划文档/卡牌数据/卡牌开发.md` 中的规范
+
+### 4.1 六步开发流程
+1. **创建需求文档**: 在 `策划文档/卡牌数据/卡牌具体文档/【卡牌名】.md` 创建文档
+2. **效果分解**: 将卡牌效果拆解为独立逻辑步骤
+3. **编写 TDD 测试**: 在 `shared/game/effects/*.test.ts` 中编写测试
+4. **实现效果**: 在对应的 Effects 文件中实现
+5. **运行测试**: `cd shared && npm test -- "卡牌名"`
+6. **验收测试**: 在实际游戏中手动测试
+
+### 4.2 效果实现模板
+```typescript
+// shared/game/effects/YokaiEffects.ts
+registerEffect('唐纸伞妖', async (ctx) => {
+  const { player, gameState, triggerInteract } = ctx;
+  
+  // 1. 伤害+1
+  player.damage += 1;
+  
+  // 2. 查看牌库顶牌
+  if (player.deck.length > 0) {
+    const topCard = player.deck[0];
+    
+    // 3. 交互选择
+    const choice = await triggerInteract?.({
+      type: 'salvageChoice',
+      playerId: player.id,
+      card: topCard,
+      prompt: '是否超度牌库顶牌？'
+    });
+    
+    // 4. 执行选择结果
+    if (choice === 1) {
+      const card = player.deck.shift()!;
+      player.exiled.push(card);
+    }
+  }
+  
+  return { success: true, message: '伤害+1' };
+});
+```
+
+### 4.3 测试模板
+```typescript
+// shared/game/effects/YokaiEffects.test.ts
+describe('唐纸伞妖', () => {
+  it('🟢 正常流程: 伤害+1，选择超度', async () => {
+    const player = createTestPlayer({ deck: [createTestCard()] });
+    const ctx = createTestContext(player);
+    ctx.triggerInteract = async () => 1; // 选择超度
+    
+    await executeYokaiEffect('唐纸伞妖', ctx);
+    
+    expect(player.damage).toBe(1);
+    expect(player.deck.length).toBe(0);
+    expect(player.exiled.length).toBe(1);
+  });
+  
+  it('🔴 边界条件: 牌库为空', async () => {
+    const player = createTestPlayer({ deck: [] });
+    const ctx = createTestContext(player);
+    
+    await executeYokaiEffect('唐纸伞妖', ctx);
+    
+    expect(player.damage).toBe(1);
+    expect(player.exiled.length).toBe(0);
+  });
+});
+```
+
+---
+
+## 5. 开发命令
+
+### 5.1 启动开发环境
+```bash
+# 启动服务端 (热重载)
+cd server && npm run dev      # 或 npx tsx watch src/index.ts
+
+# 启动客户端 (Vite)
+cd client && npm run dev
+
+# 服务端默认: http://localhost:3002
+# 客户端默认: http://localhost:5173
+```
+
+### 5.2 测试命令
+```bash
+# 运行所有测试
+cd shared && npm test
+
+# 运行指定测试文件
+cd shared && npm test -- "YokaiEffects"
+
+# 运行指定测试用例
+cd shared && npm test -- "唐纸伞妖"
+
+# 监听模式
+cd shared && npm run test:watch
+
+# 覆盖率报告
+cd shared && npm run test:coverage
+```
+
+### 5.3 构建命令
+```bash
+cd client && npm run build    # 构建前端
+cd server && npm run build    # 构建后端
+```
+
+---
+
+## 6. 代码风格
+
+### 6.1 TypeScript 规范
+- **严格模式**: 使用 `strict: true`
+- **类型导入**: 使用 `import type` 导入纯类型
+- **避免 any**: 尽量使用具体类型，必要时使用 `unknown`
+- **可选链**: 优先使用 `?.` 和 `??`
+
+### 6.2 异步处理
+```typescript
+// ✅ 推荐: async/await
+async function executeEffect(ctx: EffectContext): Promise<EffectResult> {
+  try {
+    const result = await someAsyncOperation();
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+// ✅ 推荐: 返回统一结果格式
+interface ActionResult {
+  success: boolean;
+  error?: string;
+}
+```
+
+### 6.3 错误处理
+```typescript
+// 服务端: 返回结构化错误
+handleAction(playerId: string, action: GameAction): { success: boolean; error?: string } {
+  const player = this.getPlayer(playerId);
+  if (!player) return { success: false, error: '玩家不存在' };
+  
+  if (this.state.turnPhase !== 'action') {
+    return { success: false, error: '当前阶段不能执行此操作' };
+  }
+  
+  // ... 执行逻辑
+  return { success: true };
+}
+```
+
+### 6.4 日志规范
+```typescript
+// 使用 emoji 前缀区分日志类型
+this.addLog(`🎴 ${player.name} 打出御魂 ${card.name}`);
+this.addLog(`⚡ ${player.name} 使用技能 ${skillName}`);
+this.addLog(`🔥 鬼火+1 (当前: ${player.ghostFire})`);
+this.addLog(`💀 ${yokai.name} 被退治`);
+this.addLog(`🧪 [GM] ${player.name} 获得 ${cardName}`);
+```
+
+---
+
+## 7. Vue 组件规范
+
+### 7.1 组件结构
+```vue
+<template>
+  <!-- 模板内容 -->
+</template>
+
+<script setup lang="ts">
+// 导入
+import { ref, computed, watch, onMounted } from 'vue';
+import type { PlayerState, CardInstance } from '@shared/types';
+
+// Props
+const props = defineProps<{
+  player: PlayerState;
+}>();
+
+// Emits
+const emit = defineEmits<{
+  (e: 'cardPlayed', card: CardInstance): void;
+}>();
+
+// 响应式状态
+const isLoading = ref(false);
+
+// 计算属性
+const handCount = computed(() => props.player.hand.length);
+
+// 方法
+function playCard(card: CardInstance) {
+  emit('cardPlayed', card);
+}
+
+// 生命周期
+onMounted(() => {
+  // 初始化逻辑
+});
+</script>
+
+<style scoped>
+/* 组件样式 */
+</style>
+```
+
+### 7.2 样式规范
+- 使用 `scoped` 隔离样式
+- 使用 `:deep()` 穿透子组件样式
+- CSS 变量定义在 `client/src/styles/` 目录
+
+---
+
+## 8. 网络通信规范
+
+### 8.1 Socket 事件命名
+```typescript
+// 客户端 -> 服务端
+socket.emit('game:action', { type: 'playCard', cardInstanceId: '...' });
+socket.emit('game:salvageResponse', { playerId, salvage: true });
+
+// 服务端 -> 客户端
+socket.emit('game:stateUpdate', gameState);
+socket.emit('game:error', { message: '...' });
+```
+
+### 8.2 GM 调试 API
+```bash
+# 获取房间列表
+GET /api/rooms
+
+# 获取调试信息
+GET /api/gm/debug
+
+# 给玩家添加卡牌
+GET /api/gm/addcard/:roomId/:playerId/:cardName/:count
+
+# 设置式神
+GET /api/gm/setshikigami/:roomId/:playerId/:slotIndex/:shikigamiName
+
+# 设置妖怪
+GET /api/gm/setyokai/:roomId/:slotIndex/:yokaiName
+```
+
+---
+
+## 9. 数据文件规范
+
+### 9.1 cards.json 结构
+```json
+{
+  "version": "0.3.0",
+  "totalCards": 400,
+  "onmyoji": [...],
+  "shikigami": [...],
+  "yokai": [...],
+  "boss": [...],
+  "spell": [...],
+  "token": [...],
+  "penalty": [...]
+}
+```
+
+### 9.2 卡牌ID规范
+- 阴阳师: `onmyoji_001` ~ `onmyoji_xxx`
+- 式神: `shikigami_001` ~ `shikigami_xxx`
+- 妖怪: `yokai_001` ~ `yokai_xxx`
+- 鬼王: `boss_001` ~ `boss_xxx`
+- 阴阳术: `spell_001` ~ `spell_003`
+
+---
+
+## 10. 禁止事项
+
+1. **禁止硬编码**: 卡牌数据必须从 `cards.json` 读取
+2. **禁止跳过测试**: 所有卡牌效果必须有对应测试
+3. **禁止直接修改 state**: 服务端使用 `notifyStateChange()` 广播状态
+4. **禁止同步阻塞**: 网络操作必须使用异步
+5. **禁止中文变量名** (效果映射和测试除外)
+
+</rule>

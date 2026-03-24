@@ -188,8 +188,8 @@
         
         <!-- 右侧信息区 -->
         <div class="info-side-panel">
-          <div class="info-box" @click="handleLogLinkClick">
-            <div v-for="(l,i) in logs.slice(-8)" :key="i" class="info-line" :class="{ 'chat-line': l.type === 'chat' }" v-html="renderLogMessage(l)"></div>
+          <div class="info-box" ref="logRef" @click="handleLogLinkClick" @scroll="handleLogScroll">
+            <div v-for="(l,i) in logs" :key="i" class="info-line" :class="{ 'chat-line': l.type === 'chat' }" v-html="renderLogMessage(l)"></div>
           </div>
           <!-- 聊天输入栏 -->
           <div class="chat-input-bar">
@@ -1108,7 +1108,43 @@ const isMyTurn = computed(() => {
 })
 const yokai = computed(() => state.value?.field.yokaiSlots || [])
 const boss = computed(() => state.value?.field.currentBoss)
-const logs = computed(() => (state.value?.log || []).slice(-6))
+const logs = computed(() => (state.value?.log || []).slice(-300))
+
+// ====== 智能滚动系统 ======
+const isUserScrolling = ref(false)
+let scrollTimer: ReturnType<typeof setTimeout> | null = null
+
+// 检测用户是否在底部
+function isAtBottom(): boolean {
+  if (!logRef.value) return true
+  const el = logRef.value
+  const threshold = 30 // 允许30px的误差
+  return el.scrollHeight - el.scrollTop - el.clientHeight < threshold
+}
+
+// 用户滚动时的处理
+function handleLogScroll() {
+  isUserScrolling.value = !isAtBottom()
+  
+  // 如果用户停止滚动2秒且在底部，重置状态
+  if (scrollTimer) clearTimeout(scrollTimer)
+  scrollTimer = setTimeout(() => {
+    if (isAtBottom()) {
+      isUserScrolling.value = false
+    }
+  }, 2000)
+}
+
+// 监听日志变化，自动滚动到底部（除非用户在查看历史）
+watch(logs, () => {
+  if (!isUserScrolling.value) {
+    nextTick(() => {
+      if (logRef.value) {
+        logRef.value.scrollTop = logRef.value.scrollHeight
+      }
+    })
+  }
+}, { deep: true })
 
 // 日志引用对象点击状态
 const logRefPopup = ref<{
@@ -3255,6 +3291,22 @@ async function confirmReplaceShikigami() {
   overflow-y:auto;
   overflow-x:hidden;
   display:flex;flex-direction:column;gap:calc(var(--s) * 6);
+  scroll-behavior:smooth;
+}
+/* 自定义滚动条样式 - 参考3.4节规范 */
+.info-box::-webkit-scrollbar{
+  width:6px;
+}
+.info-box::-webkit-scrollbar-track{
+  background:#1A1A2E;
+  border-radius:3px;
+}
+.info-box::-webkit-scrollbar-thumb{
+  background:#D4A574;
+  border-radius:3px;
+}
+.info-box::-webkit-scrollbar-thumb:hover{
+  background:#E5B685;
 }
 .info-line{
   background:#2D1F3D;

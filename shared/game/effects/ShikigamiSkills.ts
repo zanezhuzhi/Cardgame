@@ -3,8 +3,45 @@
  * @file shared/game/effects/ShikigamiSkills.ts
  */
 
-import type { PlayerState, GameState } from '../../types/game';
-import type { CardInstance } from '../../types/cards';
+// 直接定义需要的类型接口（避免模块解析问题）
+interface CardInstance {
+  instanceId: string;
+  cardId: string;
+  cardType: string;
+  name: string;
+  hp?: number;
+  maxHp?: number;
+  damage?: number;
+  tags?: string[];
+  [key: string]: any;
+}
+
+interface PlayerState {
+  id: string;
+  name: string;
+  deck: CardInstance[];
+  hand: CardInstance[];
+  discard: CardInstance[];
+  exiled: CardInstance[];
+  ghostFire: number;
+  maxGhostFire: number;
+  damage: number;
+  tempBuffs: any[];
+  [key: string]: any;
+}
+
+interface FieldState {
+  yokaiSlots: (CardInstance | null)[];
+  boss: CardInstance | null;
+  bossMaxHp: number;
+  bossCurrentHp: number;
+}
+
+interface GameState {
+  players: PlayerState[];
+  field: FieldState;
+  [key: string]: any;
+}
 
 export interface SkillContext {
   player: PlayerState;

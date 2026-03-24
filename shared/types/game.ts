@@ -135,6 +135,21 @@ export interface GameState {
   lastPlayerKilledYokai?: boolean;
   /** 是否等待当前玩家决定刷新妖怪 */
   pendingYokaiRefresh?: boolean;
+  
+  // ====== 玩家选择等待 ======
+  /** 等待玩家做出选择（御魂效果、式神技能等） */
+  pendingChoice?: {
+    /** 选择类型 */
+    type: 'salvageChoice' | 'cardSelect' | 'yokaiTarget';
+    /** 等待的玩家ID */
+    playerId: string;
+    /** 选择相关的卡牌信息 */
+    card?: CardInstance;
+    /** 提示文本 */
+    prompt?: string;
+    /** 可选项 */
+    options?: string[];
+  };
 }
 
 // ============ 游戏日志 ============
@@ -156,6 +171,20 @@ export type GameLogType =
   | 'penalty'
   | 'game_end';
 
+/** 日志引用对象类型 */
+export type LogRefType = 'card' | 'shikigami' | 'boss' | 'player';
+
+/** 日志引用对象 */
+export interface LogRef {
+  type: LogRefType;
+  id: string;           // 对象ID（卡牌instanceId、式神id等）
+  name: string;         // 显示名称
+  data?: any;           // 可选：完整对象数据（用于离线展示）
+}
+
+/** 日志可见性 */
+export type LogVisibility = 'public' | 'private';
+
 export interface GameLogEntry {
   type: GameLogType;
   playerId?: string;
@@ -165,6 +194,9 @@ export interface GameLogEntry {
   value?: number;
   message: string;
   timestamp: number;
+  // 新增字段 - 消息同步控制
+  visibility?: LogVisibility;           // 可见性：public=所有人，private=仅自己
+  refs?: Record<string, LogRef>;        // 引用对象映射 {占位符: 对象信息}
 }
 
 // ============ 游戏动作 ============

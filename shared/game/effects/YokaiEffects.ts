@@ -175,8 +175,8 @@ registerEffect('天邪鬼青', async (ctx) => {
   const choice = onChoice ? await onChoice(['抓牌+1', '伤害+1']) : 0;
   
   if (choice === 0) {
-    drawCards(player, 1);
-    return { success: true, message: '天邪鬼青：抓牌+1', draw: 1 };
+    const drawn = drawCards(player, 1);
+    return { success: true, message: '天邪鬼青：抓牌+1', draw: drawn };
   } else {
     player.damage += 1;
     return { success: true, message: '天邪鬼青：伤害+1', damage: 1 };

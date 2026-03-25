@@ -100,6 +100,7 @@ describe('天邪鬼青', () => {
       expect(result.success).toBe(true);
       expect(player.hand.length).toBe(1);
       expect(result.draw).toBe(1);
+      expect(result.message).toContain('抓牌+1');
     });
 
     it('选择伤害+1', async () => {
@@ -112,6 +113,36 @@ describe('天邪鬼青', () => {
       expect(result.success).toBe(true);
       expect(player.damage).toBe(1);
       expect(result.damage).toBe(1);
+      expect(result.message).toContain('伤害+1');
+    });
+
+    it('无 onChoice 时默认选第一项（抓牌+1）', async () => {
+      const result = await executeYokaiEffect('天邪鬼青', {
+        player, gameState,
+        card: createTestCard('yokai', '天邪鬼青'),
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.hand.length).toBe(1);
+      expect(player.damage).toBe(0);
+      expect(result.draw).toBe(1);
+      expect(result.message).toContain('抓牌+1');
+    });
+
+    it('牌库为空时抓牌分支仍可结算（实际抓=0）', async () => {
+      player.deck = [];
+
+      const result = await executeYokaiEffect('天邪鬼青', {
+        player, gameState,
+        card: createTestCard('yokai', '天邪鬼青'),
+        onChoice: async () => 0
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.hand.length).toBe(0);
+      expect(player.damage).toBe(0);
+      expect(result.draw).toBe(0);
+      expect(result.message).toContain('抓牌+1');
     });
   });
 });

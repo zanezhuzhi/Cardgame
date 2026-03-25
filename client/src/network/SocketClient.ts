@@ -9,7 +9,9 @@ import { io, Socket } from 'socket.io-client';
 import { ref, reactive } from 'vue';
 
 // 服务器地址
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3002';
+// 注意：某些环境下浏览器会优先把 `localhost` 解析到 IPv6(::1)，但服务端可能只监听 IPv4。
+// 为避免 `ERR_CONNECTION_REFUSED`，默认使用 127.0.0.1。
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://127.0.0.1:3002';
 
 // 连接状态
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';

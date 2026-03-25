@@ -720,6 +720,12 @@ export class SocketServer {
         callback?.({ success: false, error: '游戏未开始' });
         return;
       }
+
+      console.log('[SocketServer] game:yokaiTargetResponse', {
+        socketId: socket.id,
+        roomId: room.id,
+        targetId: data?.targetId,
+      });
       
       const result = room.game.handleYokaiTargetResponse(socket.id, data.targetId);
       
@@ -728,6 +734,24 @@ export class SocketServer {
         this.broadcastGameState(room.id, room.game.getState());
       }
       
+      callback?.(result);
+    });
+
+    // 御魂二选一响应（天邪鬼青等）
+    socket.on('game:yokaiChoiceResponse' as any, (data: { choiceIndex: number; playerId?: string }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleYokaiChoiceResponse(socket.id, data.choiceIndex);
+
+      if (result.success) {
+        // 广播游戏状态更新
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
       callback?.(result);
     });
   }
@@ -1089,6 +1113,15 @@ export class SocketServer {
           const opts: string[] = pc.options || [];
           if (opts.length > 0) {
             game.handleYokaiTargetResponse(cur.id, opts[0]);
+          }
+          return;
+        }
+        if (pc.type === 'yokaiChoice') {
+          // yohkai二选一：默认选第一个（抓牌+1）
+          const r = game.handleYokaiChoiceResponse(cur.id, 0);
+          if (r.success) {
+            this.broadcastGameState(roomId, game.getState());
+            this.scheduleAiTurn(roomId);
           }
           return;
         }

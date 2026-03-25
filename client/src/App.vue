@@ -424,7 +424,7 @@
           <div class="yokai-target-grid">
             <div v-for="y in yokaiTargetModal.candidates" :key="y.instanceId"
                  class="yokai-target-card"
-                 @click="handleYokaiTargetChoice(y.instanceId)"
+                   @click.stop="handleYokaiTargetChoice(y.instanceId)"
                  @mouseenter="showTooltip($event, y)"
                  @mouseleave="hideTooltip">
               <img v-if="getCardImage(y)" :src="getCardImage(y)" class="yokai-target-img" />
@@ -933,6 +933,7 @@ async function returnToLobby() {
 watch(() => socketClient.gameState.value, (newState) => {
   if (isMultiMode.value && newState) {
     console.log('[App] 多人模式：收到状态更新', newState.phase, newState.turnPhase)
+    syncShikigamiCountdownFromState(newState)
     // 移除强制滚动，由 watch(logs) 智能处理
     
     // 监听 pendingChoice：超度选择弹窗（唐纸伞妖等御魂效果）
@@ -948,10 +949,32 @@ watch(() => socketClient.gameState.value, (newState) => {
       const candidates = newState.field.yokaiSlots.filter(
         (y): y is CardInstance => y !== null && targetIds.includes(y.instanceId)
       )
+      // 只有当 candidates 存在时才打开；否则确保不再残留旧弹窗
       if (candidates.length > 0) {
         yokaiTargetModal.show = true
         yokaiTargetModal.candidates = candidates
         yokaiTargetModal.prompt = newState.pendingChoice.prompt || '选择目标'
+      } else {
+        yokaiTargetModal.show = false
+        yokaiTargetModal.candidates = []
+      }
+    } else {
+      // pendingChoice 不属于我 或 不存在时，强制关闭防止反复弹窗
+      if (yokaiTargetModal.show) {
+        yokaiTargetModal.show = false
+        yokaiTargetModal.candidates = []
+      }
+    }
+
+    // 监听 pendingChoice：御魂二选一弹窗（天邪鬼青等）
+    if (newState.pendingChoice?.type === 'yokaiChoice' && newState.pendingChoice.playerId === myPlayerId.value) {
+      choiceModal.show = true
+      choiceModal.options = newState.pendingChoice.options || []
+      choiceModal.resolve = (index: number) => {
+        socketClient.emit('game:yokaiChoiceResponse', {
+          playerId: myPlayerId.value,
+          choiceIndex: index
+        })
       }
     }
   }
@@ -961,26 +984,9 @@ watch(() => socketClient.gameState.value, (newState) => {
 if (typeof window !== 'undefined') {
   socketClient.on('gameEvent', (event: any) => {
     if (event.type === 'SHIKIGAMI_SELECT_START') {
-      // 启动倒计时
-      const timeout = event.timeout || 20000
-      shikigamiSelectCountdown.value = Math.ceil(timeout / 1000)
-      
-      // 清除旧的定时器
-      if (countdownInterval) {
-        clearInterval(countdownInterval)
-      }
-      
-      // 每秒减少
-      countdownInterval = window.setInterval(() => {
-        if (shikigamiSelectCountdown.value > 0) {
-          shikigamiSelectCountdown.value--
-        } else {
-          if (countdownInterval) {
-            clearInterval(countdownInterval)
-            countdownInterval = null
-          }
-        }
-      }, 1000)
+      // 事件兜底：晚进入页面的客户端会改为从 state 恢复倒计时
+      const timeout = Number(event.timeout) || 20000
+      startShikigamiCountdown(timeout)
     }
   })
 }
@@ -989,11 +995,7 @@ if (typeof window !== 'undefined') {
 onUnmounted(() => {
   document.removeEventListener('click', handleGlobalClick)
   if (chatCooldownTimer) clearInterval(chatCooldownTimer)
-  // 清除倒计时
-  if (countdownInterval) {
-    clearInterval(countdownInterval)
-    countdownInterval = null
-  }
+  clearShikigamiCountdown()
 })
 
 const playerName = ref('阴阳师')
@@ -1044,6 +1046,53 @@ const selectingCards = ref(false)
 // 多人模式：式神选择倒计时
 const shikigamiSelectCountdown = ref(0)
 let countdownInterval: number | null = null
+
+function clearShikigamiCountdown() {
+  if (countdownInterval) {
+    clearInterval(countdownInterval)
+    countdownInterval = null
+  }
+}
+
+function startShikigamiCountdown(timeoutMs: number, startTime?: number) {
+  if (typeof window === 'undefined') return
+
+  clearShikigamiCountdown()
+
+  const elapsed = startTime ? Math.max(0, Date.now() - startTime) : 0
+  const remainMs = Math.max(0, timeoutMs - elapsed)
+  shikigamiSelectCountdown.value = Math.ceil(remainMs / 1000)
+
+  if (shikigamiSelectCountdown.value <= 0) return
+
+  countdownInterval = window.setInterval(() => {
+    if (shikigamiSelectCountdown.value > 0) {
+      shikigamiSelectCountdown.value--
+      return
+    }
+    clearShikigamiCountdown()
+  }, 1000)
+}
+
+function syncShikigamiCountdownFromState(newState: any) {
+  if (!isMultiMode.value) return
+
+  if (!newState || newState.phase !== 'shikigamiSelect') {
+    shikigamiSelectCountdown.value = 0
+    clearShikigamiCountdown()
+    return
+  }
+
+  const timeoutMs = Number(newState.shikigamiSelectTimeout) || 0
+  const startTime = Number(newState.shikigamiSelectStartTime) || 0
+  if (timeoutMs <= 0 || startTime <= 0) return
+
+  const remainSec = Math.ceil(Math.max(0, timeoutMs - (Date.now() - startTime)) / 1000)
+  // 只在首次或出现明显漂移时重建，避免每次 stateSync 都重置倒计时动画
+  if (!countdownInterval || Math.abs(remainSec - shikigamiSelectCountdown.value) > 1) {
+    startShikigamiCountdown(timeoutMs, startTime)
+  }
+}
 
 // 悬浮提示状态
 const tooltip = reactive<{
@@ -2111,6 +2160,7 @@ function handleSalvageChoice(doSalvage: boolean) {
 
 // 妖怪目标选择处理（天邪鬼绿等御魂效果）
 function handleYokaiTargetChoice(targetId: string) {
+  console.log('[UI] handleYokaiTargetChoice emit targetId=', targetId)
   socketClient.emit('game:yokaiTargetResponse', {
     targetId: targetId
   })

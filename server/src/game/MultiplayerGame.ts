@@ -260,6 +260,9 @@ export class MultiplayerGame {
    */
   private startShikigamiSelectTimer(): void {
     this.shikigamiSelectStartTime = Date.now();
+    // 同步到状态，供晚到客户端通过 state 自行恢复倒计时
+    (this.state as any).shikigamiSelectStartTime = this.shikigamiSelectStartTime;
+    (this.state as any).shikigamiSelectTimeout = GAME_CONSTANTS.SHIKIGAMI_SELECT_TIMEOUT;
     
     // 广播倒计时开始
     this.notifyStateChange({
@@ -278,34 +281,41 @@ export class MultiplayerGame {
    */
   private handleShikigamiSelectTimeout(): void {
     console.log(`[MultiplayerGame] 式神选择超时，为未选择的玩家随机分配`);
-    
-    const allOptions = (this.state as any).shikigamiOptions || [];
-    
+
     // 为未确认的玩家随机选择式神
-    for (let i = 0; i < this.state.players.length; i++) {
-      const player = this.state.players[i];
+    for (const player of this.state.players) {
       const selectedList = (player as any).selectedShikigami as ShikigamiCard[] || [];
       
       if (!player.isReady && selectedList.length < 2) {
-        // 获取该玩家的4个选项
-        const start = i * 4;
-        const playerOptions = allOptions.slice(start, start + 4);
-        
-        if (playerOptions.length > 0) {
-          // 过滤掉已选的，从剩余中随机选择
-          const remaining = playerOptions.filter(
-            (s: ShikigamiCard) => !selectedList.some(sel => sel.id === s.id)
-          );
-          const needed = 2 - selectedList.length;
-          const shuffled = shuffle(remaining);
-          const randomPicked = shuffled.slice(0, needed);
-          
-          // 合并已选和随机选的
-          const finalSelection = [...selectedList, ...randomPicked] as ShikigamiCard[];
-          player.shikigami = finalSelection;
-          player.isReady = true;
-          this.addLog(`⏰ ${player.name} 超时，自动分配式神：${finalSelection.map((s: ShikigamiCard) => s.name).join('、')}`);
+        // 优先按 playerId 获取候选，避免依赖玩家数组顺序导致错位
+        const playerOptions = this.playerShikigamiOptions.get(player.id) || [];
+        const fallbackOptions = ((this.state as any).shikigamiOptions as ShikigamiCard[] || []).filter(
+          s => !selectedList.some(sel => sel.id === s.id)
+        );
+        const source = playerOptions.length > 0 ? playerOptions : fallbackOptions;
+
+        if (source.length === 0) {
+          console.warn(`[MultiplayerGame] 玩家 ${player.name}(${player.id}) 超时自动分配失败：无可用候选`);
+          continue;
         }
+
+        // 过滤掉已选的，从剩余中随机选择
+        const remaining = source.filter(
+          (s: ShikigamiCard) => !selectedList.some(sel => sel.id === s.id)
+        );
+        const needed = Math.max(0, 2 - selectedList.length);
+        const randomPicked = shuffle(remaining).slice(0, needed);
+
+        // 合并已选和随机选，并兜底截断为2个
+        const finalSelection = [...selectedList, ...randomPicked].slice(0, 2) as ShikigamiCard[];
+        player.shikigami = finalSelection;
+        player.shikigamiState = finalSelection.map(s => ({
+          cardId: s.id,
+          isExhausted: false,
+          markers: {},
+        }));
+        player.isReady = true;
+        this.addLog(`⏰ ${player.name} 超时，自动分配式神：${finalSelection.map((s: ShikigamiCard) => s.name).join('、')}`);
       }
     }
     
@@ -1054,6 +1064,13 @@ export class MultiplayerGame {
     if (currentPlayer.id !== playerId) {
       return { success: false, error: '不是你的回合' };
     }
+
+    // 行动阶段交互锁：只要存在 pendingChoice，就禁止任何普通 action
+    // 目的：避免在某个玩家等待选择时，其他玩家/AI 继续出牌，覆盖 pendingChoice，
+    // 导致客户端弹窗重复出现或状态卡死。
+    if ((this.state as any).pendingChoice) {
+      return { success: false, error: '请先完成当前选择后再继续操作' };
+    }
     
     switch (action.type) {
       // === 大写格式（兼容旧代码）===
@@ -1249,6 +1266,9 @@ export class MultiplayerGame {
       clearTimeout(this.shikigamiSelectTimer);
       this.shikigamiSelectTimer = undefined;
     }
+    this.shikigamiSelectStartTime = undefined;
+    delete (this.state as any).shikigamiSelectStartTime;
+    delete (this.state as any).shikigamiSelectTimeout;
     
     // 🎲 随机打乱玩家行动顺序
     const originalOrder = this.state.players.map(p => p.name).join(' → ');
@@ -2590,9 +2610,14 @@ export class MultiplayerGame {
           break;
           
         case '天邪鬼青':
-          // 选择：抓牌+1 或 伤害+1（默认抓牌）
-          this.drawCards(player, 1);
-          this.addLog(`   ✨ 御魂：抓牌+1`);
+          // 选择：抓牌+1 或 伤害+1（需要玩家二选一）
+          this.state.pendingChoice = {
+            type: 'yokaiChoice',
+            playerId: player.id,
+            options: ['抓牌+1', '伤害+1'],
+            prompt: '选择一个效果'
+          };
+          this.addLog(`   🎯 御魂：选择抓牌+1 或 伤害+1`);
           break;
           
         case '天邪鬼赤':
@@ -3146,6 +3171,12 @@ export class MultiplayerGame {
    * @param targetId 选择的目标妖怪instanceId
    */
   public handleYokaiTargetResponse(playerId: string, targetId: string): { success: boolean; error?: string } {
+    console.log('[Server] handleYokaiTargetResponse', {
+      playerId,
+      targetId,
+      pending: this.state.pendingChoice?.type,
+      options: (this.state.pendingChoice as any)?.options
+    });
     // 验证是否有等待的目标选择
     if (!this.state.pendingChoice || this.state.pendingChoice.type !== 'yokaiTarget') {
       return { success: false, error: '没有待处理的目标选择' };
@@ -3157,18 +3188,33 @@ export class MultiplayerGame {
     }
     
     const player = this.getPlayer(playerId);
-    if (!player) return { success: false, error: '玩家不存在' };
+    if (!player) {
+      // 兜底：同一玩家的选择已完成/被消费，避免 pendingChoice 反复触发导致卡死
+      this.state.pendingChoice = undefined;
+      this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+      return { success: false, error: '玩家不存在' };
+    }
     
     // 验证目标是否合法
     const validOptions = this.state.pendingChoice.options || [];
     if (!validOptions.includes(targetId)) {
+      // 兜底：非法选择也要清掉 pendingChoice，避免客户端持续弹窗/交互锁导致卡死
+      this.addLog(`   ⚠️ 御魂：非法目标选择已跳过`);
+      this.state.pendingChoice = undefined;
+      this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
       return { success: false, error: '非法的目标选择' };
     }
     
     // 找到并退治目标妖怪
     const idx = this.state.field.yokaiSlots.findIndex(y => y?.instanceId === targetId);
     if (idx === -1) {
+      console.log('[Server] handleYokaiTargetResponse idx not found', {
+        targetId,
+        slots: this.state.field.yokaiSlots.map(s => s?.instanceId)
+      });
+      // 兜底：避免 pendingChoice 残留
       this.state.pendingChoice = undefined;
+      this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
       return { success: false, error: '目标妖怪不存在' };
     }
     
@@ -3182,6 +3228,42 @@ export class MultiplayerGame {
     this.state.pendingChoice = undefined;
     this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
     
+    return { success: true };
+  }
+
+  /**
+   * 处理御魂二选一响应（天邪鬼青等）
+   * @param playerId 玩家ID（socket.id）
+   * @param choiceIndex 选项下标：0=抓牌+1，1=伤害+1（按 pendingChoice.options 顺序）
+   */
+  public handleYokaiChoiceResponse(playerId: string, choiceIndex: number): { success: boolean; error?: string } {
+    // 验证是否有等待的二选一
+    if (!this.state.pendingChoice || this.state.pendingChoice.type !== 'yokaiChoice') {
+      return { success: false, error: '没有待处理的御魂选择' };
+    }
+    // 验证是否是正确的玩家
+    if (this.state.pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+
+    // 默认兜底：无效下标按 0（抓牌+1）
+    const idx = Number.isFinite(choiceIndex) ? choiceIndex : 0;
+
+    if (idx === 0) {
+      const drawn = this.drawCards(player, 1);
+      this.addLog(`   ✨ 御魂：抓牌+1（抓到${drawn}张）`);
+    } else {
+      player.damage += 1;
+      this.addLog(`   ✨ 御魂：伤害+1`);
+    }
+
+    // 清除等待状态
+    this.state.pendingChoice = undefined;
+
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
     return { success: true };
   }
 

@@ -207,6 +207,8 @@
               :disabled="chatCooldownRemaining > 0 && !chatInputText.startsWith('/')"
               maxlength="100"
               @keydown.enter.exact.prevent="handleChatSend"
+              @keydown.up.exact.prevent="handleChatHistoryUp"
+              @keydown.down.exact.prevent="handleChatHistoryDown"
               @input="handleChatInputChange"
             />
             <button
@@ -260,7 +262,6 @@
       <div class="bot-row">
         <!-- 式神区 -->
         <div class="shiki-panel">
-          <div class="shiki-label">式神</div>
           <div class="shiki-cards">
             <div v-for="(s,i) in player?.shikigami" :key="s.id" 
                  class="shiki-card" 
@@ -292,11 +293,11 @@
           <div class="damage-display">
             <span>⚔️</span><b>{{player?.damage||0}}</b>
           </div>
-          <div class="hand-label">手牌</div>
           <div class="hand-cards">
-            <div v-for="c in player?.hand" :key="c.instanceId" 
+            <div v-for="(c, idx) in (player?.hand || [])" :key="c.instanceId" 
                  class="hand-card" 
                  :class="[cardType(c), {selecting: selectingCards, unplayable: !canPlay(c)}]"
+                 :style="{ zIndex: idx + 1 }"
                  @click="handleCardClick(c)"
                  @mouseenter="showTooltip($event, c)"
                  @mouseleave="hideTooltip">
@@ -971,7 +972,7 @@ watch(() => socketClient.gameState.value, (newState) => {
       choiceModal.show = true
       choiceModal.options = newState.pendingChoice.options || []
       choiceModal.resolve = (index: number) => {
-        socketClient.emit('game:yokaiChoiceResponse', {
+        socketClient.send('game:yokaiChoiceResponse', {
           playerId: myPlayerId.value,
           choiceIndex: index
         })
@@ -980,21 +981,26 @@ watch(() => socketClient.gameState.value, (newState) => {
   }
 }, { deep: true })
 
+function handleGameEvent(event: any) {
+  if (event.type === 'SHIKIGAMI_SELECT_START') {
+    // 事件兜底：晚进入页面的客户端会改为从 state 恢复倒计时
+    const timeout = Number(event.timeout) || 20000
+    startShikigamiCountdown(timeout)
+  }
+}
+
 // 多人模式：监听游戏事件（倒计时等）
 if (typeof window !== 'undefined') {
-  socketClient.on('gameEvent', (event: any) => {
-    if (event.type === 'SHIKIGAMI_SELECT_START') {
-      // 事件兜底：晚进入页面的客户端会改为从 state 恢复倒计时
-      const timeout = Number(event.timeout) || 20000
-      startShikigamiCountdown(timeout)
-    }
-  })
+  socketClient.on('gameEvent', handleGameEvent)
 }
 
 // 组件卸载时的清理
 onUnmounted(() => {
   document.removeEventListener('click', handleGlobalClick)
   if (chatCooldownTimer) clearInterval(chatCooldownTimer)
+  // 解绑 socket 监听，避免页面重进/HMR 后重复注册导致重复日志
+  socketClient.off('gameEvent', handleGameEvent)
+  socketClient.off('gmResult', handleGMResult)
   clearShikigamiCountdown()
 })
 
@@ -1322,6 +1328,9 @@ const logRefPopup = ref<{
 // ====== 聊天系统 ======
 const chatInputRef = ref<HTMLInputElement | null>(null)
 const chatInputText = ref('')
+const chatInputHistory = ref<string[]>([])
+let chatHistoryIndex = -1
+let chatDraftBeforeHistory = ''
 const showEmojiPanel = ref(false)
 const chatCooldownRemaining = ref(0)
 let chatCooldownTimer: ReturnType<typeof setInterval> | null = null
@@ -1343,7 +1352,21 @@ const gmCommandHistory = ref<string[]>([])
 let gmHistoryIndex = -1
 
 function handleChatInputChange() {
-  // 实时更新 placeholder 逻辑（通过 computed 已处理）
+  // 用户手动输入时，退出历史浏览状态
+  if (chatHistoryIndex !== -1) {
+    chatHistoryIndex = -1
+    chatDraftBeforeHistory = ''
+  }
+}
+
+function rememberChatInputHistory(text: string) {
+  const normalized = text.trim()
+  if (!normalized) return
+  if (chatInputHistory.value[0] === normalized) return
+  chatInputHistory.value.unshift(normalized)
+  if (chatInputHistory.value.length > 50) chatInputHistory.value.pop()
+  chatHistoryIndex = -1
+  chatDraftBeforeHistory = ''
 }
 
 function handleChatSend() {
@@ -1365,6 +1388,7 @@ function handleChatSend() {
       // 单人模式本地处理GM指令
       handleLocalGMCommand(command)
     }
+    rememberChatInputHistory(text)
   } else {
     // 聊天消息
     if (chatCooldownRemaining.value > 0) return
@@ -1377,6 +1401,7 @@ function handleChatSend() {
       // 单人模式本地添加聊天记录
       addLocalChatLog(text)
     }
+    rememberChatInputHistory(text)
 
     // 启动冷却
     startChatCooldown()
@@ -1384,6 +1409,43 @@ function handleChatSend() {
 
   chatInputText.value = ''
   showEmojiPanel.value = false
+}
+
+function focusChatInputToEnd() {
+  nextTick(() => {
+    const input = chatInputRef.value
+    if (!input) return
+    input.focus()
+    const pos = chatInputText.value.length
+    input.setSelectionRange(pos, pos)
+  })
+}
+
+function handleChatHistoryUp() {
+  if (chatInputHistory.value.length === 0) return
+
+  if (chatHistoryIndex === -1) {
+    chatDraftBeforeHistory = chatInputText.value
+  }
+
+  if (chatHistoryIndex < chatInputHistory.value.length - 1) {
+    chatHistoryIndex++
+    chatInputText.value = chatInputHistory.value[chatHistoryIndex] || ''
+    focusChatInputToEnd()
+  }
+}
+
+function handleChatHistoryDown() {
+  if (chatInputHistory.value.length === 0 || chatHistoryIndex === -1) return
+
+  chatHistoryIndex--
+  if (chatHistoryIndex >= 0) {
+    chatInputText.value = chatInputHistory.value[chatHistoryIndex] || ''
+  } else {
+    chatInputText.value = chatDraftBeforeHistory
+    chatDraftBeforeHistory = ''
+  }
+  focusChatInputToEnd()
 }
 
 function handleLocalGMCommand(command: string) {
@@ -1465,23 +1527,24 @@ function insertEmoji(emoji: string) {
   showEmojiPanel.value = false
 }
 
-// 监听GM指令结果（多人模式）- 使用标志防止重复注册
-let gmResultListenerRegistered = false
+function handleGMResult(data: { message: string; success: boolean }) {
+  if (state.value) {
+    state.value.log.push({
+      type: 'chat' as any,
+      message: `⚙️ [GM] ${data.message}`,
+      timestamp: Date.now(),
+      logSeq: takeClientDirectLogSeq(),
+      visibility: 'private',
+      playerId: player.value?.id,
+    })
+  }
+}
+
+// 监听GM指令结果（多人模式）
 function registerGMResultListener() {
-  if (gmResultListenerRegistered) return
-  gmResultListenerRegistered = true
-  socketClient.on('gmResult', (data: { message: string; success: boolean }) => {
-    if (state.value) {
-      state.value.log.push({
-        type: 'chat' as any,
-        message: `⚙️ [GM] ${data.message}`,
-        timestamp: Date.now(),
-        logSeq: takeClientDirectLogSeq(),
-        visibility: 'private',
-        playerId: player.value?.id,
-      })
-    }
-  })
+  // 先解绑同引用，再绑定，避免同一实例中重复注册
+  socketClient.off('gmResult', handleGMResult)
+  socketClient.on('gmResult', handleGMResult)
 }
 registerGMResultListener()
 
@@ -2150,7 +2213,7 @@ function resolveCardSelect() {
 
 // 超度选择处理（唐纸伞妖等御魂效果）
 function handleSalvageChoice(doSalvage: boolean) {
-  socketClient.emit('game:salvageResponse', {
+  socketClient.send('game:salvageResponse', {
     playerId: myPlayerId.value,
     salvage: doSalvage
   })
@@ -2161,7 +2224,7 @@ function handleSalvageChoice(doSalvage: boolean) {
 // 妖怪目标选择处理（天邪鬼绿等御魂效果）
 function handleYokaiTargetChoice(targetId: string) {
   console.log('[UI] handleYokaiTargetChoice emit targetId=', targetId)
-  socketClient.emit('game:yokaiTargetResponse', {
+  socketClient.send('game:yokaiTargetResponse', {
     targetId: targetId
   })
   yokaiTargetModal.show = false
@@ -2207,6 +2270,11 @@ function handleCardClick(c: CardInstance) {
   }
   if (!isMyTurn.value) {
     console.log('[handleCardClick] 不是我的回合，忽略')
+    return
+  }
+
+  if (!canPlay(c)) {
+    console.log('[handleCardClick] 当前不可打出，忽略')
     return
   }
   
@@ -2258,6 +2326,8 @@ async function handleYokaiClick(i: number, y: CardInstance) {
 
 function play(id: string) {
   if (!isMyTurn.value) return
+  const c = player.value?.hand.find(x => x.instanceId === id)
+  if (c && !canPlay(c)) return
   if (isMultiMode.value) {
     socketClient.sendAction({ type: 'playCard', cardInstanceId: id })
   } else {
@@ -2662,6 +2732,15 @@ function cardType(c: CardInstance) {
   } 
 }
 
+/** 多人：天邪鬼绿需场上存在生命∈(0,4] 的游荡妖怪（与服务器 validateYokaiMustHaveTarget 一致） */
+function hasMultiModeTenjoGreenTargets(): boolean {
+  const slots = state.value?.field?.yokaiSlots
+  if (!slots) return false
+  return slots.some(
+    (y): y is CardInstance => y !== null && (y.hp || 0) <= 4 && (y.hp || 0) > 0
+  )
+}
+
 // 检查卡牌是否可以打出
 function canPlay(c: CardInstance): boolean {
   // 多人模式
@@ -2670,9 +2749,17 @@ function canPlay(c: CardInstance): boolean {
     if (state.value?.turnPhase !== 'action') return false
     const p = player.value
     if (!p) return false
+    // 与单人 canPlayCard 一致：令牌/恶评/式神不能从手牌打出（否则 UI 会误判为可打）
+    if (c.cardType === 'token' || c.name === '招福达摩') return false
+    if (c.cardType === 'penalty') return false
+    if (c.cardType === 'shikigami') return false
     // 检查鬼火是否足够
     const cost = c.cost || 0
     if (p.ghostFire < cost) return false
+    // 单目标御魂：无合法目标不可打出（与天邪鬼绿规则一致）
+    if (c.cardType === 'yokai' && (c.cardId === 'yokai_003' || c.name === '天邪鬼绿')) {
+      if (!hasMultiModeTenjoGreenTargets()) return false
+    }
     return true
   }
   // 单人模式
@@ -4031,15 +4118,6 @@ async function confirmReplaceShikigami() {
   padding:calc(var(--s) * 10);
   align-items:center;
 }
-.shiki-label{
-  position:absolute;
-  top:50%;left:50%;
-  transform:translate(-50%,-50%);
-  font-size:calc(var(--s) * 42);
-  color:#FFD700;
-  pointer-events:none;
-  opacity:.3;
-}
 .shiki-cards{
   display:flex;
   gap:calc(var(--s) * 10);
@@ -4166,20 +4244,12 @@ async function confirmReplaceShikigami() {
   font-size:calc(var(--s) * 28);
 }
 .damage-display b{color:#fff;font-size:calc(var(--s) * 32)}
-.hand-label{
-  position:absolute;
-  top:50%;left:50%;
-  transform:translate(-50%,-50%);
-  font-size:calc(var(--s) * 42);
-  color:#FFD700;
-  pointer-events:none;
-  opacity:0.3;
-}
 .hand-cards{
   display:flex;
   gap:0;
   overflow-x:auto;
   flex:1;
+  min-height:0; /* 避免 flex 子项撑出父级竖向滚动条 */
   align-items:center;  /* 改为垂直居中 */
   justify-content:center;
   padding:0 calc(var(--s) * 5);
@@ -4197,6 +4267,7 @@ async function confirmReplaceShikigami() {
   transition:all .18s;
   display:flex;flex-direction:column;justify-content:flex-end;
   position:relative;overflow:hidden;
+  isolation:isolate; /* 每张牌自成层叠上下文，避免与其他手牌的子层（底部遮罩）穿插 */
   border:1px solid #D4A574;
   box-shadow:0 calc(var(--s) * 2) calc(var(--s) * 8) rgba(0,0,0,.4);
   margin-left:calc(var(--s) * 8);  /* 默认正间距，牌少时展开 */
@@ -4218,15 +4289,52 @@ async function confirmReplaceShikigami() {
   transform:translateY(calc(var(--s) * -25)) scale(1.08);
   box-shadow:0 15px 30px rgba(0,0,0,.7);
   border-color:rgba(255,255,255,.6);
-  z-index:10;
+  z-index:1000 !important; /* 盖住所有兄弟手牌（含内联 zIndex） */
 }
 .hand-card.spell{background:linear-gradient(160deg,#0d2b5e,#1565C0)}
 .hand-card.yokai{background:linear-gradient(160deg,#0a2a14,#1b5e20)}
 .hand-card.token{background:linear-gradient(160deg,#3e2000,#e65100)}
 .hand-card.penalty{background:linear-gradient(160deg,#1a1a2e,#37474f)}
 .hand-card.boss{background:linear-gradient(160deg,#2a0030,#6a1b9a)}
-.hand-card.unplayable{opacity:.45;cursor:not-allowed;filter:grayscale(.4)}
-.hand-card.unplayable:hover{transform:none;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+/* 不可打出：整层灰蒙版（禁用感）+ 淡红细边 + 弱外光（10px），不用大卡 opacity、不过分发光以免撑布局 */
+.hand-card.unplayable{
+  cursor:not-allowed;
+  opacity:1;
+  filter:none;
+  border-width:2px;
+  border-color:#d89898;
+  box-shadow:
+    0 0 0 1px rgba(255, 210, 205, 0.65),
+    0 0 10px 1px rgba(255, 120, 110, 0.28),
+    0 calc(var(--s) * 2) calc(var(--s) * 8) rgba(0,0,0,.34);
+}
+.hand-card.unplayable::after{
+  content:'';
+  position:absolute;
+  inset:0;
+  border-radius:inherit;
+  background:rgba(48, 52, 62, 0.58);
+  pointer-events:none;
+  z-index:1;
+}
+.hand-card.unplayable .card-art{
+  filter:brightness(0.88) saturate(0.85);
+}
+.hand-card.unplayable .card-info{
+  position:relative;
+  z-index:2;
+}
+.hand-card.unplayable:hover{
+  transform:none;
+  border-color:#e0a8a8;
+  box-shadow:
+    0 0 0 1px rgba(255, 220, 215, 0.7),
+    0 0 10px 2px rgba(255, 130, 115, 0.3),
+    0 2px 10px rgba(0,0,0,.36);
+}
+.hand-card.unplayable:hover::after{
+  background:rgba(42, 46, 56, 0.62);
+}
 .hand-card.selecting{border:2px solid #ff9800;box-shadow:0 0 10px rgba(255,152,0,.5)}
 
 /* 手牌底部信息条 */

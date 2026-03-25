@@ -28,7 +28,8 @@ Cardgame/
 ├── docs/                          # 技术文档
 │   ├── design/testset.md          # 测试条件与GM测试入口
 │   ├── MULTIPLAYER_ARCHITECTURE.md
-│   └── MULTIPLAYER_SCENARIOS.md
+│   ├── MULTIPLAYER_SCENARIOS.md
+│   └── CLIENT_VISUAL_FX_TECH_PLAN.md  # 客户端视觉/动效与 Pixi 分层方案
 ├── 策划文档/                       # 规则权威来源
 │   ├── 游戏规则说明书.md
 │   ├── 交互设计.md
@@ -52,6 +53,7 @@ Cardgame/
 ### 技术（再看）
 - `docs/design/testset.md`：测试开关、测试流程、GM测试
 - `docs/MULTIPLAYER_ARCHITECTURE.md`：多人架构
+- `docs/CLIENT_VISUAL_FX_TECH_PLAN.md`：逻辑稳定后的美化阶段——Vue 与 Pixi 分层、粒子与资源策略（对标 2D 卡牌战斗反馈）
 - `PROGRESS.md`：当前开发进度
 
 ### 关键代码

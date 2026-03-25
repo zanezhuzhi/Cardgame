@@ -2318,6 +2318,21 @@ export class MultiplayerGame {
   }
   
   /**
+   * 御魂打出前置：纯单目标效果在无合法目标时禁止打出（与 executeYokaiEffect 条件一致）
+   */
+  private validateYokaiMustHaveTarget(card: CardInstance): string | null {
+    // 按卡牌身份校验，不依赖 cardType（部分同步数据可能缺省，但仍会走御魂效果分支）
+    if (card.name !== '天邪鬼绿' && card.cardId !== 'yokai_003') return null;
+    const hasTarget = this.state.field.yokaiSlots.some(
+      (y): y is CardInstance => y !== null && (y.hp || 0) <= 4 && (y.hp || 0) > 0
+    );
+    if (!hasTarget) {
+      return '场上没有生命≤4的游荡妖怪，无法使用天邪鬼绿';
+    }
+    return null;
+  }
+
+  /**
    * 抽牌
    */
   private drawCards(player: PlayerState, count: number): void {
@@ -2356,6 +2371,12 @@ export class MultiplayerGame {
     // 检查是否是 token（不能打出）
     if (card.cardType === 'token') {
       return { success: false, error: '令牌不能打出' };
+    }
+
+    // 单目标御魂：场上无合法目标时不可打出（策划文档《卡牌开发》§ 单目标效果与可用性）
+    const yokaiTargetBlock = this.validateYokaiMustHaveTarget(card);
+    if (yokaiTargetBlock) {
+      return { success: false, error: yokaiTargetBlock };
     }
     
     // 移到已打出区域
@@ -2585,7 +2606,8 @@ export class MultiplayerGame {
               .filter((y): y is CardInstance => y !== null && (y.hp || 0) <= 4 && (y.hp || 0) > 0);
             
             if (validTargets.length === 0) {
-              this.addLog(`   ⚠️ 御魂：场上没有符合条件的妖怪`);
+              // 打出前已校验，不应到达；兜底避免静默消耗手牌
+              this.addLog(`   ⚠️ 御魂：场上没有符合条件的妖怪（异常路径）`);
             } else if (validTargets.length === 1) {
               // 只有一个目标时自动选择
               const target = validTargets[0];

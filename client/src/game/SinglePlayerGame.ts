@@ -584,7 +584,12 @@ export class SinglePlayerGame {
     const player = this.getPlayer();
     
     // 辅助函数
-    const hasLowHpYokai = (maxHp: number) => yokaiSlots.some(y => y && (y.currentHp ?? y.hp) <= maxHp);
+    const hasLowHpYokai = (maxHp: number) =>
+      yokaiSlots.some(y => {
+        if (!y) return false
+        const hp = y.currentHp ?? y.hp ?? 0
+        return hp > 0 && hp <= maxHp
+      });
     const hasAnyYokai = () => yokaiSlots.some(y => y !== null);
     const hasOtherHandCards = () => player.hand.length > 1;
     const hasDiscard = () => player.discard.length > 0;

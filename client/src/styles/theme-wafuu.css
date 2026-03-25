@@ -351,15 +351,13 @@ img, a {
   border-color: #ab47bc;
 }
 
+/* 不可用态由 App.vue 手牌样式统一处理（淡红描边、无虚透明），勿在此加 opacity/filter 否则会盖住 scoped 里的边框效果 */
 .hand-card.unplayable {
-  opacity: 0.45;
-  filter: grayscale(40%);
   cursor: not-allowed;
 }
 
 .hand-card.unplayable:hover {
   transform: none;
-  box-shadow: none;
 }
 
 /* ===== 式神卡牌 ===== */

@@ -166,6 +166,9 @@ export interface PlayerState {
   totalCharm: number;
   cardsPlayed: number;
   isConnected: boolean;
+  disconnectedAt?: number;
+  lastActionAt?: number;
+  isOfflineHosted?: boolean;
   isReady: boolean;
   /** 是否为 AI 座位 */
   isAI?: boolean;
@@ -210,6 +213,8 @@ export interface GameState {
   currentPlayerIndex: number;
   turnNumber: number;
   turnPhase: TurnPhase | 'start';
+  turnStartAt?: number;
+  turnTimeoutMs?: number;
   field: FieldState;
   shikigamiDeck?: ShikigamiCard[];
   shikigamiOptions?: ShikigamiCard[];
@@ -218,6 +223,13 @@ export interface GameState {
   lastPlayerKilledYokai?: boolean;
   pendingYokaiRefresh?: boolean;
   turnHadKill?: boolean;
+  pendingChoice?: {
+    type: 'salvageChoice' | 'cardSelect' | 'yokaiTarget' | 'yokaiChoice';
+    playerId: string;
+    card?: CardInstance;
+    prompt?: string;
+    options?: string[];
+  };
   // 式神选择阶段倒计时
   shikigamiSelectTimeout?: number;
   shikigamiSelectStartTime?: number;

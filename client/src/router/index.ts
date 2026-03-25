@@ -26,4 +26,20 @@ const router = createRouter({
   routes,
 });
 
+/** 开发构建：未显式传 devPanel 时默认带上 devPanel=1（传 devPanel=0 可关闭测试面板） */
+if (import.meta.env.DEV) {
+  router.beforeEach((to, _from, next) => {
+    if (to.query.devPanel !== undefined) {
+      next();
+      return;
+    }
+    next({
+      path: to.path,
+      query: { ...to.query, devPanel: '1' },
+      hash: to.hash,
+      replace: true,
+    });
+  });
+}
+
 export default router;

@@ -54,7 +54,7 @@ export class SocketServer {
   private playerNames: Map<string, string> = new Map();
   
   /** 重连超时时间 */
-  private reconnectTimeout: number = 60000; // 1分钟
+  private reconnectTimeout: number = 180000; // 180秒
 
   /** 玩家聊天冷却记录 (socketId -> lastChatTimestamp) */
   private chatCooldowns: Map<string, number> = new Map();
@@ -506,6 +506,45 @@ export class SocketServer {
     // 加入房间
     socket.on('room:join', (roomId, password, callback) => {
       const playerName = socket.data.playerName || `玩家${socket.id.substring(0, 4)}`;
+      const targetRoom = this.roomManager.getRoom(roomId);
+
+      // 进行中对局重连恢复：按“同名且离线”的座位回收
+      if (targetRoom && targetRoom.status === 'playing') {
+        const disconnected = targetRoom.findDisconnectedPlayerByName(playerName);
+        if (disconnected) {
+          const oldPlayerId = disconnected.id;
+          const rebindRoomResult = targetRoom.rebindDisconnectedPlayer(oldPlayerId, socket.id);
+          if (rebindRoomResult.success) {
+            const rebindGameResult = targetRoom.game?.rebindPlayerId(oldPlayerId, socket.id, playerName) ?? false;
+            if (!rebindGameResult) {
+              targetRoom.rebindDisconnectedPlayer(socket.id, oldPlayerId);
+              callback?.({ success: false, error: '重连恢复失败，请重新进入房间' });
+              return;
+            }
+            this.roomManager.rebindPlayerRoom(oldPlayerId, socket.id, targetRoom.id);
+            socket.join(targetRoom.id);
+            socket.data.roomId = targetRoom.id;
+            socket.data.playerId = socket.id;
+            targetRoom.game?.onPlayerReconnected(socket.id);
+            const roomInfo = targetRoom.toRoomInfo();
+            socket.emit('room:joined', roomInfo, socket.id);
+            this.io.to(targetRoom.id).emit('player:reconnected', socket.id);
+            this.io.to(targetRoom.id).emit('room:updated', roomInfo);
+            if (targetRoom.game) {
+              // 立即下发一次最新状态，避免客户端等待下一次广播才恢复棋盘
+              const latest = targetRoom.game.getState();
+              const seq = targetRoom.game.getStateSeq();
+              socket.emit('game:started', latest);
+              socket.emit('game:stateSync', latest, seq);
+            }
+            callback?.({ success: true, room: roomInfo });
+            console.log(`[SocketServer] 玩家 ${playerName} 重连恢复至房间 ${roomId}`);
+            return;
+          }
+          callback?.({ success: false, error: '重连恢复失败，请重新进入房间' });
+          return;
+        }
+      }
       
       const result = this.roomManager.joinRoom(roomId, socket.id, playerName, password);
       
@@ -852,7 +891,7 @@ export class SocketServer {
       case 'help':
         return {
           success: true,
-          message: '可用指令: /help, /status, /ping, /addcard <卡牌名> [数量]',
+          message: '可用指令: /help, /status, /ping, /addcard <卡牌名> [数量], /timeout, /afk [秒], /offline, /online',
         };
 
       case 'status': {
@@ -896,6 +935,58 @@ export class SocketServer {
         } else {
           return { success: false, message: result.error || '添加失败', error: result.error };
         }
+      }
+
+      case 'timeout': {
+        const room = this.roomManager.getRoom(socket.data.roomId || '');
+        if (!room || !room.game) {
+          return { success: false, message: '游戏未开始', error: '游戏未开始' };
+        }
+        const ok = room.game.forceCurrentTurnTimeout();
+        if (!ok) {
+          return { success: false, message: '当前不在可超时的行动阶段', error: '阶段不允许' };
+        }
+        this.broadcastGameState(room.id, room.game.getState());
+        return { success: true, message: '已强制触发当前回合超时结算' };
+      }
+
+      case 'afk': {
+        const room = this.roomManager.getRoom(socket.data.roomId || '');
+        if (!room || !room.game) {
+          return { success: false, message: '游戏未开始', error: '游戏未开始' };
+        }
+        const seconds = Math.max(0, parseInt(args[0] || '301', 10) || 301);
+        const ok = room.game.debugSetPlayerLastActionAgo(socket.id, seconds);
+        if (!ok) {
+          return { success: false, message: '设置 AFK 时间失败', error: '玩家不存在' };
+        }
+        room.game.debugRunAfkCheck();
+        this.broadcastGameState(room.id, room.game.getState());
+        return { success: true, message: `已将你的最后操作时间回拨 ${seconds} 秒，并执行 AFK 检查` };
+      }
+
+      case 'offline': {
+        const room = this.roomManager.getRoom(socket.data.roomId || '');
+        if (!room || !room.game) {
+          return { success: false, message: '游戏未开始', error: '游戏未开始' };
+        }
+        room.playerDisconnected(socket.id);
+        room.game.onPlayerDisconnected(socket.id);
+        this.io.to(room.id).emit('player:disconnected', socket.id, this.reconnectTimeout);
+        this.broadcastGameState(room.id, room.game.getState());
+        return { success: true, message: '已模拟离线托管（180秒保护）' };
+      }
+
+      case 'online': {
+        const room = this.roomManager.getRoom(socket.data.roomId || '');
+        if (!room || !room.game) {
+          return { success: false, message: '游戏未开始', error: '游戏未开始' };
+        }
+        room.playerReconnected(socket.id);
+        room.game.onPlayerReconnected(socket.id);
+        this.io.to(room.id).emit('player:reconnected', socket.id);
+        this.broadcastGameState(room.id, room.game.getState());
+        return { success: true, message: '已恢复在线真人控制' };
       }
 
       default:
@@ -1013,14 +1104,8 @@ export class SocketServer {
         // 如果游戏正在进行，标记玩家断线
         if (room.status === 'playing') {
           room.playerDisconnected(socket.id);
+          room.game?.onPlayerDisconnected(socket.id);
           this.io.to(roomId).emit('player:disconnected', socket.id, this.reconnectTimeout);
-          
-          // 设置重连超时
-          room.setReconnectTimeout(socket.id, this.reconnectTimeout, () => {
-            console.log(`[SocketServer] 玩家 ${socket.id} 重连超时`);
-            this.roomManager.leaveRoom(socket.id);
-            this.io.to(roomId).emit('room:playerLeft', socket.id);
-          });
         } else {
           // 等待中，直接离开
           this.roomManager.leaveRoom(socket.id);
@@ -1066,6 +1151,18 @@ export class SocketServer {
       this.broadcastGameState(room.id, state, event);
       this.scheduleAiTurn(room.id);
     });
+    room.game.setOnForceExit((playerId) => {
+      const leaveResult = this.roomManager.leaveRoom(playerId);
+      const sock = this.io.sockets.sockets.get(playerId);
+      if (sock) {
+        sock.leave(room.id);
+        sock.data.roomId = null;
+        sock.emit('room:left');
+      }
+      if (!leaveResult.roomDeleted) {
+        this.io.to(room.id).emit('room:playerLeft', playerId);
+      }
+    });
   }
 
   private scheduleAiTurn(roomId: string): void {
@@ -1095,7 +1192,9 @@ export class SocketServer {
     if (state.phase !== 'playing') return;
 
     const cur = state.players[state.currentPlayerIndex];
-    if (!this.aiManager.isAI(cur.id)) return;
+    const isSeatAI = this.aiManager.isAI(cur.id);
+    const isOfflineHosted = game.isOfflineHostedPlayer(cur.id);
+    if (!isSeatAI && !isOfflineHosted) return;
 
     this.aiTurnBusy.add(roomId);
     try {

@@ -26,6 +26,9 @@ export interface PlayerState {
     totalCharm: number;
     cardsPlayed: number;
     isConnected: boolean;
+    disconnectedAt?: number;
+    lastActionAt?: number;
+    isOfflineHosted?: boolean;
     isReady: boolean;
     /** 是否为 AI（匹配/机器人座位） */
     isAI?: boolean;
@@ -68,6 +71,8 @@ export interface GameState {
     currentPlayerIndex: number;
     turnNumber: number;
     turnPhase: TurnPhase | 'start';
+    turnStartAt?: number;
+    turnTimeoutMs?: number;
     field: FieldState;
     shikigamiDeck?: ShikigamiCard[];
     log: GameLogEntry[];
@@ -81,7 +86,7 @@ export interface GameState {
     /** 等待玩家做出选择（御魂效果、式神技能等） */
     pendingChoice?: {
         /** 选择类型 */
-        type: 'salvageChoice' | 'cardSelect' | 'yokaiTarget';
+        type: 'salvageChoice' | 'cardSelect' | 'yokaiTarget' | 'yokaiChoice';
         /** 等待的玩家ID */
         playerId: string;
         /** 选择相关的卡牌信息 */
@@ -106,6 +111,7 @@ export interface LogRef {
 export type LogVisibility = 'public' | 'private';
 export interface GameLogEntry {
     type: GameLogType;
+    /** 单调递增序号，保证 v-for key 唯一（避免同 ms 内多条日志与 timestamp 碰撞） */
     logSeq?: number;
     playerId?: string;
     playerName?: string;

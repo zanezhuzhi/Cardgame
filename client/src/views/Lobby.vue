@@ -328,10 +328,19 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { socketClient, type RoomInfo } from '../network/SocketClient';
 
 const router = useRouter();
+const route = useRoute();
+
+/** 进入对局路由时保留 ?devPanel=1 等调试参数 */
+function buildGameRouteQuery(mode: 'single' | 'multi'): Record<string, string> {
+  const q: Record<string, string> = { mode };
+  const d = route.query.devPanel;
+  if (d !== undefined && String(d) !== '') q.devPanel = String(d);
+  return q;
+}
 
 // 状态
 const playerName = ref(localStorage.getItem('playerName') || '');
@@ -567,7 +576,7 @@ function copyRoomCode() {
 }
 
 function playSinglePlayer() {
-  router.push('/game?mode=single');
+  router.push({ path: '/game', query: buildGameRouteQuery('single') });
 }
 
 function addMessage(msg: string) {
@@ -702,7 +711,7 @@ onMounted(() => {
   
   // 游戏开始
   socketClient.on('gameStarted', () => {
-    router.push('/game?mode=multi');
+    router.push({ path: '/game', query: buildGameRouteQuery('multi') });
   });
   
   // 被踢出
@@ -766,7 +775,7 @@ onMounted(() => {
     console.log('[Lobby] 匹配成功，进入游戏:', data);
     stopConfirmPhase();
     stopMatchingTimer();
-    router.push('/game?mode=multi');
+    router.push({ path: '/game', query: buildGameRouteQuery('multi') });
   });
   
   // 匹配失败

@@ -48,6 +48,9 @@ export interface PlayerState {
   
   // 状态
   isConnected: boolean;
+  disconnectedAt?: number;
+  lastActionAt?: number;
+  isOfflineHosted?: boolean;
   isReady: boolean;
   /** 是否为 AI（匹配/机器人座位） */
   isAI?: boolean;
@@ -121,6 +124,8 @@ export interface GameState {
   
   // 回合内状态
   turnPhase: TurnPhase | 'start';  // 支持 start 作为初始值
+  turnStartAt?: number;
+  turnTimeoutMs?: number;
   
   // 战场
   field: FieldState;
@@ -146,7 +151,7 @@ export interface GameState {
   /** 等待玩家做出选择（御魂效果、式神技能等） */
   pendingChoice?: {
     /** 选择类型 */
-    type: 'salvageChoice' | 'cardSelect' | 'yokaiTarget';
+    type: 'salvageChoice' | 'cardSelect' | 'yokaiTarget' | 'yokaiChoice';
     /** 等待的玩家ID */
     playerId: string;
     /** 选择相关的卡牌信息 */

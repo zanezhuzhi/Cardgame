@@ -134,6 +134,8 @@ const GAME_CONSTANTS = {
   SHIKIGAMI_DRAW: 4,
   SHIKIGAMI_KEEP: 2,
   SHIKIGAMI_SELECT_TIMEOUT: 20000, // 式神选择超时时间（毫秒）
+  AFK_TIMEOUT_MS: 300000, // 无操作超时（5分钟）
+  RECONNECT_GRACE_MS: 180000, // 掉线保护窗口（3分钟）
 };
 
 // ============ 工具函数 ============
@@ -181,9 +183,13 @@ export class MultiplayerGame {
   
   /** 交互请求回调 */
   private onInteractRequest?: (playerId: string, request: any) => Promise<any>;
+  /** 强制退出回调（AFK/离线超时） */
+  private onForceExit?: (playerId: string, reason: 'afk' | 'disconnect_timeout') => void;
   
   /** 回合超时定时器 */
   private turnTimer?: NodeJS.Timeout;
+  /** 无操作检查定时器 */
+  private afkTimer?: NodeJS.Timeout;
   
   /** 式神选择倒计时 */
   private shikigamiSelectTimer?: NodeJS.Timeout;
@@ -282,10 +288,22 @@ export class MultiplayerGame {
   private handleShikigamiSelectTimeout(): void {
     console.log(`[MultiplayerGame] 式神选择超时，为未选择的玩家随机分配`);
 
-    // 为未确认的玩家随机选择式神
+    // 为未确认的玩家：已勾满 2 个则视同确认；否则随机补全（与 confirmShikigamiSelection 一致）
     for (const player of this.state.players) {
       const selectedList = (player as any).selectedShikigami as ShikigamiCard[] || [];
       
+      if (!player.isReady && selectedList.length >= 2) {
+        player.shikigami = [...selectedList] as ShikigamiCard[];
+        player.shikigamiState = selectedList.map((s) => ({
+          cardId: s.id,
+          isExhausted: false,
+          markers: {},
+        }));
+        player.isReady = true;
+        this.addLog(`⏰ ${player.name} 超时，自动确认所选式神：${selectedList.map((s) => s.name).join('、')}`);
+        continue;
+      }
+
       if (!player.isReady && selectedList.length < 2) {
         // 优先按 playerId 获取候选，避免依赖玩家数组顺序导致错位
         const playerOptions = this.playerShikigamiOptions.get(player.id) || [];
@@ -318,7 +336,7 @@ export class MultiplayerGame {
         this.addLog(`⏰ ${player.name} 超时，自动分配式神：${finalSelection.map((s: ShikigamiCard) => s.name).join('、')}`);
       }
     }
-    
+
     // 进入游戏阶段
     this.startPlayingPhase();
   }
@@ -672,6 +690,71 @@ export class MultiplayerGame {
     this.onInteractRequest = callback;
   }
 
+  /**
+   * 设置强制退出回调（由 SocketServer 负责实际移出房间）
+   */
+  setOnForceExit(callback: (playerId: string, reason: 'afk' | 'disconnect_timeout') => void): void {
+    this.onForceExit = callback;
+  }
+
+  /**
+   * AFK / 掉线超时等：从对局座位移除玩家，修正 currentPlayerIndex 与回合计时；
+   * 若移除的是当前行动玩家则新开其下一位的回合。须在本轮收集完待踢名单后再调用，避免遍历中改数组。
+   */
+  removePlayerFromActiveGame(playerId: string, options?: { silent?: boolean }): void {
+    const idx = this.state.players.findIndex((p) => p.id === playerId);
+    if (idx < 0) return;
+    if (this.state.phase !== 'playing') return;
+
+    const removed = this.state.players[idx];
+    const name = removed.name;
+
+    this.playerInfoMap.delete(playerId);
+    this.shikigamiSelections.delete(playerId);
+
+    const pc = (this.state as any).pendingChoice;
+    if (pc?.playerId === playerId) {
+      (this.state as any).pendingChoice = undefined;
+    }
+
+    const wasCurrent = idx === this.state.currentPlayerIndex;
+    this.clearTurnTimer();
+
+    this.state.players.splice(idx, 1);
+    if (typeof this.state.playerCount === 'number') {
+      this.state.playerCount = this.state.players.length;
+    }
+
+    if (this.state.players.length === 0) {
+      if (!options?.silent) {
+        this.addLog(`🚪 ${name} 已离开，对局结束`);
+      }
+      this.endGame();
+      return;
+    }
+
+    if (idx < this.state.currentPlayerIndex) {
+      this.state.currentPlayerIndex--;
+    } else if (wasCurrent) {
+      if (this.state.currentPlayerIndex >= this.state.players.length) {
+        this.state.currentPlayerIndex = 0;
+        this.state.turnNumber++;
+      }
+    }
+
+    if (!options?.silent) {
+      this.addLog(`🚪 ${name} 已离开对局`);
+    }
+
+    if (wasCurrent) {
+      const next = this.getCurrentPlayer();
+      this.addLog(`📍 第 ${this.state.turnNumber} 回合，轮到 ${next.name}`);
+      this.startTurn();
+    } else {
+      this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    }
+  }
+
   // ============ 游戏流程 ============
 
   /**
@@ -814,6 +897,13 @@ export class MultiplayerGame {
     // 更新游戏状态
     this.state.phase = 'playing';
     this.state.turnNumber = 1;
+    const now = Date.now();
+    for (const p of this.state.players) {
+      p.lastActionAt = now;
+      p.disconnectedAt = undefined;
+      p.isOfflineHosted = false;
+    }
+    this.startAfkMonitor();
     
     this.addLog('🎮 游戏开始！');
     this.addLog(`📍 第 1 回合，轮到 ${this.getCurrentPlayer().name}`);
@@ -828,6 +918,223 @@ export class MultiplayerGame {
     });
   }
 
+  /** 当前对局中的真人玩家数量（不含 AI 座位） */
+  private getHumanPlayerCount(): number {
+    return this.state.players.filter(p => !p.isAI).length;
+  }
+
+  /**
+   * 按真人数计算回合倒计时（毫秒）
+   * 1人=无限，其余按规则映射。
+   */
+  private getTurnTimeoutMsByHumanCount(): number {
+    const humanCount = this.getHumanPlayerCount();
+    if (humanCount <= 1) return 0;
+    if (humanCount === 2) return 30000;
+    if (humanCount === 3) return 25000;
+    if (humanCount === 4) return 20000;
+    return 15000; // 5-6人
+  }
+
+  private clearTurnTimer(): void {
+    if (this.turnTimer) {
+      clearTimeout(this.turnTimer);
+      this.turnTimer = undefined;
+    }
+  }
+
+  private startTurnTimer(): void {
+    this.clearTurnTimer();
+    const timeoutMs = this.getTurnTimeoutMsByHumanCount();
+    this.state.turnTimeoutMs = timeoutMs;
+    this.state.turnStartAt = timeoutMs > 0 ? Date.now() : undefined;
+    if (timeoutMs <= 0) return;
+
+    const playerId = this.getCurrentPlayer().id;
+    const snapshotTurn = this.state.turnNumber;
+    const snapshotIndex = this.state.currentPlayerIndex;
+    this.turnTimer = setTimeout(() => {
+      // 防止旧定时器误触发新回合
+      if (
+        this.state.turnNumber !== snapshotTurn ||
+        this.state.currentPlayerIndex !== snapshotIndex ||
+        this.getCurrentPlayer().id !== playerId
+      ) {
+        return;
+      }
+      this.handleTurnTimeout(playerId);
+    }, timeoutMs);
+  }
+
+  /** 回合超时：清理待选择并强制结束当前玩家回合 */
+  private handleTurnTimeout(playerId: string): void {
+    if (this.state.phase !== 'playing' || this.state.turnPhase !== 'action') return;
+    const current = this.getCurrentPlayer();
+    if (!current || current.id !== playerId) return;
+
+    // 超时视为玩家发生一次系统操作，避免被 AFK 检查立即判退
+    this.markPlayerAction(playerId);
+    this.resolvePendingChoiceForTimeout(playerId);
+    this.addLog(`⏰ ${current.name} 回合超时，自动结束回合`);
+    this.handleEndTurn(playerId);
+  }
+
+  /** 超时/托管兜底：若存在待选择，自动按最保守分支处理，避免卡死 */
+  private resolvePendingChoiceForTimeout(playerId: string): void {
+    const pc = (this.state as any).pendingChoice;
+    if (!pc || pc.playerId !== playerId) return;
+    if (pc.type === 'salvageChoice') {
+      this.handleSalvageResponse(playerId, false);
+      return;
+    }
+    if (pc.type === 'yokaiTarget') {
+      const opts: string[] = pc.options || [];
+      if (opts.length > 0) this.handleYokaiTargetResponse(playerId, opts[0]);
+      else (this.state as any).pendingChoice = undefined;
+      return;
+    }
+    if (pc.type === 'yokaiChoice') {
+      const opts: string[] = pc.options || [];
+      const damageIdx = opts.findIndex((x: string) => String(x).includes('伤害'));
+      this.handleYokaiChoiceResponse(playerId, damageIdx >= 0 ? damageIdx : 0);
+      return;
+    }
+    (this.state as any).pendingChoice = undefined;
+  }
+
+  private clearAfkTimer(): void {
+    if (this.afkTimer) {
+      clearInterval(this.afkTimer);
+      this.afkTimer = undefined;
+    }
+  }
+
+  private startAfkMonitor(): void {
+    this.clearAfkTimer();
+    this.afkTimer = setInterval(() => this.checkInactivityKick(), 1000);
+  }
+
+  private markPlayerAction(playerId: string): void {
+    const p = this.getPlayer(playerId);
+    if (!p) return;
+    p.lastActionAt = Date.now();
+  }
+
+  /** AFK 判定：300 秒无有效操作直接退出（回调给 Socket 层实际离房） */
+  private checkInactivityKick(): void {
+    if (this.state.phase !== 'playing') return;
+    const now = Date.now();
+    const toKick: string[] = [];
+    for (const p of this.state.players) {
+      if (p.isAI) continue;
+      if (!p.isConnected) continue; // 离线走断线窗口判定
+      const last = p.lastActionAt || this.state.lastUpdate || now;
+      if (now - last >= GAME_CONSTANTS.AFK_TIMEOUT_MS) {
+        toKick.push(p.id);
+      }
+    }
+    for (const id of toKick) {
+      const p = this.getPlayer(id);
+      if (!p || p.isAI || !p.isConnected) continue;
+      this.addLog(`🚪 ${p.name} 长时间无操作（300秒）已退出游戏`);
+      this.removePlayerFromActiveGame(id, { silent: true });
+      this.onForceExit?.(id, 'afk');
+    }
+  }
+
+  /** 玩家断线：进入保护期并启用离线托管 */
+  public onPlayerDisconnected(playerId: string): void {
+    const p = this.getPlayer(playerId);
+    if (!p) return;
+    p.isConnected = false;
+    p.disconnectedAt = Date.now();
+    p.isOfflineHosted = true;
+    this.addLog(`📴 ${p.name} 已掉线，进入180秒重连保护（离线托管中）`);
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    setTimeout(() => {
+      const cur = this.getPlayer(playerId);
+      if (!cur || cur.isConnected) return;
+      if ((Date.now() - (cur.disconnectedAt || 0)) < GAME_CONSTANTS.RECONNECT_GRACE_MS) return;
+      cur.isOfflineHosted = false;
+      this.addLog(`🚪 ${cur.name} 掉线超时（180秒）已退出游戏`);
+      this.removePlayerFromActiveGame(playerId, { silent: true });
+      this.onForceExit?.(playerId, 'disconnect_timeout');
+    }, GAME_CONSTANTS.RECONNECT_GRACE_MS + 500);
+  }
+
+  /** 玩家重连恢复控制 */
+  public onPlayerReconnected(playerId: string): void {
+    const p = this.getPlayer(playerId);
+    if (!p) return;
+    p.isConnected = true;
+    p.disconnectedAt = undefined;
+    p.isOfflineHosted = false;
+    p.lastActionAt = Date.now();
+    this.addLog(`🔌 ${p.name} 已重连，恢复真人控制`);
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+  }
+
+  /** 调试：强制触发当前回合超时流程 */
+  public forceCurrentTurnTimeout(): boolean {
+    if (this.state.phase !== 'playing' || this.state.turnPhase !== 'action') return false;
+    const current = this.getCurrentPlayer();
+    if (!current) return false;
+    this.handleTurnTimeout(current.id);
+    return true;
+  }
+
+  /** 调试：将玩家最后操作时间回拨 N 秒 */
+  public debugSetPlayerLastActionAgo(playerId: string, secondsAgo: number): boolean {
+    const p = this.getPlayer(playerId);
+    if (!p) return false;
+    const safeSec = Math.max(0, Math.floor(secondsAgo));
+    p.lastActionAt = Date.now() - safeSec * 1000;
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return true;
+  }
+
+  /** 调试：立即执行一次 AFK 检查 */
+  public debugRunAfkCheck(): void {
+    this.checkInactivityKick();
+  }
+
+  /** 离线托管状态查询 */
+  public isOfflineHostedPlayer(playerId: string): boolean {
+    const p = this.getPlayer(playerId);
+    return !!p?.isOfflineHosted;
+  }
+
+  /** 重连时把旧 socketId 迁移到新 socketId */
+  public rebindPlayerId(oldPlayerId: string, newPlayerId: string, newName?: string): boolean {
+    if (oldPlayerId === newPlayerId) {
+      this.onPlayerReconnected(oldPlayerId);
+      return true;
+    }
+    const idx = this.state.players.findIndex(p => p.id === oldPlayerId);
+    if (idx < 0) return false;
+    if (this.state.players.some(p => p.id === newPlayerId)) return false;
+    const prev = this.state.players[idx];
+    this.playerInfoMap.delete(oldPlayerId);
+    this.playerInfoMap.set(newPlayerId, {
+      id: newPlayerId,
+      name: newName || prev.name,
+    });
+    this.state.players[idx] = {
+      ...prev,
+      id: newPlayerId,
+      name: newName || prev.name,
+      isConnected: true,
+      disconnectedAt: undefined,
+      isOfflineHosted: false,
+      lastActionAt: Date.now(),
+    };
+    if ((this.state as any).pendingChoice?.playerId === oldPlayerId) {
+      (this.state as any).pendingChoice.playerId = newPlayerId;
+    }
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return true;
+  }
+
   /**
    * 开始回合
    */
@@ -838,6 +1145,7 @@ export class MultiplayerGame {
     player.damage = 0;
     player.cardsPlayed = 0;
     player.tempBuffs = [];
+    player.lastActionAt = Date.now();
     this.state.turnHadKill = false;
     
     // 进入鬼火阶段
@@ -917,6 +1225,7 @@ export class MultiplayerGame {
   private enterActionPhase(): void {
     const player = this.getCurrentPlayer();
     this.state.turnPhase = 'action';
+    this.startTurnTimer();
     
     // 重置式神疲劳状态
     if (player.shikigamiState) {
@@ -937,6 +1246,9 @@ export class MultiplayerGame {
   private enterCleanupPhase(): void {
     const player = this.getCurrentPlayer();
     this.state.turnPhase = 'cleanup';
+    this.clearTurnTimer();
+    this.state.turnStartAt = undefined;
+    this.state.turnTimeoutMs = undefined;
     
     // 重置本回合鬼王击杀标记（ allocate 路径用于 UI 待选）
     (this.state as any).killedBossThisTurn = false;
@@ -1032,13 +1344,17 @@ export class MultiplayerGame {
     // 式神选择阶段的动作不需要检查回合（所有玩家同时选择）
     const shikigamiActions = ['selectShikigami', 'deselectShikigami', 'confirmShikigamiSelection'];
     if (shikigamiActions.includes(action.type)) {
-      return this.handleShikigamiAction(playerId, action);
+      const r = this.handleShikigamiAction(playerId, action);
+      if (r.success) this.markPlayerAction(playerId);
+      return r;
     }
     
     // GM指令不检查回合
     const gmActions = ['gmAddTestCards', 'gmAddCard', 'gmSetShikigami', 'gmAddDamage', 'gmAddToDiscard'];
     if (gmActions.includes(action.type)) {
-      return this.handleGmAction(playerId, action);
+      const r = this.handleGmAction(playerId, action);
+      if (r.success) this.markPlayerAction(playerId);
+      return r;
     }
 
     // 式神选择同步阶段：禁止对局内行动（避免 currentPlayerIndex===0 误当成「可出牌回合」）
@@ -1049,14 +1365,20 @@ export class MultiplayerGame {
     // 式神获取相关action不检查回合（需要实时响应）
     const shikigamiAcquireActions = ['getShikigamiCandidates', 'acquireShikigami', 'replaceShikigami'];
     if (shikigamiAcquireActions.includes(action.type)) {
+      let r: { success: boolean; error?: string } = { success: false, error: '无效动作' };
       switch (action.type) {
         case 'getShikigamiCandidates':
-          return this.handleGetShikigamiCandidates(playerId, action.spellIds, action.isReplace);
+          r = this.handleGetShikigamiCandidates(playerId, action.spellIds, action.isReplace);
+          break;
         case 'acquireShikigami':
-          return this.handleAcquireShikigami(playerId, action.shikigamiId, action.spellIds);
+          r = this.handleAcquireShikigami(playerId, action.shikigamiId, action.spellIds);
+          break;
         case 'replaceShikigami':
-          return this.handleReplaceShikigami(playerId, action.shikigamiId, action.slotIndex || 0, action.spellIds);
+          r = this.handleReplaceShikigami(playerId, action.shikigamiId, action.slotIndex || 0, action.spellIds);
+          break;
       }
+      if (r.success) this.markPlayerAction(playerId);
+      return r;
     }
     
     // 验证是否轮到该玩家
@@ -1072,82 +1394,109 @@ export class MultiplayerGame {
       return { success: false, error: '请先完成当前选择后再继续操作' };
     }
     
+    let result: { success: boolean; error?: string };
     switch (action.type) {
       // === 大写格式（兼容旧代码）===
       case 'PLAY_CARD':
-        return this.handlePlayCard(playerId, action.cardInstanceId);
+        result = this.handlePlayCard(playerId, action.cardInstanceId);
+        break;
       
       case 'USE_SKILL':
-        return this.handleUseSkill(playerId, action.shikigamiId, action.targetId);
+        result = this.handleUseSkill(playerId, action.shikigamiId, action.targetId);
+        break;
       
       case 'ATTACK':
-        return this.handleAttack(playerId, action.targetId, action.damage);
+        result = this.handleAttack(playerId, action.targetId, action.damage);
+        break;
       
       case 'DECIDE_YOKAI_REFRESH':
-        return this.handleYokaiRefresh(action.refresh);
+        result = this.handleYokaiRefresh(action.refresh);
+        break;
       
       case 'END_TURN':
-        return this.handleEndTurn(playerId);
+        result = this.handleEndTurn(playerId);
+        break;
       
       case 'SELECT_SHIKIGAMI':
-        return this.handleShikigamiSelection(playerId, action.selectedIds);
+        result = this.handleShikigamiSelection(playerId, action.selectedIds);
+        break;
       
       // === 小写格式（客户端使用）===
       case 'playCard':
-        return this.handlePlayCard(playerId, action.cardInstanceId);
+        result = this.handlePlayCard(playerId, action.cardInstanceId);
+        break;
       
       case 'useShikigamiSkill':
-        return this.handleUseSkill(playerId, action.shikigamiId, action.targetId);
+        result = this.handleUseSkill(playerId, action.shikigamiId, action.targetId);
+        break;
       
       case 'attackBoss':
-        return this.handleAttackBoss(playerId, action.damage);
+        result = this.handleAttackBoss(playerId, action.damage);
+        break;
       
       case 'allocateDamage':
-        return this.handleAllocateDamage(playerId, action.slotIndex);
+        result = this.handleAllocateDamage(playerId, action.slotIndex);
+        break;
       
       case 'retireYokai':
-        return this.handleRetireYokai(playerId, action.slotIndex);
+        result = this.handleRetireYokai(playerId, action.slotIndex);
+        break;
       
       case 'banishYokai':
-        return this.handleBanishYokai(playerId, action.slotIndex);
+        result = this.handleBanishYokai(playerId, action.slotIndex);
+        break;
       
       case 'retireBoss':
-        return this.handleRetireBoss(playerId);
+        result = this.handleRetireBoss(playerId);
+        break;
       
       case 'banishBoss':
-        return this.handleBanishBoss(playerId);
+        result = this.handleBanishBoss(playerId);
+        break;
       
       
       case 'decideYokaiRefresh':
-        return this.handleYokaiRefresh(action.refresh);
+        result = this.handleYokaiRefresh(action.refresh);
+        break;
       
       case 'endTurn':
-        return this.handleEndTurn(playerId);
+        result = this.handleEndTurn(playerId);
+        break;
       
       case 'confirmShikigamiPhase':
-        return this.handleConfirmShikigamiPhase(playerId);
+        result = this.handleConfirmShikigamiPhase(playerId);
+        break;
       
       case 'gainBasicSpell':
-        return this.handleGainBasicSpell(playerId);
+        result = this.handleGainBasicSpell(playerId);
+        break;
       
       case 'exchangeMediumSpell':
-        return this.handleExchangeMediumSpell(playerId, action.yokaiId);
+        result = this.handleExchangeMediumSpell(playerId, action.yokaiId);
+        break;
       
       case 'exchangeAdvancedSpell':
-        return this.handleExchangeAdvancedSpell(playerId, action.yokaiId);
+        result = this.handleExchangeAdvancedSpell(playerId, action.yokaiId);
+        break;
       
       case 'acquireShikigami':
-        return this.handleAcquireShikigami(playerId, action.shikigamiId, action.spellIds);
+        result = this.handleAcquireShikigami(playerId, action.shikigamiId, action.spellIds);
+        break;
       
       case 'replaceShikigami':
-        return this.handleReplaceShikigami(playerId, action.shikigamiId, action.slotIndex || 0, action.spellIds);
+        result = this.handleReplaceShikigami(playerId, action.shikigamiId, action.slotIndex || 0, action.spellIds);
+        break;
       
       case 'getShikigamiCandidates':
-        return this.handleGetShikigamiCandidates(playerId, action.spellIds, action.isReplace);
+        result = this.handleGetShikigamiCandidates(playerId, action.spellIds, action.isReplace);
+        break;
       
       default:
-        return { success: false, error: `未知的操作类型: ${(action as any).type}` };
+        result = { success: false, error: `未知的操作类型: ${(action as any).type}` };
+        break;
     }
+    if (result.success) this.markPlayerAction(playerId);
+    return result;
   }
   
   /**
@@ -3643,12 +3992,11 @@ export class MultiplayerGame {
     if (this.cleaned) return;
     this.cleaned = true;
     
-    if (this.turnTimer) {
-      clearTimeout(this.turnTimer);
-      this.turnTimer = undefined;
-    }
+    this.clearTurnTimer();
+    this.clearAfkTimer();
     
     this.onStateChange = undefined;
     this.onInteractRequest = undefined;
+    this.onForceExit = undefined;
   }
 }

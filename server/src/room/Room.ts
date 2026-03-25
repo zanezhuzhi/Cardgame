@@ -308,6 +308,39 @@ export class Room {
   }
 
   /**
+   * 查找指定名称的离线玩家（用于进行中对局的重连恢复）
+   */
+  findDisconnectedPlayerByName(playerName: string): RoomPlayer | undefined {
+    const normalized = (playerName || '').trim();
+    if (!normalized) return undefined;
+    return this.players.find(p => !p.isConnected && p.name === normalized);
+  }
+
+  /**
+   * 重绑定离线玩家ID（旧socket -> 新socket）
+   */
+  rebindDisconnectedPlayer(oldPlayerId: string, newPlayerId: string): { success: boolean; error?: string } {
+    if (oldPlayerId === newPlayerId) {
+      const ok = this.playerReconnected(oldPlayerId);
+      return ok ? { success: true } : { success: false, error: '玩家不存在' };
+    }
+    const oldPlayer = this._players.get(oldPlayerId);
+    if (!oldPlayer) return { success: false, error: '旧玩家不存在' };
+    if (this._players.has(newPlayerId)) return { success: false, error: '新玩家ID已存在' };
+
+    this.clearReconnectTimer(oldPlayerId);
+    this._players.delete(oldPlayerId);
+    this._players.set(newPlayerId, {
+      ...oldPlayer,
+      id: newPlayerId,
+      isConnected: true,
+    });
+    if (this._hostId === oldPlayerId) this._hostId = newPlayerId;
+    this.updateActivity();
+    return { success: true };
+  }
+
+  /**
    * 设置重连超时
    */
   setReconnectTimeout(playerId: string, timeout: number, callback: () => void): void {

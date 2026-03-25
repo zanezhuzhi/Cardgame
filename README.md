@@ -30,6 +30,9 @@ Cardgame/
 │   ├── MULTIPLAYER_ARCHITECTURE.md
 │   ├── MULTIPLAYER_SCENARIOS.md
 │   └── CLIENT_VISUAL_FX_TECH_PLAN.md  # 客户端视觉/动效与 Pixi 分层方案
+├── tools/                         # 开发工具说明（脚本/手测清单，不接入主界面）
+│   ├── README.md
+│   └── multiplayer-timer-gm.md    # 多人计时与托管 GM 手测
 ├── 策划文档/                       # 规则权威来源
 │   ├── 游戏规则说明书.md
 │   ├── 交互设计.md
@@ -51,6 +54,7 @@ Cardgame/
 - `策划文档/备忘录.md`：开发中零散需求与待办（随时追加，正式规格请写入对应专题文档）
 
 ### 技术（再看）
+- `tools/README.md`：根目录工具索引（手测清单等，与主界面解耦）
 - `docs/design/testset.md`：测试开关、测试流程、GM测试
 - `docs/MULTIPLAYER_ARCHITECTURE.md`：多人架构
 - `docs/CLIENT_VISUAL_FX_TECH_PLAN.md`：逻辑稳定后的美化阶段——Vue 与 Pixi 分层、粒子与资源策略（对标 2D 卡牌战斗反馈）
@@ -87,6 +91,7 @@ cd ../client && npm run dev
 文档先行 -> 代码实现 -> 测试验证 -> 更新进度
 
 - 规则变更：先改策划文档，再改代码
+- 新需求实现：先产出技术方案并经需求方确认，再进入编码
 - 功能完成：补测试（自动化 + GM手测）
 - 提交前：至少跑相关模块测试
 
@@ -94,9 +99,15 @@ cd ../client && npm run dev
 
 | 步骤 | 名称 | 内容 |
 |:----:|------|------|
-| **1** | **编写代码** | 实现功能逻辑（类型定义、核心方法、UI渲染） |
-| **2** | **创建核心验证内容** | 定义验证点（边界条件、预期行为、错误处理） |
+| **1** | **文档确认** | 先更新策划/技术文档并与需求方确认范围与验收标准 |
+| **2** | **编写代码** | 实现功能逻辑（类型定义、核心方法、UI渲染） |
 | **3** | **建立 Red/Green TDD 用例** | 编写测试用例，先失败(Red)后通过(Green) |
 | **4** | **自动化测试** | 运行 `npm test` 直至全部通过 |
 | **5** | **创建 GM 指令** | 添加调试指令协助手工测试 |
 | **6** | **提交并重启** | 重启服务端/客户端，人工跟进测试 |
+
+---
+
+## 多人计时 / 托管手测
+
+详见 **`tools/multiplayer-timer-gm.md`**。开发环境下还可加 **`?devPanel=1`** 打开右下角测试面板（仪表盘 + GM 快捷按钮，见 `client/src/dev/DevTestPanel.vue`）。

@@ -77,6 +77,17 @@ export class RoomManager {
     return this._rooms.get(roomId);
   }
 
+  /**
+   * 断线重连时更新 playerId -> roomId 映射（旧socket迁移到新socket）
+   */
+  rebindPlayerRoom(oldPlayerId: string, newPlayerId: string, roomId: string): void {
+    const existing = this._playerRooms.get(oldPlayerId);
+    if (existing && existing === roomId) {
+      this._playerRooms.delete(oldPlayerId);
+    }
+    this._playerRooms.set(newPlayerId, roomId);
+  }
+
   joinRoom(
     roomId: string,
     playerId: string,

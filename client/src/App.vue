@@ -5,7 +5,8 @@
       <div class="lobby-card">
         <h1>🎴 御魂传说</h1>
         <h2>多人对战模式</h2>
-        <p class="tips">正在加载游戏状态...</p>
+        <p class="tips" v-if="socketClient.currentRoom.value">正在同步游戏状态…</p>
+        <p class="tips" v-else>正在跳转到大厅（多人需先在大厅连接并加入房间）</p>
         <button @click="returnToLobby" class="btn">返回大厅</button>
       </div>
     </div>
@@ -156,7 +157,14 @@
           <div class="boss-remain">剩余:{{state?.field.bossDeck.length||0}}</div>
         </div>
         <div class="yokai-panel">
-          <div class="panel-title">👻 游荡妖怪区</div>
+          <div class="yokai-panel-header-row">
+            <div class="panel-title yokai-panel-title">👻 游荡妖怪区</div>
+            <div v-if="showTurnCountdown" class="turn-countdown-bar">
+              <span class="countdown-icon">⏱️</span>
+              <span class="countdown-text">回合倒计时：{{ turnCountdownDisplay }}</span>
+              <div v-if="turnCountdownMax > 0" class="countdown-progress" :style="{ width: (turnCountdown / turnCountdownMax * 100) + '%' }"></div>
+            </div>
+          </div>
           <div class="yokai-grid">
             <div v-for="(y,i) in yokai" :key="i" 
                  class="yokai-card" 
@@ -849,6 +857,8 @@
       <!-- 点击遮罩关闭弹出框 -->
       <div class="log-ref-overlay" v-if="logRefPopup.show" @click="closeLogRefPopup"></div>
     </Teleport>
+    <!-- 开发用：URL 加 ?devPanel=1（可与 mode=multi 同用） -->
+    <DevTestPanel v-if="showDevTestPanel" />
   </div>
 </template>
 
@@ -857,6 +867,7 @@ import { ref, computed, nextTick, reactive, onMounted, onUnmounted, watch } from
 import { useRoute, useRouter } from 'vue-router'
 import { SinglePlayerGame } from './game/SinglePlayerGame'
 import { socketClient } from './network/SocketClient'
+import DevTestPanel from './dev/DevTestPanel.vue'
 import type { GameState } from '../../shared/types/game'
 import type { CardInstance } from '../../shared/types/cards'
 
@@ -864,6 +875,33 @@ import type { CardInstance } from '../../shared/types/cards'
 const route = useRoute()
 const router = useRouter()
 const isMultiMode = computed(() => route.query.mode === 'multi')
+
+/** 仅开发构建且 URL 含 devPanel=1 时显示右下角测试面板 */
+const showDevTestPanel = computed(
+  () => import.meta.env.DEV && String(route.query.devPanel) === '1'
+)
+
+/** 返回大厅时保留 devPanel 等调试参数 */
+function lobbyQueryFromCurrentRoute(): Record<string, string> {
+  const q: Record<string, string> = {}
+  const d = route.query.devPanel
+  if (d !== undefined && String(d) !== '') q.devPanel = String(d)
+  return q
+}
+
+/** 直接打开 /game?mode=multi 且未在大厅进房时：自动回大厅并保留 devPanel */
+watch(
+  () => ({
+    multi: isMultiMode.value,
+    gs: socketClient.gameState.value,
+    room: socketClient.currentRoom.value,
+  }),
+  ({ multi, gs, room }) => {
+    if (!multi || gs || room) return
+    router.replace({ path: '/', query: lobbyQueryFromCurrentRoute() })
+  },
+  { immediate: true }
+)
 
 // ── 卡牌图片路径映射 ──────────────────────────────────────
 // id格式：boss_001 → 101.webp, yokai_001 → 201.webp, shikigami_001 → 401.webp
@@ -927,7 +965,7 @@ async function returnToLobby() {
       console.warn('[App] 返回大厅前离开房间失败:', error)
     }
   }
-  router.push('/')
+  router.push({ path: '/', query: lobbyQueryFromCurrentRoute() })
 }
 
 // 多人模式：监听游戏状态同步
@@ -935,6 +973,7 @@ watch(() => socketClient.gameState.value, (newState) => {
   if (isMultiMode.value && newState) {
     console.log('[App] 多人模式：收到状态更新', newState.phase, newState.turnPhase)
     syncShikigamiCountdownFromState(newState)
+    syncTurnCountdownFromState(newState)
     // 移除强制滚动，由 watch(logs) 智能处理
     
     // 监听 pendingChoice：超度选择弹窗（唐纸伞妖等御魂效果）
@@ -967,8 +1006,9 @@ watch(() => socketClient.gameState.value, (newState) => {
       }
     }
 
-    // 监听 pendingChoice：御魂二选一弹窗（天邪鬼青等）
+    // 监听 pendingChoice：御魂二选一弹窗（天邪鬼青等）；pending 被服务端清空（含 GM 超时回合）时关闭
     if (newState.pendingChoice?.type === 'yokaiChoice' && newState.pendingChoice.playerId === myPlayerId.value) {
+      choiceModal.serverYokaiChoice = true
       choiceModal.show = true
       choiceModal.options = newState.pendingChoice.options || []
       choiceModal.resolve = (index: number) => {
@@ -976,6 +1016,21 @@ watch(() => socketClient.gameState.value, (newState) => {
           playerId: myPlayerId.value,
           choiceIndex: index
         })
+      }
+    } else {
+      if (choiceModal.show && choiceModal.serverYokaiChoice) {
+        choiceModal.show = false
+        choiceModal.options = []
+        choiceModal.resolve = null
+        choiceModal.serverYokaiChoice = false
+      }
+    }
+
+    // 超度弹窗：pending 清空时关闭（超时回合等）
+    if (!(newState.pendingChoice?.type === 'salvageChoice' && newState.pendingChoice.playerId === myPlayerId.value)) {
+      if (salvageChoiceModal.show) {
+        salvageChoiceModal.show = false
+        salvageChoiceModal.card = null
       }
     }
   }
@@ -1002,6 +1057,7 @@ onUnmounted(() => {
   socketClient.off('gameEvent', handleGameEvent)
   socketClient.off('gmResult', handleGMResult)
   clearShikigamiCountdown()
+  clearTurnCountdown()
 })
 
 const playerName = ref('阴阳师')
@@ -1052,11 +1108,27 @@ const selectingCards = ref(false)
 // 多人模式：式神选择倒计时
 const shikigamiSelectCountdown = ref(0)
 let countdownInterval: number | null = null
+const turnCountdown = ref(0)
+const turnCountdownMax = ref(0)
+let turnCountdownInterval: number | null = null
+const showTurnCountdown = computed(() =>
+  isMultiMode.value && !!state.value && state.value.phase === 'playing' && state.value.turnPhase === 'action'
+)
+const turnCountdownDisplay = computed(() =>
+  turnCountdownMax.value <= 0 ? '∞' : `${Math.max(0, turnCountdown.value)}s`
+)
 
 function clearShikigamiCountdown() {
   if (countdownInterval) {
     clearInterval(countdownInterval)
     countdownInterval = null
+  }
+}
+
+function clearTurnCountdown() {
+  if (turnCountdownInterval) {
+    clearInterval(turnCountdownInterval)
+    turnCountdownInterval = null
   }
 }
 
@@ -1097,6 +1169,46 @@ function syncShikigamiCountdownFromState(newState: any) {
   // 只在首次或出现明显漂移时重建，避免每次 stateSync 都重置倒计时动画
   if (!countdownInterval || Math.abs(remainSec - shikigamiSelectCountdown.value) > 1) {
     startShikigamiCountdown(timeoutMs, startTime)
+  }
+}
+
+function startTurnCountdown(timeoutMs: number, startTime?: number) {
+  if (typeof window === 'undefined') return
+  clearTurnCountdown()
+  const maxSec = Math.ceil(Math.max(0, timeoutMs) / 1000)
+  turnCountdownMax.value = maxSec
+  const elapsed = startTime ? Math.max(0, Date.now() - startTime) : 0
+  const remainMs = Math.max(0, timeoutMs - elapsed)
+  turnCountdown.value = Math.ceil(remainMs / 1000)
+  if (timeoutMs <= 0 || turnCountdown.value <= 0) return
+  turnCountdownInterval = window.setInterval(() => {
+    if (turnCountdown.value > 0) {
+      turnCountdown.value--
+      return
+    }
+    clearTurnCountdown()
+  }, 1000)
+}
+
+function syncTurnCountdownFromState(newState: any) {
+  if (!isMultiMode.value) return
+  if (!newState || newState.phase !== 'playing' || newState.turnPhase !== 'action') {
+    turnCountdown.value = 0
+    turnCountdownMax.value = 0
+    clearTurnCountdown()
+    return
+  }
+  const timeoutMs = Number(newState.turnTimeoutMs) || 0
+  if (timeoutMs <= 0) {
+    turnCountdown.value = 0
+    turnCountdownMax.value = 0
+    clearTurnCountdown()
+    return
+  }
+  const startAt = Number(newState.turnStartAt) || 0
+  const remainSec = Math.ceil(Math.max(0, timeoutMs - (Date.now() - startAt)) / 1000)
+  if (!turnCountdownInterval || Math.abs(remainSec - turnCountdown.value) > 1 || turnCountdownMax.value !== Math.ceil(timeoutMs / 1000)) {
+    startTurnCountdown(timeoutMs, startAt)
   }
 }
 
@@ -1142,15 +1254,18 @@ function showHint(title: string, lines: string[]) {
   hintModal.show = true
 }
 
-// 效果选择弹窗
+// 效果选择弹窗（单人 / 多人退治超度 Promise / 多人服务端 yokaiChoice 共用）
 const choiceModal = reactive<{
   show: boolean
   options: string[]
   resolve: ((index: number) => void) | null
+  /** 多人：由 state.pendingChoice.yokaiChoice 驱动，超时/服务端收口需在 state 清空时关窗 */
+  serverYokaiChoice: boolean
 }>({
   show: false,
   options: [],
-  resolve: null
+  resolve: null,
+  serverYokaiChoice: false
 })
 
 // 卡牌选择弹窗
@@ -2160,6 +2275,7 @@ function startGame() {
   // 绑定选择回调
   game.onChoiceRequired = async (options: string[]) => {
     return new Promise<number>((resolve) => {
+      choiceModal.serverYokaiChoice = false
       choiceModal.show = true
       choiceModal.options = options
       choiceModal.resolve = resolve
@@ -2197,6 +2313,7 @@ function resolveChoice(index: number) {
     choiceModal.resolve(index)
     choiceModal.show = false
     choiceModal.resolve = null
+    choiceModal.serverYokaiChoice = false
   }
 }
 
@@ -2302,6 +2419,7 @@ async function handleYokaiClick(i: number, y: CardInstance) {
   if (isKilled(y)) {
     // 已击杀：弹出退治/超度选择
     const choice = await new Promise<number>(resolve => {
+      choiceModal.serverYokaiChoice = false
       choiceModal.show = true
       choiceModal.options = [`退治【${y.name}】（放入弃牌堆）`, `超度【${y.name}】（移出游戏）`]
       choiceModal.resolve = resolve
@@ -3571,6 +3689,45 @@ async function confirmReplaceShikigami() {
   display:flex;flex-direction:column;
   padding:calc(var(--s) * 15);
   overflow:hidden;
+}
+.yokai-panel-header-row{
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  gap:calc(var(--s) * 10);
+  margin-bottom:calc(var(--s) * 8);
+  min-width:0;
+}
+.yokai-panel-header-row .yokai-panel-title{
+  margin-bottom:0;
+  flex-shrink:0;
+  text-align:left;
+  white-space:nowrap;
+}
+.yokai-panel-header-row .turn-countdown-bar{
+  margin-bottom:0;
+  flex:1 1 0;
+  min-width:0;
+}
+.turn-countdown-bar{
+  position: relative;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:calc(var(--s) * 6);
+  margin-bottom:calc(var(--s) * 8);
+  padding:calc(var(--s) * 6) calc(var(--s) * 10);
+  background:rgba(255, 110, 110, 0.16);
+  border:1px solid rgba(255, 130, 130, 0.35);
+  border-radius:calc(var(--s) * 8);
+  overflow:hidden;
+}
+.turn-countdown-bar .countdown-icon{
+  font-size:calc(var(--s) * 18);
+}
+.turn-countdown-bar .countdown-text{
+  font-size:calc(var(--s) * 16);
+  color:#ffc1c1;
 }
 
 /* 游荡妖怪标签 */

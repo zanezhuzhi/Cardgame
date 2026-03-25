@@ -12,6 +12,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    host: true // 允许局域网访问，方便测试
+    host: true, // 允许局域网访问，方便测试
+    open: '/?devPanel=1' // 开发默认打开带调试面板参数
   }
 })

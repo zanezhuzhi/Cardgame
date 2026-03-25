@@ -2349,6 +2349,13 @@ export class MultiplayerGame {
     }
   }
 
+  /** 与 drawCards 一致：至少还能从牌库/弃牌堆抓到 1 张时使用 */
+  private canDrawOneFromPiles(player: PlayerState): boolean {
+    const deckLen = player.deck?.length ?? 0;
+    const discLen = player.discard?.length ?? 0;
+    return deckLen > 0 || discLen > 0;
+  }
+
   /**
    * 处理打牌
    */
@@ -2564,10 +2571,12 @@ export class MultiplayerGame {
    */
   private executeYokaiEffect(player: PlayerState, card: CardInstance, multiplier: number = 1): void {
     const yokaiName = card.name;
-    
+    // 天邪鬼青以 cardId 为准，避免名称字段异常时误入 default 或其它分支
+    const effectKey = card.cardId === 'yokai_004' ? '天邪鬼青' : (yokaiName || '');
+
     // 根据妖怪名称执行效果
     for (let m = 0; m < multiplier; m++) {
-      switch (yokaiName) {
+      switch (effectKey) {
         // ============ 生命2 ============
         case '招福达摩':
           // 无效果
@@ -2631,8 +2640,14 @@ export class MultiplayerGame {
           }
           break;
           
-        case '天邪鬼青':
-          // 选择：抓牌+1 或 伤害+1（需要玩家二选一）
+        case '天邪鬼青': {
+          // 选择：抓牌+1 或 伤害+1；牌库与弃牌堆皆空时无法抓牌，仅结算伤害+1（与 drawCards 可执行条件一致）
+          const canDrawAmanojakuAo = this.canDrawOneFromPiles(player);
+          if (!canDrawAmanojakuAo) {
+            player.damage += 1;
+            this.addLog(`   ✨ 御魂：伤害+1`);
+            break;
+          }
           this.state.pendingChoice = {
             type: 'yokaiChoice',
             playerId: player.id,
@@ -2641,6 +2656,7 @@ export class MultiplayerGame {
           };
           this.addLog(`   🎯 御魂：选择抓牌+1 或 伤害+1`);
           break;
+        }
           
         case '天邪鬼赤':
           // 伤害+1
@@ -3256,7 +3272,7 @@ export class MultiplayerGame {
   /**
    * 处理御魂二选一响应（天邪鬼青等）
    * @param playerId 玩家ID（socket.id）
-   * @param choiceIndex 选项下标：0=抓牌+1，1=伤害+1（按 pendingChoice.options 顺序）
+   * @param choiceIndex 选项下标（按客户端展示的 options 顺序；仅一项时可能为 0 且文案为「伤害+1」）
    */
   public handleYokaiChoiceResponse(playerId: string, choiceIndex: number): { success: boolean; error?: string } {
     // 验证是否有等待的二选一
@@ -3271,12 +3287,19 @@ export class MultiplayerGame {
     const player = this.getPlayer(playerId);
     if (!player) return { success: false, error: '玩家不存在' };
 
-    // 默认兜底：无效下标按 0（抓牌+1）
+    const options = (this.state.pendingChoice.options || []) as string[];
     const idx = Number.isFinite(choiceIndex) ? choiceIndex : 0;
+    const picked = options[idx] ?? options[0] ?? '';
+    const isDraw = typeof picked === 'string' && picked.includes('抓牌');
 
-    if (idx === 0) {
-      const drawn = this.drawCards(player, 1);
-      this.addLog(`   ✨ 御魂：抓牌+1（抓到${drawn}张）`);
+    if (isDraw) {
+      if (!this.canDrawOneFromPiles(player)) {
+        player.damage += 1;
+        this.addLog(`   ✨ 御魂：伤害+1`);
+      } else {
+        this.drawCards(player, 1);
+        this.addLog(`   ✨ 御魂：抓牌+1`);
+      }
     } else {
       player.damage += 1;
       this.addLog(`   ✨ 御魂：伤害+1`);

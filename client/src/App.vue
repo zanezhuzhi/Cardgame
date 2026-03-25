@@ -1555,6 +1555,12 @@ function handleGlobalClick() {
 
 // 渲染日志消息（解析超链接 + 聊天消息样式）
 // lineIndex：当前行在 logs 数组中的下标；用于点击时解析 refs（每条日志的 yokai_0 等键会重复，不能全局搜第一条）
+/** 去掉日志里冗余的「(抓到N张)」等括注，避免旧文案或异常占位显示 undefined */
+function stripLogDrawParentheticals(text: string): string {
+  if (!text) return text
+  return text.replace(/\s*[\(（]抓到[^)）]*[\)）]/g, '')
+}
+
 function renderLogMessage(log: any, lineIndex?: number): string {
   // 聊天消息使用专属样式
   if (log.type === 'chat' && log.chatData) {
@@ -1568,11 +1574,11 @@ function renderLogMessage(log: any, lineIndex?: number): string {
   }
 
   if (!log.refs || Object.keys(log.refs).length === 0) {
-    return escapeHtml(log.message)
+    return escapeHtml(stripLogDrawParentheticals(log.message))
   }
   
   // 解析 {type:name} 格式的占位符
-  let html = escapeHtml(log.message)
+  let html = escapeHtml(stripLogDrawParentheticals(log.message))
   const lineAttr =
     lineIndex != null && lineIndex >= 0 ? ` data-log-line="${lineIndex}"` : ''
   for (const [placeholder, ref] of Object.entries(log.refs as Record<string, any>)) {

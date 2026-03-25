@@ -87,12 +87,20 @@ export async function executeYokaiEffect(
   return handler(ctx);
 }
 
-// 辅助函数：抓牌
+// 辅助函数：抓牌（牌库空时洗入弃牌堆，与 MultiplayerGame/SinglePlayerGame 一致）
 function drawCards(player: PlayerState, count: number): number {
   let drawn = 0;
-  for (let i = 0; i < count && player.deck.length > 0; i++) {
-    player.hand.push(player.deck.pop()!);
-    drawn++;
+  for (let i = 0; i < count; i++) {
+    if (player.deck.length === 0) {
+      if (player.discard.length === 0) break;
+      player.deck = [...player.discard].sort(() => Math.random() - 0.5);
+      player.discard = [];
+    }
+    const card = player.deck.pop();
+    if (card) {
+      player.hand.push(card);
+      drawn++;
+    }
   }
   return drawn;
 }
@@ -169,18 +177,25 @@ export function aiSelect_天邪鬼绿(targets: CardInstance[]): string {
   return sorted[0]!.instanceId;
 }
 
-// 天邪鬼青 - 选择：抓牌+1 或 伤害+1
+// 天邪鬼青 - 选择：抓牌+1 或 伤害+1（牌库与弃牌堆皆空时仅能伤害+1，不弹出抓牌选项）
 registerEffect('天邪鬼青', async (ctx) => {
   const { player, onChoice } = ctx;
-  const choice = onChoice ? await onChoice(['抓牌+1', '伤害+1']) : 0;
-  
-  if (choice === 0) {
+  const canDraw = (player.deck?.length ?? 0) > 0 || (player.discard?.length ?? 0) > 0;
+  let choice: number;
+  if (!canDraw) {
+    choice = 1;
+  } else if (onChoice) {
+    choice = await onChoice(['抓牌+1', '伤害+1']);
+  } else {
+    choice = 0;
+  }
+
+  if (choice === 0 && canDraw) {
     const drawn = drawCards(player, 1);
     return { success: true, message: '天邪鬼青：抓牌+1', draw: drawn };
-  } else {
-    player.damage += 1;
-    return { success: true, message: '天邪鬼青：伤害+1', damage: 1 };
   }
+  player.damage += 1;
+  return { success: true, message: '天邪鬼青：伤害+1', damage: 1 };
 });
 
 // 天邪鬼赤 - 伤害+1，弃置任意手牌，抓等量牌

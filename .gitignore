@@ -15,6 +15,18 @@ build/
 *.local
 
 # ===========================
+# TypeScript build artifacts (repo-local)
+# ===========================
+# `tsc` may emit JS / d.ts into source dirs if misconfigured.
+# Keep sources tracked (e.g. shared/types/*.ts), ignore emitted outputs.
+shared/types/**/*.js
+shared/types/**/*.js.map
+shared/types/**/*.d.ts.map
+shared/game/**/*.js
+shared/game/**/*.js.map
+
+
+# ===========================
 # IDE & Editors
 # ===========================
 .idea/

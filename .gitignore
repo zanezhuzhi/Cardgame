@@ -64,6 +64,8 @@ tmp/
 temp/
 *.tmp
 *.temp
+# 本地草稿/助手生成的提交说明，勿入库
+commit_msg.txt
 
 # ===========================
 # OS generated files

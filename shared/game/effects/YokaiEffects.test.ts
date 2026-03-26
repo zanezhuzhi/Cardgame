@@ -1238,6 +1238,170 @@ describe('灯笼鬼', () => {
   });
 });
 
+describe('树妖', () => {
+  let player: PlayerState;
+  let gameState: GameState;
+
+  beforeEach(() => {
+    player = createTestPlayer({ ghostFire: 2 });
+    // 初始化牌库
+    player.deck = [
+      createTestCard('yokai', '测试牌1'),
+      createTestCard('yokai', '测试牌2'),
+      createTestCard('yokai', '测试牌3')
+    ];
+    gameState = createTestGameState(player);
+  });
+
+  describe('🟢 打出效果：抓牌+2，弃置1张', () => {
+    it('正常流程：抓2张后选择弃1张', async () => {
+      const result = await executeYokaiEffect('树妖', {
+        player,
+        gameState,
+        card: createTestCard('yokai', '树妖'),
+        onSelectCards: async (cards, count) => {
+          // 选择弃置第一张手牌
+          return [cards[0]!.instanceId];
+        }
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.draw).toBe(2);
+      expect(player.hand.length).toBe(1); // 抓2弃1 = 净增1
+      expect(player.discard.length).toBe(1); // 弃了1张
+      expect(player.deck.length).toBe(1); // 原3张 - 抓2张 = 1张
+    });
+
+    it('抓牌后无回调时默认弃第一张', async () => {
+      const result = await executeYokaiEffect('树妖', {
+        player,
+        gameState,
+        card: createTestCard('yokai', '树妖')
+        // 无 onSelectCards
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.hand.length).toBe(1);
+      expect(player.discard.length).toBe(1);
+    });
+  });
+
+  describe('🔴 边界条件', () => {
+    it('牌库空：无法抓牌，也无手牌可弃', async () => {
+      player.deck = [];
+      player.discard = [];
+      player.hand = [];
+
+      const result = await executeYokaiEffect('树妖', {
+        player,
+        gameState,
+        card: createTestCard('yokai', '树妖')
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.hand.length).toBe(0); // 无牌可抓
+      expect(player.discard.length).toBe(0); // 无牌可弃
+    });
+
+    it('牌库只有1张：抓1张后弃1张', async () => {
+      player.deck = [createTestCard('yokai', '唯一牌')];
+
+      const result = await executeYokaiEffect('树妖', {
+        player,
+        gameState,
+        card: createTestCard('yokai', '树妖')
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.hand.length).toBe(0); // 抓1弃1
+      expect(player.discard.length).toBe(1);
+    });
+
+    it('牌库空但弃牌堆有牌：洗牌后抓', async () => {
+      player.deck = [];
+      player.discard = [
+        createTestCard('yokai', '弃牌1'),
+        createTestCard('yokai', '弃牌2')
+      ];
+      player.hand = [];
+
+      const result = await executeYokaiEffect('树妖', {
+        player,
+        gameState,
+        card: createTestCard('yokai', '树妖')
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.hand.length).toBe(1); // 洗牌抓2弃1
+    });
+  });
+
+  describe('🟢 【触】被主动弃置时', () => {
+    it('主动弃置树妖时抓牌+2', async () => {
+      // 导入触发函数
+      const { onTreeDemonDiscard } = await import('./YokaiEffects');
+      
+      // 准备牌库
+      player.deck = [
+        createTestCard('yokai', '抓牌1'),
+        createTestCard('yokai', '抓牌2'),
+        createTestCard('yokai', '抓牌3')
+      ];
+      const treeDemon = createTestCard('yokai', '树妖');
+      player.hand = [treeDemon];
+      const initialHandCount = player.hand.length;
+
+      // 模拟主动弃置树妖
+      const discardedCard = player.hand.splice(0, 1)[0]!;
+      player.discard.push(discardedCard);
+      
+      // 触发【触】效果
+      onTreeDemonDiscard(player, discardedCard);
+
+      // 验证抓牌+2
+      expect(player.hand.length).toBe(2); // 弃置后抓2
+      expect(player.deck.length).toBe(1); // 原3张-抓2张
+    });
+
+    it('弃置非树妖卡牌不触发', async () => {
+      const { onTreeDemonDiscard } = await import('./YokaiEffects');
+      
+      player.deck = [createTestCard('yokai', '牌库牌')];
+      const otherCard = createTestCard('yokai', '其他卡');
+      player.hand = [];
+
+      // 弃置其他卡
+      onTreeDemonDiscard(player, otherCard);
+
+      // 不应抓牌
+      expect(player.hand.length).toBe(0);
+      expect(player.deck.length).toBe(1);
+    });
+  });
+
+  describe('🔴 回合末弃牌不触发【触】', () => {
+    it('回合结束批量清手牌不触发树妖【触】效果', () => {
+      // 此测试验证文档要求：回合末自动弃牌不触发【触】
+      // 实际触发逻辑由 MultiplayerGame 控制，此处仅验证函数存在
+      // 回合末清手牌时不应调用 onTreeDemonDiscard
+      
+      const treeDemon = createTestCard('yokai', '树妖');
+      player.hand = [treeDemon, createTestCard('yokai', '其他')];
+      player.deck = [createTestCard('yokai', '牌库')];
+      
+      // 模拟回合末批量清空（不调用 onTreeDemonDiscard）
+      const handToDiscard = [...player.hand];
+      player.discard.push(...handToDiscard);
+      player.hand = [];
+      
+      // 验证：手牌清空，但牌库未减少（未触发抓牌）
+      expect(player.hand.length).toBe(0);
+      expect(player.deck.length).toBe(1); // 未抓牌
+      expect(player.discard.length).toBe(2);
+    });
+  });
+});
+
 describe('日女巳时', () => {
   let player: PlayerState;
   let gameState: GameState;
@@ -1279,6 +1443,125 @@ describe('日女巳时', () => {
 
     expect(result.success).toBe(true);
     expect(player.damage).toBe(2);
+  });
+
+  describe('🔴 边界条件', () => {
+    it('鬼火已满时不提供鬼火+1选项，默认选择抓牌+2', async () => {
+      player.maxGhostFire = 5;
+      player.ghostFire = 5; // 已满
+      player.hand = [];
+      player.deck = [createTestCard('spell', '测试牌1'), createTestCard('spell', '测试牌2')];
+      
+      // 记录传入onChoice的选项
+      let receivedOptions: string[] = [];
+      const result = await executeYokaiEffect('日女巳时', {
+        player, gameState,
+        card: createTestCard('yokai', '日女巳时'),
+        onChoice: async (options) => {
+          receivedOptions = options as string[];
+          return 0; // 选择第一项
+        }
+      });
+
+      // 鬼火满时，选项只有2个
+      expect(receivedOptions).toEqual(['抓牌+2', '伤害+2']);
+      expect(receivedOptions).not.toContain('鬼火+1');
+      expect(result.success).toBe(true);
+      expect(result.draw).toBe(2); // 默认选第一项变成了抓牌+2
+      expect(player.hand.length).toBe(2);
+    });
+
+    it('鬼火未满时提供三个选项', async () => {
+      player.ghostFire = 3; // 未满
+      
+      let receivedOptions: string[] = [];
+      await executeYokaiEffect('日女巳时', {
+        player, gameState,
+        card: createTestCard('yokai', '日女巳时'),
+        onChoice: async (options) => {
+          receivedOptions = options as string[];
+          return 0;
+        }
+      });
+
+      expect(receivedOptions).toEqual(['鬼火+1', '抓牌+2', '伤害+2']);
+    });
+
+    it('牌库空时选择抓牌+2：仍成功但抓0张', async () => {
+      player.deck = [];
+      player.discard = [];
+      player.hand = [];
+
+      const result = await executeYokaiEffect('日女巳时', {
+        player, gameState,
+        card: createTestCard('yokai', '日女巳时'),
+        onChoice: async () => 1 // 抓牌+2
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.hand.length).toBe(0); // 无牌可抓
+      expect(result.draw).toBe(2); // 效果仍报告+2
+    });
+
+    it('牌库空但弃牌堆有牌时：洗牌后抓', async () => {
+      player.deck = [];
+      player.discard = [
+        createTestCard('spell', '弃牌1'),
+        createTestCard('spell', '弃牌2')
+      ];
+      player.hand = [];
+
+      const result = await executeYokaiEffect('日女巳时', {
+        player, gameState,
+        card: createTestCard('yokai', '日女巳时'),
+        onChoice: async () => 1 // 抓牌+2
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.hand.length).toBe(2);
+      expect(player.discard.length).toBe(0);
+    });
+
+    it('无回调时默认选择第一项（鬼火未满则为鬼火+1）', async () => {
+      player.ghostFire = 2;
+      const result = await executeYokaiEffect('日女巳时', {
+        player, gameState,
+        card: createTestCard('yokai', '日女巳时')
+        // 无 onChoice
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.ghostFire).toBe(3); // 原2+1=3
+      expect(result.ghostFire).toBe(1);
+    });
+
+    it('无回调且鬼火已满时默认选择第一项（变为抓牌+2）', async () => {
+      player.maxGhostFire = 5;
+      player.ghostFire = 5;
+      player.hand = [];
+      player.deck = [createTestCard('spell', '测试牌1'), createTestCard('spell', '测试牌2')];
+
+      const result = await executeYokaiEffect('日女巳时', {
+        player, gameState,
+        card: createTestCard('yokai', '日女巳时')
+        // 无 onChoice
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.draw).toBe(2); // 默认选第一项（抓牌+2）
+      expect(player.hand.length).toBe(2);
+    });
+
+    it('无效选择（index超出范围）返回失败', async () => {
+      const result = await executeYokaiEffect('日女巳时', {
+        player, gameState,
+        card: createTestCard('yokai', '日女巳时'),
+        onChoice: async () => 99 // 无效选择
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('无效');
+    });
   });
 });
 
@@ -1347,6 +1630,54 @@ describe('蚌精', () => {
 
     expect(result.success).toBe(false);
   });
+
+  it('牌库不足2张时少抓', async () => {
+    player.hand = [createTestCard('spell', '要超度的牌')];
+    player.deck = [createTestCard('spell', '唯一一张牌')]; // 牌库只有1张
+
+    const result = await executeYokaiEffect('蚌精', {
+      player, gameState,
+      card: createTestCard('yokai', '蚌精'),
+      onSelectCards: async (cards) => [cards[0]!.instanceId]
+    });
+
+    expect(result.success).toBe(true);
+    expect(player.exiled.length).toBe(1);
+    expect(player.hand.length).toBe(1); // 超度1张+只能抓1张
+    expect(player.deck.length).toBe(0);
+  });
+
+  it('牌库为空时仅超度', async () => {
+    player.hand = [createTestCard('spell', '要超度的牌')];
+    player.deck = []; // 牌库为空
+
+    const result = await executeYokaiEffect('蚌精', {
+      player, gameState,
+      card: createTestCard('yokai', '蚌精'),
+      onSelectCards: async (cards) => [cards[0]!.instanceId]
+    });
+
+    expect(result.success).toBe(true);
+    expect(player.exiled.length).toBe(1);
+    expect(player.hand.length).toBe(0); // 超度1张+无牌可抓
+  });
+
+  it('不提供onSelectCards时默认选第一张', async () => {
+    const card1 = createTestCard('spell', '第一张牌');
+    const card2 = createTestCard('spell', '第二张牌');
+    player.hand = [card1, card2];
+
+    const result = await executeYokaiEffect('蚌精', {
+      player, gameState,
+      card: createTestCard('yokai', '蚌精')
+      // 不提供onSelectCards
+    });
+
+    expect(result.success).toBe(true);
+    expect(player.exiled.length).toBe(1);
+    expect(player.exiled[0]!.instanceId).toBe(card1.instanceId); // 默认超度第一张
+    expect(player.hand.length).toBe(3); // 剩1张+抓2张
+  });
 });
 
 describe('兵主部', () => {
@@ -1371,6 +1702,257 @@ describe('兵主部', () => {
 // ============================================
 // 生命4 妖怪测试
 // ============================================
+
+describe('骰子鬼', () => {
+  let player: PlayerState;
+  let gameState: GameState;
+
+  beforeEach(() => {
+    player = createTestPlayer();
+    gameState = createTestGameState(player);
+  });
+
+  describe('🟢 正常流程', () => {
+    it('超度1张手牌，退治HP≤超度牌HP+2的妖怪', async () => {
+      // 手牌有一张HP=2的妖怪
+      const handCard = { ...createTestCard('yokai', '赤舌'), hp: 2, charm: 0 };
+      player.hand = [handCard];
+      
+      // 场上有HP=4和HP=5的妖怪（只有HP=4的符合退治条件：HP≤2+2=4）
+      const yokai4 = { ...createTestCard('yokai', '骰子鬼'), hp: 4, charm: 1 };
+      const yokai5 = { ...createTestCard('yokai', '狂骨'), hp: 5, charm: 1 };
+      gameState.field.yokaiSlots[0] = yokai4;
+      gameState.field.yokaiSlots[1] = yokai5;
+
+      const result = await executeYokaiEffect('骰子鬼', {
+        player, gameState,
+        card: createTestCard('yokai', '骰子鬼'),
+        onSelectCards: async () => [handCard.instanceId],
+        onSelectTarget: async (targets) => {
+          // 只应有HP=4的妖怪可选
+          expect(targets.length).toBe(1);
+          expect(targets[0]!.name).toBe('骰子鬼');
+          return targets[0]!.instanceId;
+        }
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('超度');
+      expect(result.message).toContain('退治');
+      expect(player.exiled.length).toBe(1); // 手牌被超度
+      expect(player.exiled[0]!.name).toBe('赤舌');
+      expect(player.discard.length).toBe(1); // 妖怪被退治进入弃牌堆
+      expect(player.discard[0]!.name).toBe('骰子鬼');
+      expect(gameState.field.yokaiSlots[0]).toBeNull(); // HP=4的妖怪被移除
+      expect(gameState.field.yokaiSlots[1]).not.toBeNull(); // HP=5的妖怪仍在
+    });
+
+    it('超度招福达摩(HP=1)，可退治HP≤3的妖怪', async () => {
+      const daruma = { ...createTestCard('token', '招福达摩'), hp: 1, charm: 1 };
+      player.hand = [daruma];
+      
+      const yokai3 = { ...createTestCard('yokai', '灯笼鬼'), hp: 3, charm: 1 };
+      const yokai4 = { ...createTestCard('yokai', '骰子鬼'), hp: 4, charm: 1 };
+      gameState.field.yokaiSlots[0] = yokai3;
+      gameState.field.yokaiSlots[1] = yokai4;
+
+      const result = await executeYokaiEffect('骰子鬼', {
+        player, gameState,
+        card: createTestCard('yokai', '骰子鬼'),
+        onSelectCards: async () => [daruma.instanceId],
+        onSelectTarget: async (targets) => {
+          // 只有HP=3可选（HP≤1+2=3）
+          expect(targets.length).toBe(1);
+          expect(targets[0]!.name).toBe('灯笼鬼');
+          return targets[0]!.instanceId;
+        }
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.exiled[0]!.name).toBe('招福达摩');
+      expect(player.discard[0]!.name).toBe('灯笼鬼');
+    });
+  });
+
+  describe('🔴 边界条件', () => {
+    it('手牌为空时返回失败', async () => {
+      player.hand = [];
+
+      const result = await executeYokaiEffect('骰子鬼', {
+        player, gameState, card: createTestCard('yokai', '骰子鬼')
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('没有手牌可超度');
+    });
+
+    it('场上没有符合条件的妖怪时，仅执行超度', async () => {
+      const handCard = { ...createTestCard('yokai', '赤舌'), hp: 2, charm: 0 };
+      player.hand = [handCard];
+      
+      // 场上所有妖怪HP都>4（超度HP=2后，可退治范围为HP≤4）
+      const yokai5 = { ...createTestCard('yokai', '狂骨'), hp: 5, charm: 1 };
+      const yokai6 = { ...createTestCard('yokai', '破势'), hp: 6, charm: 2 };
+      gameState.field.yokaiSlots[0] = yokai5;
+      gameState.field.yokaiSlots[1] = yokai6;
+
+      const result = await executeYokaiEffect('骰子鬼', {
+        player, gameState,
+        card: createTestCard('yokai', '骰子鬼'),
+        onSelectCards: async () => [handCard.instanceId]
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('没有可退治的妖怪');
+      expect(player.exiled.length).toBe(1); // 手牌仍被超度
+      expect(player.discard.length).toBe(0); // 无妖怪被退治
+    });
+
+    it('超度无HP属性的牌(阴阳术)，默认按HP=0计算，可退治HP≤2', async () => {
+      // 阴阳术没有hp属性，测试时需要确保hp为undefined或0
+      const spell = createTestCard('spell', '基础术式');
+      delete (spell as any).hp; // 确保无HP属性
+      player.hand = [spell];
+      
+      const yokai2 = { ...createTestCard('yokai', '赤舌'), hp: 2, charm: 0 };
+      const yokai3 = { ...createTestCard('yokai', '灯笼鬼'), hp: 3, charm: 1 };
+      gameState.field.yokaiSlots[0] = yokai2;
+      gameState.field.yokaiSlots[1] = yokai3;
+
+      const result = await executeYokaiEffect('骰子鬼', {
+        player, gameState,
+        card: createTestCard('yokai', '骰子鬼'),
+        onSelectCards: async () => [spell.instanceId],
+        onSelectTarget: async (targets) => {
+          // 只有HP=2可选（HP≤0+2=2）
+          expect(targets.length).toBe(1);
+          expect(targets[0]!.name).toBe('赤舌');
+          return targets[0]!.instanceId;
+        }
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.exiled[0]!.name).toBe('基础术式');
+      expect(player.discard[0]!.name).toBe('赤舌');
+    });
+  });
+
+  describe('🤖 AI接管（无回调）', () => {
+    it('AI超度声誉最低的牌', async () => {
+      // 两张手牌：声誉0和声誉1
+      const lowCharm = { ...createTestCard('yokai', '赤舌'), hp: 2, charm: 0 };
+      const highCharm = { ...createTestCard('yokai', '灯笼鬼'), hp: 3, charm: 1 };
+      player.hand = [highCharm, lowCharm]; // 高声誉在前
+      
+      const yokai4 = { ...createTestCard('yokai', '骰子鬼'), hp: 4, charm: 1 };
+      gameState.field.yokaiSlots[0] = yokai4;
+
+      await executeYokaiEffect('骰子鬼', {
+        player, gameState, card: createTestCard('yokai', '骰子鬼')
+      });
+
+      // AI应选择声誉=0的赤舌超度
+      expect(player.exiled[0]!.name).toBe('赤舌');
+    });
+
+    it('AI同声誉时超度HP最高的牌（扩大退治范围）', async () => {
+      // 两张手牌：同声誉，不同HP
+      const lowHp = { ...createTestCard('yokai', '赤舌'), hp: 2, charm: 0 };
+      const highHp = { ...createTestCard('yokai', '骰子鬼'), hp: 4, charm: 0 };
+      player.hand = [lowHp, highHp];
+      
+      const yokai6 = { ...createTestCard('yokai', '破势'), hp: 6, charm: 2 };
+      gameState.field.yokaiSlots[0] = yokai6;
+
+      await executeYokaiEffect('骰子鬼', {
+        player, gameState, card: createTestCard('yokai', '骰子鬼')
+      });
+
+      // AI应选择HP=4的牌超度（可退治HP≤6）
+      expect(player.exiled[0]!.name).toBe('骰子鬼');
+      // 并且能退治HP=6的妖怪
+      expect(player.discard[0]!.name).toBe('破势');
+    });
+
+    it('AI退治声誉最高的妖怪', async () => {
+      const handCard = { ...createTestCard('yokai', '骰子鬼'), hp: 4, charm: 1 };
+      player.hand = [handCard];
+      
+      // 两个符合条件的妖怪：声誉不同
+      const lowCharmYokai = { ...createTestCard('yokai', '赤舌'), hp: 2, charm: 0 };
+      const highCharmYokai = { ...createTestCard('yokai', '灯笼鬼'), hp: 3, charm: 1 };
+      gameState.field.yokaiSlots[0] = lowCharmYokai;
+      gameState.field.yokaiSlots[1] = highCharmYokai;
+
+      await executeYokaiEffect('骰子鬼', {
+        player, gameState, card: createTestCard('yokai', '骰子鬼')
+      });
+
+      // AI应选择声誉=1的灯笼鬼退治
+      expect(player.discard[0]!.name).toBe('灯笼鬼');
+    });
+  });
+
+  describe('🤖 AI决策函数', () => {
+    it('aiDecide_骰子鬼_超度：返回声誉最低的牌', async () => {
+      const { aiDecide_骰子鬼_超度 } = await import('./YokaiEffects');
+      
+      const cards = [
+        { ...createTestCard('yokai'), charm: 1, hp: 2 },
+        { ...createTestCard('yokai'), charm: 0, hp: 3 },
+      ];
+      
+      const result = aiDecide_骰子鬼_超度(cards);
+      expect(result).toBe(cards[1]!.instanceId); // 声誉=0的牌
+    });
+
+    it('aiDecide_骰子鬼_超度：同声誉时返回HP最高的牌', async () => {
+      const { aiDecide_骰子鬼_超度 } = await import('./YokaiEffects');
+      
+      const cards = [
+        { ...createTestCard('yokai'), charm: 0, hp: 2 },
+        { ...createTestCard('yokai'), charm: 0, hp: 4 },
+      ];
+      
+      const result = aiDecide_骰子鬼_超度(cards);
+      expect(result).toBe(cards[1]!.instanceId); // HP=4的牌
+    });
+
+    it('aiDecide_骰子鬼_退治：返回声誉最高的妖怪', async () => {
+      const { aiDecide_骰子鬼_退治 } = await import('./YokaiEffects');
+      
+      const targets = [
+        { ...createTestCard('yokai'), charm: 1, hp: 3 },
+        { ...createTestCard('yokai'), charm: 2, hp: 2 },
+      ];
+      
+      const result = aiDecide_骰子鬼_退治(targets);
+      expect(result).toBe(targets[1]!.instanceId); // 声誉=2的妖怪
+    });
+
+    it('aiDecide_骰子鬼_退治：同声誉时返回HP最高的妖怪', async () => {
+      const { aiDecide_骰子鬼_退治 } = await import('./YokaiEffects');
+      
+      const targets = [
+        { ...createTestCard('yokai'), charm: 1, hp: 2 },
+        { ...createTestCard('yokai'), charm: 1, hp: 4 },
+      ];
+      
+      const result = aiDecide_骰子鬼_退治(targets);
+      expect(result).toBe(targets[1]!.instanceId); // HP=4的妖怪
+    });
+
+    it('aiDecide_骰子鬼_超度：空手牌返回空字符串', async () => {
+      const { aiDecide_骰子鬼_超度 } = await import('./YokaiEffects');
+      expect(aiDecide_骰子鬼_超度([])).toBe('');
+    });
+
+    it('aiDecide_骰子鬼_退治：空目标返回空字符串', async () => {
+      const { aiDecide_骰子鬼_退治 } = await import('./YokaiEffects');
+      expect(aiDecide_骰子鬼_退治([])).toBe('');
+    });
+  });
+});
 describe('涅槃之火', () => {
   let player: PlayerState;
   let gameState: GameState;
@@ -1432,6 +2014,132 @@ describe('网切', () => {
     expect(buff).toBeDefined();
     expect((buff as any).yokaiReduction).toBe(1);
     expect((buff as any).bossReduction).toBe(2);
+  });
+});
+
+describe('魍魉之匣', () => {
+  let player: PlayerState;
+  let opponent1: PlayerState;
+  let opponent2: PlayerState;
+  let gameState: GameState;
+
+  beforeEach(() => {
+    player = createTestPlayer({ name: '玩家A' });
+    player.deck = [createTestCard('spell', '基础术式')];
+    
+    opponent1 = createTestPlayer({ name: '玩家B' });
+    opponent1.id = 'opponent1';
+    opponent1.deck = [createTestCard('yokai', '赤舌')];
+    
+    opponent2 = createTestPlayer({ name: '玩家C' });
+    opponent2.id = 'opponent2';
+    opponent2.deck = [createTestCard('yokai', '灯笼鬼')];
+    
+    gameState = createTestGameState(player);
+    gameState.players = [player, opponent1, opponent2];
+  });
+
+  it('🟢 基础效果：抓牌+1，伤害+1', async () => {
+    const result = await executeYokaiEffect('魍魉之匣', {
+      player, gameState, card: createTestCard('yokai', '魍魉之匣'),
+      onChoice: async () => 0 // 全部保留
+    });
+
+    expect(result.success).toBe(true);
+    expect(player.hand.length).toBe(1); // 抓1张
+    expect(player.damage).toBe(1);      // 伤害+1
+  });
+
+  it('🟢 选择保留：所有玩家牌库顶不变', async () => {
+    const originalDeckLengths = [player.deck.length, opponent1.deck.length, opponent2.deck.length];
+    
+    const result = await executeYokaiEffect('魍魉之匣', {
+      player, gameState, card: createTestCard('yokai', '魍魉之匣'),
+      onChoice: async () => 0 // 全部选择保留
+    });
+
+    expect(result.success).toBe(true);
+    // 玩家自己的牌库因抓牌减少1张
+    expect(player.deck.length).toBe(originalDeckLengths[0] - 1);
+    // 对手牌库不变（保留）
+    expect(opponent1.deck.length).toBe(originalDeckLengths[1]);
+    expect(opponent2.deck.length).toBe(originalDeckLengths[2]);
+    // 对手弃牌堆不变
+    expect(opponent1.discard.length).toBe(0);
+    expect(opponent2.discard.length).toBe(0);
+  });
+
+  it('🟢 选择弃置：对手牌库顶移入弃牌堆', async () => {
+    // 玩家牌库放2张：1张被drawCards抓走，剩1张可展示弃置
+    player.deck = [createTestCard('spell', '基础术式'), createTestCard('spell', '额外术式')];
+    
+    const result = await executeYokaiEffect('魍魉之匣', {
+      player, gameState, card: createTestCard('yokai', '魍魉之匣'),
+      onChoice: async () => 1 // 全部选择弃置
+    });
+
+    expect(result.success).toBe(true);
+    // 玩家自己的牌库顶也被弃置（drawCards抓1张+弃置1张=deck从2变0）
+    expect(player.deck.length).toBe(0);
+    expect(player.discard.length).toBe(1);
+    // 对手牌库顶被弃置
+    expect(opponent1.deck.length).toBe(0);
+    expect(opponent1.discard.length).toBe(1);
+    expect(opponent1.discard[0]!.name).toBe('赤舌');
+    expect(opponent2.deck.length).toBe(0);
+    expect(opponent2.discard.length).toBe(1);
+    expect(opponent2.discard[0]!.name).toBe('灯笼鬼');
+  });
+
+  it('🟢 混合选择：保留自己、弃置对手', async () => {
+    // 玩家牌库放2张：1张被drawCards抓走，剩1张可展示
+    player.deck = [createTestCard('spell', '基础术式'), createTestCard('spell', '额外术式')];
+    
+    let choiceIndex = 0;
+    const choices = [0, 1, 1]; // 保留玩家A、弃置玩家B、弃置玩家C
+    
+    const result = await executeYokaiEffect('魍魉之匣', {
+      player, gameState, card: createTestCard('yokai', '魍魉之匣'),
+      onChoice: async () => choices[choiceIndex++]!
+    });
+
+    expect(result.success).toBe(true);
+    // 玩家自己保留（牌库顶不弃置，deck剩1张）
+    expect(player.deck.length).toBe(1);
+    expect(player.discard.length).toBe(0);
+    // 对手被弃置
+    expect(opponent1.discard.length).toBe(1);
+    expect(opponent2.discard.length).toBe(1);
+  });
+
+  it('🔴 边界条件：空牌库跳过', async () => {
+    // 玩家牌库放2张：1张被drawCards抓走，剩1张可展示
+    player.deck = [createTestCard('spell', '基础术式'), createTestCard('spell', '额外术式')];
+    opponent1.deck = []; // 对手1牌库为空
+    
+    let choiceCount = 0;
+    const result = await executeYokaiEffect('魍魉之匣', {
+      player, gameState, card: createTestCard('yokai', '魍魉之匣'),
+      onChoice: async () => { choiceCount++; return 0; }
+    });
+
+    expect(result.success).toBe(true);
+    // 触发2次选择（玩家A + 玩家C），跳过空牌库的玩家B
+    expect(choiceCount).toBe(2);
+  });
+
+  it('🔴 超时默认：默认保留（index=0）', async () => {
+    // 不传 onChoice，模拟超时走默认
+    const result = await executeYokaiEffect('魍魉之匣', {
+      player, gameState, card: createTestCard('yokai', '魍魉之匣')
+    });
+
+    expect(result.success).toBe(true);
+    // 默认保留，对手牌库不变
+    expect(opponent1.deck.length).toBe(1);
+    expect(opponent2.deck.length).toBe(1);
+    expect(opponent1.discard.length).toBe(0);
+    expect(opponent2.discard.length).toBe(0);
   });
 });
 

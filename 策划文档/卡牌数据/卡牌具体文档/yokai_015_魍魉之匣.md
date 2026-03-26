@@ -118,15 +118,21 @@
 
 ## ✅ 验收标准
 
-- [ ] 打出者抓 1、伤害 +1
-- [ ] 每名有牌库的玩家都被处理；空库跳过
-- [ ] 保留则顶牌未移除；弃置则顶牌入该玩家弃牌堆
-- [ ] 【妨害】日志或标签正确
-- [ ] 超时默认与上表一致
+- [x] 打出者抓 1、伤害 +1
+- [x] 每名有牌库的玩家都被处理；空库跳过
+- [x] 保留则顶牌未移除；弃置则顶牌入该玩家弃牌堆
+- [x] 【妨害】日志或标签正确
+- [x] 超时默认与上表一致（默认全部保留）
 
 ---
 
 ## 📊 开发状态
 
 - 文档创建时间：2026-03-25
+- **实现完成时间：2026-03-25**
 - 实现参考：`shared/game/effects/YokaiEffects.ts`（`魍魉之匣`）；多玩家 `onChoice` 串行与 AI 策略可逐项对照验收
+- **多人模式实现**：
+  - `server/src/game/MultiplayerGame.ts` — `case '魍魉之匣'` pendingChoice 逻辑
+  - `server/src/game/MultiplayerGame.ts` — `handleWangliangResponse()` / `handleWangliangBatchResponse()`
+  - `server/src/socket/SocketServer.ts` — `game:wangliangResponse` / `game:wangliangBatchResponse` 事件监听
+  - `client/src/App.vue` — `wangliangModal` 模态框 + watch 检测 + UI 样式

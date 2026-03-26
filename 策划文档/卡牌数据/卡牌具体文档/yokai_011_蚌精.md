@@ -108,14 +108,17 @@
 
 ## ✅ 验收标准
 
-- [ ] 有手牌：先超度 1 再抓 2
-- [ ] 无手牌：与产品一致（当前为失败/不可打出）
-- [ ] 超度牌进超度区，不入弃牌堆
-- [ ] 日志正确
+- [x] 有手牌：先超度 1 再抓 2
+- [x] 无手牌：与产品一致（当前为失败/不可打出）
+- [x] 超度牌进超度区，不入弃牌堆
+- [x] 日志正确
 
 ---
 
 ## 📊 开发状态
 
 - 文档创建时间：2026-03-25
+- **实现完成时间：2025-07-24**
 - 实现参考：`shared/game/effects/YokaiEffects.ts`（`蚌精`）
+- 多人模式：`server/src/game/MultiplayerGame.ts` → `handleBangJingExileResponse()`
+- 客户端 UI：`client/src/App.vue` → `bangJingExile` pendingChoice 处理

@@ -55,7 +55,7 @@ Cardgame/
 
 ### 技术（再看）
 - `tools/README.md`：根目录工具索引（手测清单等，与主界面解耦）
-- `docs/design/testset.md`：测试开关、测试流程、GM测试
+- `docs/design/testset.md`：测试开关、测试流程、GM测试(测试中已暴露的问题)
 - `docs/MULTIPLAYER_ARCHITECTURE.md`：多人架构
 - `docs/CLIENT_VISUAL_FX_TECH_PLAN.md`：逻辑稳定后的美化阶段——Vue 与 Pixi 分层、粒子与资源策略（对标 2D 卡牌战斗反馈）
 - `PROGRESS.md`：当前开发进度
@@ -94,7 +94,8 @@ cd ../client && npm run dev
 - 新需求实现：先产出技术方案并经需求方确认，再进入编码
 - 功能完成：补测试（自动化 + GM手测）
 - 提交前：至少跑相关模块测试
-
+- 所有卡牌的bug，以及我用bug：XXXX，标注的问题，修复完了都要在 docs/design/testset.md 里简要记录原因
+ 
 ## 开发执行（6步TDD流程）
 
 | 步骤 | 名称 | 内容 |

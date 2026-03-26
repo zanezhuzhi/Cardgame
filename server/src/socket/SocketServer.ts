@@ -830,6 +830,96 @@ export class SocketServer {
       callback?.(result);
     });
 
+    // 树妖弃牌响应
+    socket.on('game:treeDemonDiscardResponse' as any, (data: { selectedId: string }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleTreeDemonDiscardResponse(socket.id, data.selectedId);
+
+      if (result.success) {
+        // 广播游戏状态更新
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
+    // 日女巳时选择响应
+    socket.on('game:rinyuChoiceResponse' as any, (data: { choice: string }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleRinyuChoiceResponse(socket.id, data.choice);
+
+      if (result.success) {
+        // 广播游戏状态更新
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
+    // 蚌精超度响应
+    socket.on('game:bangJingExileResponse' as any, (data: { selectedId: string }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleBangJingExileResponse(socket.id, data.selectedId);
+
+      if (result.success) {
+        // 广播游戏状态更新
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
+    // 骰子鬼超度响应（第一步）
+    socket.on('game:diceGhostExileResponse' as any, (data: { selectedId: string }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleDiceGhostExileResponse(socket.id, data.selectedId);
+
+      if (result.success) {
+        // 广播游戏状态更新
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
+    // 骰子鬼退治响应（第二步）
+    socket.on('game:diceGhostTargetResponse' as any, (data: { selectedId: string }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleDiceGhostTargetResponse(socket.id, data.selectedId);
+
+      if (result.success) {
+        // 广播游戏状态更新
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
     // 魅妖选择响应
     socket.on('game:meiYaoSelectResponse' as any, (data: { selectedCardId: string }, callback?: (result: { success: boolean; error?: string }) => void) => {
       const room = this.roomManager.getPlayerRoom(socket.id);
@@ -842,6 +932,51 @@ export class SocketServer {
 
       if (result.success) {
         // 广播游戏状态更新
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
+    // 魍魉之匣选择响应（单个决策）
+    socket.on('game:wangliangResponse' as any, (data: { targetPlayerId: string; action: 'keep' | 'discard' }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      console.log('[SocketServer] game:wangliangResponse', {
+        playerId: socket.id,
+        targetPlayerId: data.targetPlayerId,
+        action: data.action
+      });
+
+      const result = room.game.handleWangliangResponse(socket.id, data.targetPlayerId, data.action);
+
+      if (result.success) {
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
+    // 魍魉之匣批量选择响应（一次性提交所有决策）
+    socket.on('game:wangliangBatchResponse' as any, (data: { decisions: { playerId: string; action: 'keep' | 'discard' }[] }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      console.log('[SocketServer] game:wangliangBatchResponse', {
+        playerId: socket.id,
+        decisions: data.decisions
+      });
+
+      const result = room.game.handleWangliangBatchResponse(socket.id, data.decisions);
+
+      if (result.success) {
         this.broadcastGameState(room.id, room.game.getState());
       }
 

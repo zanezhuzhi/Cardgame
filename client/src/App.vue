@@ -131,8 +131,8 @@
                @mouseenter="showBossTooltip($event, boss)"
                @mouseleave="hideTooltip">
             <img v-if="getCardImage(boss)" :src="getCardImage(boss)" class="card-art boss-art" />
-            <!-- 等待退治/超度选择时 -->
-            <div v-if="isBossDefeated" class="boss-defeated-overlay">💀 已击败<br/>请选择...</div>
+            <!-- 鬼王被击败（已自动退治） -->
+            <div v-if="isBossDefeated" class="boss-defeated-overlay">💀 已击败</div>
             <!-- 鬼王信息（顶部渐变） -->
             <div class="boss-info">
               <div class="boss-name">{{boss.name}}</div>
@@ -309,6 +309,21 @@
         <div class="hand-panel">
           <div class="damage-display">
             <span>⚔️</span><b>{{player?.damage||0}}</b>
+          </div>
+          <!-- 打出区列表：显示本回合已打出的牌 -->
+          <div class="played-area">
+            <div class="played-list">
+              <div v-for="c in (player?.played || [])" :key="c.instanceId" 
+                   class="played-item"
+                   @mouseenter="showTooltip($event, c)"
+                   @mouseleave="hideTooltip">
+                <img v-if="getCardImage(c)" :src="getCardImage(c)" class="played-thumb" />
+                <span class="played-name">{{ c.name }}</span>
+              </div>
+            </div>
+            <div class="played-count">
+              已打出: {{ player?.played?.length || 0 }} 张
+            </div>
           </div>
           <div class="hand-cards">
             <div v-for="(c, idx) in sortedHand" :key="c.instanceId" 
@@ -536,6 +551,55 @@
       <div v-if="akajitaDeckHint" class="akajita-deck-hint">
         <span class="hint-icon">👅</span>
         <span>已将【{{ akajitaDeckHint.cardName }}】置于牌库顶</span>
+      </div>
+
+      <!-- 弹窗：魍魉之匣选择（点选要弃置的牌库顶牌） -->
+      <div class="modal" v-if="wangliangModal.show">
+        <div class="modal-box wangliang-modal">
+          <p class="modal-title">📦 魍魉之匣</p>
+          <p class="modal-hint">默认全部保留，点选要<b>弃置</b>的牌</p>
+          <div class="wl-card-row">
+            <div v-for="target in wangliangModal.targets" :key="target.playerId"
+                 class="wl-card"
+                 :class="{ 
+                   discarding: target.card && wangliangModal.discardSet.has(target.playerId),
+                   empty: !target.card
+                 }"
+                 @click="target.card && toggleWangliangDiscard(target.playerId)">
+              <!-- 玩家名 -->
+              <div class="wl-player-tag" :class="{ self: target.isSelf }">
+                {{ target.isSelf ? '【自己】' : target.playerName }}
+              </div>
+              <!-- 有卡牌 -->
+              <template v-if="target.card">
+                <div class="wl-card-art-wrap">
+                  <img v-if="getCardImageById(target.card.cardId)" 
+                       :src="getCardImageById(target.card.cardId)" 
+                       class="wl-card-art" />
+                  <!-- 弃置标记 -->
+                  <div class="wl-discard-mark" v-if="wangliangModal.discardSet.has(target.playerId)">🗑️</div>
+                </div>
+                <div class="wl-card-name">{{ target.card.name }}</div>
+                <div class="wl-card-hp">❤️{{ target.card.hp }}</div>
+              </template>
+              <!-- 空牌库 -->
+              <template v-else>
+                <div class="wl-card-art-wrap wl-empty-art">
+                  <span>空</span>
+                </div>
+                <div class="wl-card-name wl-empty-text">牌库为空</div>
+              </template>
+            </div>
+          </div>
+          <div class="wangliang-actions">
+            <button class="confirm-btn" @click="submitWangliangDecisions">
+              确认（{{ wangliangModal.discardSet.size > 0 ? `弃置 ${wangliangModal.discardSet.size} 张` : '全部保留' }}）
+            </button>
+            <button class="cancel-btn" @click="closeWangliangModal">
+              取消（全部保留）
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- 弹窗：超度区查看（公共区域） -->
@@ -999,7 +1063,13 @@ watch(
 function getCardImage(card: CardInstance | any): string {
   const rawId = card?.cardId || card?.id
   if (!rawId) return ''
-  const m = String(rawId).match(/^(\w+)_(\d+)$/)
+  return getCardImageById(rawId)
+}
+
+// 根据 cardId 直接获取卡牌图片路径
+function getCardImageById(cardId: string): string {
+  if (!cardId) return ''
+  const m = String(cardId).match(/^(\w+)_(\d+)$/)
   if (!m) return ''
   const [, type, num] = m
   const n = parseInt(num)
@@ -1041,6 +1111,14 @@ onMounted(() => {
     inGame.value = true
     console.log('[App] 多人模式：检测到游戏状态，直接进入游戏')
   }
+  
+  // 初始化时延迟检查并滚动到底部（确保 DOM 已渲染）
+  nextTick(() => {
+    if (logRef.value) {
+      logRef.value.scrollTop = logRef.value.scrollHeight
+      userIsAtBottom.value = true
+    }
+  })
 })
 
 async function returnToLobby() {
@@ -1148,6 +1226,98 @@ watch(() => socketClient.gameState.value, (newState) => {
           socketClient.send('game:selectCardPutTopResponse', { selectedId: ids[0] || '' })
         }
       }
+    } else if (newState.pendingChoice?.type === 'treeDemonDiscard' && newState.pendingChoice.playerId === myPlayerId.value) {
+      // 监听 pendingChoice：树妖弃牌选择
+      const pc = newState.pendingChoice as any
+      const player = newState.players.find(p => p.id === myPlayerId.value)
+      if (player && player.hand.length > 0) {
+        cardSelectModal.isServerMultiSelect = true
+        cardSelectModal.show = true
+        cardSelectModal.title = '🗑️ 树妖：选择1张手牌弃置'
+        cardSelectModal.hint = pc.prompt || '选择1张手牌弃置'
+        cardSelectModal.candidates = player.hand
+        cardSelectModal.minCount = 1
+        cardSelectModal.maxCount = 1
+        cardSelectModal.count = 1
+        cardSelectModal.selected = []
+        cardSelectModal.resolve = (ids: string[]) => {
+          socketClient.send('game:treeDemonDiscardResponse', { selectedId: ids[0] || '' })
+        }
+      }
+    } else if (newState.pendingChoice?.type === 'rinyuChoice' && newState.pendingChoice.playerId === myPlayerId.value) {
+      // 监听 pendingChoice：日女巳时三选一
+      choiceModal.serverYokaiChoice = true
+      choiceModal.show = true
+      choiceModal.options = ['🔥 鬼火+1', '🎴 抓牌+2', '⚔️ 伤害+2']
+      choiceModal.resolve = (index: number) => {
+        const choices = ['ghostFire', 'draw', 'damage']
+        socketClient.send('game:rinyuChoiceResponse', { choice: choices[index] || 'damage' })
+      }
+    } else if (newState.pendingChoice?.type === 'bangJingExile' && newState.pendingChoice.playerId === myPlayerId.value) {
+      // 监听 pendingChoice：蚌精超度手牌选择
+      const pc = newState.pendingChoice as any
+      const player = newState.players.find(p => p.id === myPlayerId.value)
+      if (player && player.hand.length > 0) {
+        cardSelectModal.isServerMultiSelect = true
+        cardSelectModal.show = true
+        cardSelectModal.title = '☁️ 蚌精：选择1张手牌超度'
+        cardSelectModal.hint = pc.prompt || '选择1张手牌超度（移出游戏）'
+        cardSelectModal.candidates = player.hand
+        cardSelectModal.minCount = 1
+        cardSelectModal.maxCount = 1
+        cardSelectModal.count = 1
+        cardSelectModal.selected = []
+        cardSelectModal.resolve = (ids: string[]) => {
+          socketClient.send('game:bangJingExileResponse', { selectedId: ids[0] || '' })
+        }
+      }
+    } else if (newState.pendingChoice?.type === 'diceGhostExile' && newState.pendingChoice.playerId === myPlayerId.value) {
+      // 监听 pendingChoice：骰子鬼第一步 - 选择超度手牌
+      const pc = newState.pendingChoice as any
+      const player = newState.players.find(p => p.id === myPlayerId.value)
+      if (player && player.hand.length > 0) {
+        cardSelectModal.isServerMultiSelect = true
+        cardSelectModal.show = true
+        cardSelectModal.title = '🎲 骰子鬼：选择1张手牌超度'
+        cardSelectModal.hint = pc.prompt || '超度1张手牌，可退治HP≤(超度牌HP+2)的妖怪'
+        cardSelectModal.candidates = player.hand
+        cardSelectModal.minCount = 1
+        cardSelectModal.maxCount = 1
+        cardSelectModal.count = 1
+        cardSelectModal.selected = []
+        cardSelectModal.resolve = (ids: string[]) => {
+          socketClient.send('game:diceGhostExileResponse', { selectedId: ids[0] || '' })
+        }
+      }
+    } else if (newState.pendingChoice?.type === 'diceGhostTarget' && newState.pendingChoice.playerId === myPlayerId.value) {
+      // 监听 pendingChoice：骰子鬼第二步 - 选择退治妖怪
+      const pc = newState.pendingChoice as any
+      const options = pc.options || []
+      if (options.length > 0) {
+        // 将妖怪选项转换为 CardInstance 格式以复用 cardSelectModal
+        const virtualCards: CardInstance[] = options.map((o: any) => ({
+          instanceId: o.instanceId,
+          cardId: o.cardId || o.instanceId,
+          cardType: 'yokai' as any,
+          name: o.name,
+          hp: o.hp,
+          maxHp: o.hp,
+          charm: o.charm ?? 0,
+          _slotIndex: o.slotIndex
+        }))
+        cardSelectModal.isServerMultiSelect = true
+        cardSelectModal.show = true
+        cardSelectModal.title = `🎲 骰子鬼：选择退治目标（HP≤${pc.maxHp}）`
+        cardSelectModal.hint = pc.prompt || '选择1个游荡妖怪退治'
+        cardSelectModal.candidates = virtualCards
+        cardSelectModal.minCount = 1
+        cardSelectModal.maxCount = 1
+        cardSelectModal.count = 1
+        cardSelectModal.selected = []
+        cardSelectModal.resolve = (ids: string[]) => {
+          socketClient.send('game:diceGhostTargetResponse', { selectedId: ids[0] || '' })
+        }
+      }
     } else if (newState.pendingChoice?.type === 'meiYaoSelect' && newState.pendingChoice.playerId === myPlayerId.value) {
       // 监听 pendingChoice：魅妖选择对手牌库顶牌
       const pc = newState.pendingChoice as any
@@ -1234,6 +1404,25 @@ watch(() => socketClient.gameState.value, (newState) => {
         showAkajitaDeckHint(myNotify.cardName)
         lastAkajitaNotifyTimestamp.value = myNotify.timestamp
       }
+    }
+    
+    // 魍魉之匣选择：展示每名玩家牌库顶牌，点选要弃置的
+    if (newState.pendingChoice?.type === 'wangliangChoice' && newState.pendingChoice.playerId === myPlayerId.value) {
+      const pc = newState.pendingChoice as any
+      const allTargets = pc.allTargets || []
+      if (allTargets.length > 0 && !wangliangModal.show) {
+        wangliangModal.targets = allTargets.map((t: any) => ({
+          ...t,
+          isSelf: t.playerId === myPlayerId.value
+        }))
+        wangliangModal.discardSet = new Set()
+        wangliangModal.show = true
+        console.log('[魍魉之匣] 弹窗显示，全部目标:', allTargets)
+      }
+    } else if (wangliangModal.show && newState.pendingChoice?.type !== 'wangliangChoice') {
+      wangliangModal.show = false
+      wangliangModal.targets = []
+      wangliangModal.discardSet = new Set()
     }
     
     if (!newState.pendingChoice) {
@@ -1562,6 +1751,56 @@ const akajitaDeckHint = ref<{ cardName: string } | null>(null)
 let akajitaDeckHintTimer: number | null = null
 const lastAkajitaNotifyTimestamp = ref<number>(0) // 用于避免重复显示通知
 
+// 魍魉之匣选择弹窗（点选要弃置的牌库顶牌，未选中则保留）
+const wangliangModal = reactive<{
+  show: boolean
+  targets: { playerId: string; playerName: string; isSelf: boolean; card: { instanceId: string; cardId: string; name: string; hp: number; cardType: string } | null }[]
+  discardSet: Set<string>  // 被选中弃置的 playerId 集合
+}>({
+  show: false,
+  targets: [],
+  discardSet: new Set()
+})
+
+// 切换某玩家的弃置状态（仅对有牌的玩家有效）
+function toggleWangliangDiscard(playerId: string) {
+  if (wangliangModal.discardSet.has(playerId)) {
+    wangliangModal.discardSet.delete(playerId)
+  } else {
+    wangliangModal.discardSet.add(playerId)
+  }
+}
+
+// 提交魍魉之匣决策：discardSet 中的=弃置，其余=保留
+function submitWangliangDecisions() {
+  // 只为有牌库的玩家生成决策
+  const decisions = wangliangModal.targets
+    .filter(t => t.card !== null)
+    .map(t => ({
+      playerId: t.playerId,
+      action: (wangliangModal.discardSet.has(t.playerId) ? 'discard' : 'keep') as 'keep' | 'discard'
+    }))
+  
+  socketClient.send('game:wangliangBatchResponse', { decisions })
+  wangliangModal.show = false
+  wangliangModal.targets = []
+  wangliangModal.discardSet = new Set()
+}
+
+// 关闭魍魉之匣弹窗（取消/超时时默认全部保留）
+function closeWangliangModal() {
+  const decisions = wangliangModal.targets
+    .filter(t => t.card !== null)
+    .map(t => ({
+      playerId: t.playerId,
+      action: 'keep' as const
+    }))
+  socketClient.send('game:wangliangBatchResponse', { decisions })
+  wangliangModal.show = false
+  wangliangModal.targets = []
+  wangliangModal.discardSet = new Set()
+}
+
 // 目标选择弹窗
 const targetModal = reactive<{
   show: boolean
@@ -1724,20 +1963,21 @@ function logEntryRowKey(l: any, i: number): string | number {
 const hasNewMessage = ref(false)
 let lastLogLength = 0 // 追踪上次日志长度，用于检测新消息
 let autoScrolling = false // 标记是否正在自动滚动中，避免批量消息竞态
-let userIsAtBottom = true // 实时追踪用户是否在底部（通过 scroll 事件持续更新）
+// 用 ref 追踪用户是否在底部，确保响应性
+const userIsAtBottom = ref(true)
 
 // 检测用户是否在底部（最新消息是否在可视区域）
 function checkIsAtBottom(): boolean {
   if (!logRef.value) return true
   const el = logRef.value
-  const threshold = 30 // 允许30px的误差
+  const threshold = 50 // 允许50px的误差（增加容错）
   return el.scrollHeight - el.scrollTop - el.clientHeight < threshold
 }
 
 // 用户滚动时的处理 - 实时更新底部状态
 function handleLogScroll() {
   const atBottom = checkIsAtBottom()
-  userIsAtBottom = atBottom
+  userIsAtBottom.value = atBottom
   // 如果用户滚动到底部，清除新消息提示
   if (atBottom) {
     hasNewMessage.value = false
@@ -1749,7 +1989,7 @@ function scrollToBottom() {
   if (logRef.value) {
     logRef.value.scrollTop = logRef.value.scrollHeight
     hasNewMessage.value = false
-    userIsAtBottom = true
+    userIsAtBottom.value = true
   }
 }
 
@@ -1775,9 +2015,8 @@ watch(() => state.value?.log?.length ?? 0, (newLen, oldLen) => {
     return
   }
   
-  // 使用 scroll 事件实时追踪的状态，而非当前瞬时测量
-  // 这避免了 Vue 响应式更新时 scrollHeight 已变化的问题
-  const wasAtBottom = userIsAtBottom
+  // 使用 ref 追踪的底部状态，确保响应性
+  const wasAtBottom = userIsAtBottom.value
   
   nextTick(() => {
     if (wasAtBottom) {
@@ -1787,7 +2026,7 @@ watch(() => state.value?.log?.length ?? 0, (newLen, oldLen) => {
         logRef.value.scrollTop = logRef.value.scrollHeight
       }
       hasNewMessage.value = false // 确保清除提示
-      userIsAtBottom = true // 滚动后仍在底部
+      userIsAtBottom.value = true // 滚动后仍在底部
       // 100ms后重置标记，允许处理下一批消息
       setTimeout(() => { autoScrolling = false }, 100)
     } else {
@@ -2834,36 +3073,14 @@ async function handleYokaiClick(i: number, y: CardInstance) {
   if (selectingTarget.value || targetModal.show) return // 选择模式下走弹窗
   if (!isMyTurn.value) return
   
-  // 检查妖怪是否已被击杀
-  if (isKilled(y)) {
-    // 已击杀：弹出退治/超度选择
-    const choice = await new Promise<number>(resolve => {
-      choiceModal.serverYokaiChoice = false
-      choiceModal.show = true
-      choiceModal.options = [`退治【${y.name}】（放入弃牌堆）`, `超度【${y.name}】（移出游戏）`]
-      choiceModal.resolve = resolve
-    })
-    
-    if (isMultiMode.value) {
-      if (choice === 0) {
-        socketClient.sendAction({ type: 'retireYokai', slotIndex: i })
-      } else {
-        socketClient.sendAction({ type: 'banishYokai', slotIndex: i })
-      }
-    } else {
-      if (choice === 0) {
-        await game?.retireYokai(i)
-      } else {
-        game?.banishYokai(i)
-      }
-    }
+  // 已击杀的妖怪已自动退治，无需操作
+  if (isKilled(y)) return
+  
+  // 分配伤害（击杀时服务端/单人端会自动退治）
+  if (isMultiMode.value) {
+    socketClient.sendAction({ type: 'allocateDamage', slotIndex: i })
   } else {
-    // 未击杀：分配伤害
-    if (isMultiMode.value) {
-      socketClient.sendAction({ type: 'allocateDamage', slotIndex: i })
-    } else {
-      await game?.allocateDamage(i)
-    }
+    await game?.allocateDamage(i)
   }
 }
 
@@ -2928,20 +3145,31 @@ const isFirstBoss = computed(() => {
   return bossDeckLength >= 9
 })
 // 是否处于鬼王被击败等待选择状态
-const isBossDefeated = computed(() =>
-  (state.value?.turnPhase as any) === 'bossDefeated'
-)
+const isBossDefeated = computed(() => {
+  // 多人模式：检查 pendingBossDeath 标记
+  if (isMultiMode.value) {
+    return (state.value as any)?.pendingBossDeath === true
+  }
+  // 单人模式：检查 bossCurrentHp <= 0
+  return state.value?.field.currentBoss && (state.value?.field.bossCurrentHp ?? 999) <= 0
+})
 // 鬼王是否可以被攻击
 const canAttackBoss = computed(() => {
   const p = player.value
   return state.value?.turnPhase === 'action'
     && !!state.value?.field.currentBoss
     && (p?.damage ?? 0) > 0
+    && !isBossDefeated.value // 鬼王已被击败时不可再攻击
 })
 
-function hitBoss() {
-  if (!canAttackBoss.value) return
+async function hitBoss() {
   if (!isMyTurn.value) return // 多人模式：只有自己回合才能操作
+  
+  // 鬼王被击败后已自动退治，无需额外操作
+  if (isBossDefeated.value) return
+  
+  // 正常攻击鬼王
+  if (!canAttackBoss.value) return
   
   const d = player.value?.damage || 0
   if (d > 0) {
@@ -4848,6 +5076,70 @@ async function confirmReplaceShikigami() {
   font-size:calc(var(--s) * 28);
 }
 .damage-display b{color:#fff;font-size:calc(var(--s) * 32)}
+
+/* 打出区列表 - 在 damage-display 下方 */
+.played-area{
+  position:absolute;
+  left:calc(var(--s) * 10);
+  top:calc(var(--s) * 90);
+  width:calc(var(--s) * 100);
+  height:calc(var(--s) * 170);
+  background:rgba(21,21,37,0.9);
+  border:calc(var(--s) * 1) solid #D4A574;
+  border-radius:calc(var(--s) * 4);
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+.played-list{
+  flex:1;
+  overflow-y:auto;
+  overflow-x:hidden;
+  padding:calc(var(--s) * 4);
+}
+.played-list::-webkit-scrollbar{width:calc(var(--s) * 3)}
+.played-list::-webkit-scrollbar-track{background:transparent}
+.played-list::-webkit-scrollbar-thumb{background:rgba(212,165,116,0.4);border-radius:calc(var(--s) * 2)}
+.played-item{
+  display:flex;
+  align-items:center;
+  gap:calc(var(--s) * 4);
+  padding:calc(var(--s) * 3) calc(var(--s) * 4);
+  border-radius:calc(var(--s) * 3);
+  background:rgba(255,255,255,0.05);
+  margin-bottom:calc(var(--s) * 3);
+  cursor:pointer;
+  transition:background 0.15s;
+}
+.played-item:hover{
+  background:rgba(212,165,116,0.2);
+}
+.played-item:last-child{
+  margin-bottom:0;
+}
+.played-thumb{
+  width:calc(var(--s) * 24);
+  height:calc(var(--s) * 32);
+  border-radius:calc(var(--s) * 2);
+  object-fit:cover;
+  flex-shrink:0;
+}
+.played-name{
+  font-size:calc(var(--s) * 11);
+  color:#ddd;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.played-count{
+  padding:calc(var(--s) * 4) calc(var(--s) * 6);
+  font-size:calc(var(--s) * 10);
+  color:#aaa;
+  background:rgba(0,0,0,0.3);
+  text-align:center;
+  border-top:calc(var(--s) * 1) solid rgba(212,165,116,0.3);
+}
+
 .hand-cards{
   display:flex;
   gap:0;
@@ -5452,6 +5744,167 @@ async function confirmReplaceShikigami() {
 @keyframes akajita-hint-pulse{
   0%,100%{box-shadow:0 8px 25px rgba(139,69,19,0.6)}
   50%{box-shadow:0 8px 35px rgba(139,69,19,0.8)}
+}
+
+/* 魍魉之匣选择弹窗样式 - 横排卡牌布局 */
+.wangliang-modal{
+  min-width:320px;
+  max-width:90vw;
+  padding:20px 25px;
+  text-align:center;
+}
+.wangliang-modal .modal-hint{color:#aaa;font-size:14px;margin:4px 0 0}
+.wangliang-modal .modal-hint b{color:#ff6b6b;font-size:15px}
+/* 横排卡牌容器 */
+.wl-card-row{
+  display:flex;
+  gap:14px;
+  justify-content:center;
+  margin:18px 0 20px;
+  flex-wrap:wrap;
+}
+/* 单张卡牌 */
+.wl-card{
+  width:120px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:6px;
+  padding:10px 8px 12px;
+  border:2px solid #555;
+  border-radius:10px;
+  background:rgba(0,0,0,0.35);
+  cursor:pointer;
+  transition:all 0.2s ease;
+  position:relative;
+}
+.wl-card:hover:not(.empty){
+  border-color:#888;
+  background:rgba(0,0,0,0.5);
+  transform:translateY(-2px);
+}
+/* 弃置选中态 */
+.wl-card.discarding{
+  border-color:#e55;
+  background:rgba(204,60,60,0.15);
+  box-shadow:0 0 12px rgba(204,60,60,0.4);
+}
+/* 空牌库态 */
+.wl-card.empty{
+  opacity:0.45;
+  cursor:default;
+  border-style:dashed;
+}
+/* 玩家名标签 */
+.wl-player-tag{
+  font-size:12px;
+  color:#ccc;
+  font-weight:bold;
+  padding:2px 8px;
+  border-radius:4px;
+  background:rgba(255,255,255,0.08);
+  width:100%;
+  text-align:center;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.wl-player-tag.self{
+  color:#ffd700;
+  background:rgba(255,215,0,0.15);
+  border:1px solid rgba(255,215,0,0.3);
+}
+/* 卡牌图区 */
+.wl-card-art-wrap{
+  width:90px;
+  height:120px;
+  border-radius:6px;
+  overflow:hidden;
+  position:relative;
+  border:1px solid #444;
+  background:#1a1a2e;
+}
+.wl-card-art{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+/* 弃置标记覆盖层 */
+.wl-discard-mark{
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:rgba(180,40,40,0.55);
+  font-size:36px;
+}
+/* 空牌库占位 */
+.wl-empty-art{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:rgba(80,80,80,0.3);
+  border-style:dashed;
+}
+.wl-empty-art span{
+  color:#666;
+  font-size:22px;
+  font-weight:bold;
+}
+/* 卡名 + HP */
+.wl-card-name{
+  font-size:13px;
+  color:#fff;
+  font-weight:bold;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  max-width:110px;
+}
+.wl-card-hp{
+  font-size:12px;
+  color:#ff6b6b;
+}
+.wl-empty-text{
+  color:#666;
+  font-weight:normal;
+}
+/* 底部按钮 */
+.wangliang-actions{
+  display:flex;
+  gap:15px;
+  justify-content:center;
+  margin-top:4px;
+}
+.wangliang-actions .confirm-btn{
+  padding:10px 28px;
+  background:linear-gradient(135deg, #4a9 0%, #387 100%);
+  border:none;
+  border-radius:8px;
+  color:#fff;
+  font-size:14px;
+  font-weight:bold;
+  cursor:pointer;
+  transition:all 0.2s ease;
+}
+.wangliang-actions .confirm-btn:hover{
+  transform:scale(1.05);
+  box-shadow:0 4px 15px rgba(68,170,153,0.5);
+}
+.wangliang-actions .cancel-btn{
+  padding:10px 18px;
+  background:rgba(255,255,255,0.08);
+  border:1px solid #555;
+  border-radius:8px;
+  color:#999;
+  font-size:13px;
+  cursor:pointer;
+  transition:all 0.2s ease;
+}
+.wangliang-actions .cancel-btn:hover{
+  background:rgba(255,255,255,0.15);
+  color:#fff;
 }
 
 .pile-view-panel{

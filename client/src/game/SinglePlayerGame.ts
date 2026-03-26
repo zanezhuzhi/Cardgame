@@ -1141,7 +1141,7 @@ export class SinglePlayerGame {
 
     // 已击杀的妖怪不能再分配伤害
     if (yokai.currentHp !== undefined && yokai.currentHp <= 0) {
-      this.addLog(`⚠️ 【${yokai.name}】已被击杀，请选择退治或超度`);
+      this.addLog(`⚠️ 【${yokai.name}】已被退治`);
       this.notifyChange();
       return false;
     }
@@ -1166,9 +1166,9 @@ export class SinglePlayerGame {
     
     this.addLog(`⚔️ 对【${yokai.name}】造成 ${damageToApply} 点伤害（${yokai.currentHp}/${yokai.hp}）`);
     
-    // 检查是否击杀
+    // 检查是否击杀 → 直接退治（进入弃牌堆）
     if (yokai.currentHp <= 0) {
-      this.addLog(`💀 【${yokai.name}】已被击杀！点击选择「退治」或「超度」`);
+      await this.killYokai(targetSlotIndex);
     }
     
     this.notifyChange();
@@ -1214,7 +1214,7 @@ export class SinglePlayerGame {
   }
 
   /** 攻击鬼王 */
-  attackBoss(damage: number): boolean {
+  async attackBoss(damage: number): Promise<boolean> {
     if (this.state.turnPhase !== 'action') return false;
     
     const player = this.getPlayer();
@@ -1238,12 +1238,11 @@ export class SinglePlayerGame {
     
     this.addLog(`⚔️ 对鬼王【${boss.name}】造成 ${damage} 点伤害（剩余:${this.state.field.bossCurrentHp}）`);
     
-    // 检查鬼王是否被击败 → 异步弹出退治/超度选择
+    // 检查鬼王是否被击败 → 直接退治（进入弃牌堆）
     if (this.state.field.bossCurrentHp <= 0) {
       this.state.field.bossCurrentHp = 0;
-      this.state.turnPhase = 'bossDefeated' as any; // 锁定操作，等待选择
+      await this.retireBoss();
       this.notifyChange();
-      this.promptBossDefeat();   // 异步，不阻塞
       return true;
     }
     
@@ -1340,7 +1339,7 @@ export class SinglePlayerGame {
     if (choice === 0) {
       await this.retireBoss();
     } else {
-      await this.transcendBoss();
+      await this.banishBoss();
     }
 
     // 解锁操作
@@ -1349,7 +1348,7 @@ export class SinglePlayerGame {
   }
 
   /** 退治鬼王：进弃牌堆 + 触发特殊退治效果 */
-  private async retireBoss(): Promise<void> {
+  async retireBoss(): Promise<void> {
     const player = this.getPlayer();
     const boss = this.state.field.currentBoss;
     if (!boss) return;
@@ -1393,8 +1392,8 @@ export class SinglePlayerGame {
     this.revealNextBoss();
   }
 
-  /** 超度鬼王：移出游戏，获得声誉 */
-  private async transcendBoss(): Promise<void> {
+  /** 超度鬼王：移出游戏，不获得声誉 */
+  async banishBoss(): Promise<void> {
     const player = this.getPlayer();
     const boss = this.state.field.currentBoss;
     if (!boss) return;
@@ -1428,19 +1427,12 @@ export class SinglePlayerGame {
     // 进入清理阶段
     this.state.turnPhase = 'cleanup';
     
-    // 处理战场上的妖怪：已击杀的自动退治，存活的恢复HP
+    // 处理战场上的妖怪：存活的恢复HP（击杀时已直接退治，无需额外处理）
     for (let i = 0; i < this.state.field.yokaiSlots.length; i++) {
       const yokai = this.state.field.yokaiSlots[i];
       if (!yokai) continue;
-      
-      if (yokai.currentHp !== undefined && yokai.currentHp <= 0) {
-        // 已击杀的自动退治（放入弃牌堆）
-        await this.killYokai(i);
-        this.addLog(`🔄 清理阶段：【${yokai.name}】自动退治`);
-      } else {
-        // 存活的恢复HP
-        yokai.currentHp = yokai.hp;
-      }
+      // 存活的恢复HP
+      yokai.currentHp = yokai.hp;
     }
     
     // 清理阶段：手牌 + 已打出 → 弃牌堆（含弃置触发）

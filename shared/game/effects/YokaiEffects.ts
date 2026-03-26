@@ -337,8 +337,18 @@ registerEffect('赤舌', async (ctx) => {
     
     const idx = opp.discard.findIndex(c => c.instanceId === selected.instanceId);
     if (idx !== -1) {
-      opp.deck.push(opp.discard.splice(idx, 1)[0]!);
+      const movedCard = opp.discard.splice(idx, 1)[0]!;
+      opp.deck.push(movedCard);
       affected++;
+      
+      // 标记牌顶卡牌为可见（对手可以查看自己牌顶的这张牌）
+      if (!opp.revealedDeckCards) opp.revealedDeckCards = [];
+      opp.revealedDeckCards.push({
+        instanceId: movedCard.instanceId,
+        position: 'top',
+        revealedBy: opp.id, // 对手自己可见
+        revealedAt: Date.now()
+      });
     }
   }
   
@@ -386,18 +396,32 @@ registerEffect('树妖', async (ctx) => {
 });
 
 // 日女巳时 - 选择：鬼火+1 / 抓牌+2 / 伤害+2
+// 鬼火满时不提供「鬼火+1」选项
 registerEffect('日女巳时', async (ctx) => {
   const { player, onChoice } = ctx;
-  const choice = onChoice ? await onChoice(['鬼火+1', '抓牌+2', '伤害+2']) : 0;
   
-  switch (choice) {
-    case 0:
+  // 构建可用选项列表
+  const options: string[] = [];
+  const ghostFireAvailable = player.ghostFire < player.maxGhostFire;
+  
+  if (ghostFireAvailable) {
+    options.push('鬼火+1');
+  }
+  options.push('抓牌+2', '伤害+2');
+  
+  // 获取选择（无回调时默认第0项）
+  const choiceIndex = onChoice ? await onChoice(options) : 0;
+  const chosenOption = options[choiceIndex];
+  
+  // 根据选择执行效果
+  switch (chosenOption) {
+    case '鬼火+1':
       player.ghostFire = Math.min(player.ghostFire + 1, player.maxGhostFire);
       return { success: true, message: '日女巳时：鬼火+1', ghostFire: 1 };
-    case 1:
+    case '抓牌+2':
       drawCards(player, 2);
       return { success: true, message: '日女巳时：抓牌+2', draw: 2 };
-    case 2:
+    case '伤害+2':
       player.damage += 2;
       return { success: true, message: '日女巳时：伤害+2', damage: 2 };
     default:
@@ -552,13 +576,13 @@ registerEffect('骰子鬼', async (ctx) => {
     return { success: false, message: '骰子鬼：没有手牌可超度' };
   }
   
-  // 选择超度的牌
+  // 选择超度的牌（AI策略：优先超度声誉最低的牌，同声誉时选HP最高的）
   let cardId: string;
   if (onSelectCards) {
     const ids = await onSelectCards(player.hand, 1);
     cardId = ids[0]!;
   } else {
-    cardId = player.hand[0]!.instanceId;
+    cardId = aiDecide_骰子鬼_超度(player.hand);
   }
   
   const cardIdx = player.hand.findIndex(c => c.instanceId === cardId);
@@ -576,19 +600,66 @@ registerEffect('骰子鬼', async (ctx) => {
     return { success: true, message: `骰子鬼：超度${exiledCard.name}，没有可退治的妖怪` };
   }
   
+  // 选择退治目标（AI策略：优先退治声誉最高的妖怪，同声誉时选HP最高的）
   const targetId = onSelectTarget 
     ? await onSelectTarget(validTargets) 
-    : validTargets[0]!.instanceId;
+    : aiDecide_骰子鬼_退治(validTargets);
   
   const idx = gameState.field.yokaiSlots.findIndex(y => y?.instanceId === targetId);
   if (idx !== -1) {
     const target = gameState.field.yokaiSlots[idx]!;
     gameState.field.yokaiSlots[idx] = null;
+    // 退治的妖怪进入玩家弃牌堆
+    player.discard.push(target);
     return { success: true, message: `骰子鬼：超度${exiledCard.name}，退治${target.name}` };
   }
   
   return { success: true, message: `骰子鬼：超度${exiledCard.name}` };
 });
+
+/**
+ * 骰子鬼 AI 决策 - 选择超度手牌（L1 规则策略）
+ * @param hand 可选手牌列表
+ * @returns 应超度的卡牌 instanceId
+ * @description
+ * - 优先选择声誉最低的牌
+ * - 同声誉时选择HP最高的牌（使退治范围更大）
+ */
+export function aiDecide_骰子鬼_超度(hand: CardInstance[]): string {
+  if (hand.length === 0) return '';
+  if (hand.length === 1) return hand[0]!.instanceId;
+  
+  // 按声誉升序，同声誉时按HP降序
+  const sorted = [...hand].sort((a, b) => {
+    const charmA = (a as any).charm ?? 0;
+    const charmB = (b as any).charm ?? 0;
+    if (charmA !== charmB) return charmA - charmB;
+    return (b.hp || 0) - (a.hp || 0);
+  });
+  return sorted[0]!.instanceId;
+}
+
+/**
+ * 骰子鬼 AI 决策 - 选择退治目标（L1 规则策略）
+ * @param targets 可选游荡妖怪列表
+ * @returns 应退治的妖怪 instanceId
+ * @description
+ * - 优先选择声誉最高的妖怪
+ * - 同声誉时选择HP最高的妖怪
+ */
+export function aiDecide_骰子鬼_退治(targets: CardInstance[]): string {
+  if (targets.length === 0) return '';
+  if (targets.length === 1) return targets[0]!.instanceId;
+  
+  // 按声誉降序，同声誉时按HP降序
+  const sorted = [...targets].sort((a, b) => {
+    const charmA = (a as any).charm ?? 0;
+    const charmB = (b as any).charm ?? 0;
+    if (charmA !== charmB) return charmB - charmA;
+    return (b.hp || 0) - (a.hp || 0);
+  });
+  return sorted[0]!.instanceId;
+}
 
 // 涅槃之火 - 本回合式神技能鬼火消耗-1
 registerEffect('涅槃之火', async (ctx) => {

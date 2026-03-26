@@ -49,7 +49,7 @@ export type GameAction =
   | { type: 'retireYokai'; yokaiIndex: number }
   | { type: 'transcendYokai'; yokaiIndex: number }
   | { type: 'retireBoss' }
-  | { type: 'transcendBoss' }
+  | { type: 'banishBoss' }
   | { type: 'gainSpell' }
   | { type: 'endTurn' };
 

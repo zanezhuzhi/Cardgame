@@ -420,9 +420,9 @@ export class MultiplayerGame {
       lastPlayerKilledYokai: true,
       pendingYokaiRefresh: false,
       turnHadKill: false,
-      pendingDeathChoices: [],  // 待选择退治/超度的妖怪槽位
+      pendingDeathChoices: [],  // [已废弃] 击杀时直接退治，不再使用待选列表
       killedBossThisTurn: false,  // 本回合是否击杀了鬼王
-      pendingBossDeath: false,  // 待选择退治/超度的鬼王
+      pendingBossDeath: false,  // [已废弃] 击杀时直接退治，不再使用
       // 式神选择阶段的全局数据
       shikigamiOptions: allShikigamiOptions,  // 所有式神选项（玩家0的4个 + 玩家1的4个 + ...）
       shikigamiSelectTimeout: GAME_CONSTANTS.SHIKIGAMI_SELECT_TIMEOUT,  // 剩余时间（毫秒）
@@ -1301,12 +1301,12 @@ export class MultiplayerGame {
     // 3. 未使用伤害清空
     player.damage = 0;
     
-    // 4. 弃置所有手牌
-    player.discard.push(...player.hand);
+    // 4. 弃置所有手牌（规则弃置，不触发【触】）
+    this.discardMany(player, player.hand, 'rule');
     player.hand = [];
     
-    // 5. 弃置所有已打出的牌
-    player.discard.push(...player.played);
+    // 5. 弃置所有已打出的牌（规则弃置）
+    this.discardMany(player, player.played, 'rule');
     player.played = [];
     
     // 6. 重置本回合打牌计数
@@ -1741,13 +1741,27 @@ export class MultiplayerGame {
     
     this.addLog(`⚔️ ${player.name} 对鬼王造成 ${damage} 点伤害`);
     
-    // 检查鬼王是否被击败
+    // 检查鬼王是否被击败 → 直接退治（进入弃牌堆）
     if (this.state.field.bossCurrentHp <= 0) {
       this.markTurnHadKill();
-      // 标记本回合击杀了鬼王，等待玩家选择退治/超度
       (this.state as any).killedBossThisTurn = true;
-      (this.state as any).pendingBossDeath = true;
-      this.addLog(`💀 鬼王 ${this.state.field.currentBoss?.name} 被击杀，请选择【退治】或【超度】`);
+      
+      const boss = this.state.field.currentBoss!;
+      // 直接退治：鬼王进入弃牌堆
+      player.discard.push(boss as any);
+      
+      // 检查茨木「迁怒」buff
+      const exileBonus = TempBuffHelper.triggerExileKillBonus(player);
+      if (exileBonus > 0) {
+        player.damage += exileBonus;
+        this.addLog(`💀 ${player.name} 退治了鬼王 ${boss.name}（+${boss.charm || 0} 声誉，迁怒+${exileBonus}伤害）`);
+      } else {
+        this.addLog(`💀 ${player.name} 退治了鬼王 ${boss.name}（+${boss.charm || 0} 声誉）`);
+      }
+      
+      // 清除当前鬼王并翻出下一个
+      this.state.field.currentBoss = null;
+      this.revealBoss();
     }
     
     this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
@@ -1783,16 +1797,22 @@ export class MultiplayerGame {
     
     this.addLog(`⚔️ ${player.name} 对 ${yokai.name} 造成 ${damageDealt} 点伤害`);
     
-    // 检查妖怪是否被击杀
+    // 检查妖怪是否被击杀 → 直接退治（进入弃牌堆）
     if (yokai.hp <= 0) {
       this.markTurnHadKill();
-      // 添加到待选择列表
-      const pendingList = (this.state as any).pendingDeathChoices || [];
-      if (!pendingList.includes(slotIndex)) {
-        pendingList.push(slotIndex);
-        (this.state as any).pendingDeathChoices = pendingList;
+      // 直接退治：移入弃牌堆
+      this.ensureYokaiDiscardFaceStats(yokai);
+      player.discard.push(yokai);
+      this.state.field.yokaiSlots[slotIndex] = null;
+      
+      // 检查茨木「迁怒」buff
+      const exileBonus = TempBuffHelper.triggerExileKillBonus(player);
+      if (exileBonus > 0) {
+        player.damage += exileBonus;
+        this.addLog(`💀 ${player.name} 退治了 ${yokai.name}（+${yokai.charm || 0} 声誉，迁怒+${exileBonus}伤害）`);
+      } else {
+        this.addLog(`💀 ${player.name} 退治了 ${yokai.name}（+${yokai.charm || 0} 声誉）`);
       }
-      this.addLog(`💀 ${yokai.name} 被击杀，请选择【退治】或【超度】`);
     }
     
     this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
@@ -2586,10 +2606,10 @@ export class MultiplayerGame {
         this.addLog(`   👹 来袭：每位玩家弃置1张手牌`);
         for (const player of this.state.players) {
           if (player.hand.length > 0) {
-            // 简化：随机弃置1张
+            // 简化：随机弃置1张（主动弃置，触发【触】）
             const randIdx = Math.floor(Math.random() * player.hand.length);
             const card = player.hand.splice(randIdx, 1)[0];
-            player.discard.push(card);
+            this.discard(player, card, 'active');
           }
         }
         break;
@@ -2719,6 +2739,50 @@ export class MultiplayerGame {
         DeckRevealHelper.removeRevealedCard(player, card.instanceId);
         player.hand.push(card);
       }
+    }
+  }
+
+  /**
+   * 【原子操作】弃置卡牌
+   * @param player 玩家
+   * @param card 要弃置的卡牌（调用前需已从原区域移除）
+   * @param type 'active' = 主动弃置（触发【触】效果），'rule' = 规则弃置（不触发）
+   */
+  private discard(player: PlayerState, card: CardInstance, type: 'active' | 'rule'): void {
+    // 放入弃牌堆
+    player.discard.push(card);
+
+    // 仅主动弃置触发【触】效果
+    if (type === 'active') {
+      this.checkDiscardTrigger(player, card);
+    }
+  }
+
+  /**
+   * 【原子操作】批量弃置（用于回合末清理等场景）
+   * @param player 玩家
+   * @param cards 要弃置的卡牌数组
+   * @param type 弃置类型
+   */
+  private discardMany(player: PlayerState, cards: CardInstance[], type: 'active' | 'rule'): void {
+    for (const card of cards) {
+      this.discard(player, card, type);
+    }
+  }
+
+  /**
+   * 检查主动弃置触发的【触】效果（内部方法）
+   */
+  private checkDiscardTrigger(player: PlayerState, card: CardInstance): void {
+    // 树妖【触】：被弃置时抓牌+2
+    if (card.name === '树妖') {
+      this.drawCards(player, 2);
+      this.addLog(`   🌳 树妖【触】效果：抓牌+2`);
+    }
+    // 三味【触】：被弃置时抓牌+3
+    else if (card.name === '三味') {
+      this.drawCards(player, 3);
+      this.addLog(`   🎸 三味【触】效果：抓牌+3`);
     }
   }
 
@@ -3169,22 +3233,43 @@ export class MultiplayerGame {
         case '树妖':
           // 抓牌+2，弃置1张
           this.drawCards(player, 2);
+          this.addLog(`   ✨ 御魂：抓牌+2`);
+          // 如果有手牌，让玩家选择要弃置的牌
           if (player.hand.length > 0) {
-            player.discard.push(player.hand.shift()!);
+            this.state.pendingChoice = {
+              type: 'treeDemonDiscard',
+              playerId: player.id,
+              prompt: '选择1张手牌弃置'
+            };
+            this.addLog(`   ⏳ 等待选择1张手牌弃置...`);
           }
-          this.addLog(`   ✨ 御魂：抓牌+2，弃置1张`);
           break;
           
         case '日女巳时':
-          // 选择：鬼火+1 / 抓牌+2 / 伤害+2（默认伤害）
-          player.damage += 2;
-          this.addLog(`   ✨ 御魂：伤害+2`);
+          // 选择：鬼火+1 / 抓牌+2 / 伤害+2
+          this.state.pendingChoice = {
+            type: 'rinyuChoice',
+            playerId: player.id,
+            prompt: '选择一项效果',
+            options: ['ghostFire', 'draw', 'damage'] // 鬼火+1, 抓牌+2, 伤害+2
+          };
+          this.addLog(`   ⏳ 等待选择：鬼火+1 / 抓牌+2 / 伤害+2`);
           break;
           
         case '蚌精':
-          // 抓牌+2（超度部分简化）
-          this.drawCards(player, 2);
-          this.addLog(`   ✨ 御魂：抓牌+2`);
+          // 超度1张手牌，抓牌+2
+          if (player.hand.length > 0) {
+            this.state.pendingChoice = {
+              type: 'bangJingExile',
+              playerId: player.id,
+              prompt: '选择1张手牌超度'
+            };
+            this.addLog(`   ⏳ 等待选择1张手牌超度...`);
+          } else {
+            // 无手牌时仅抓牌（根据策划文档：无手牌时不可打出，这里做兜底）
+            this.drawCards(player, 2);
+            this.addLog(`   ✨ 御魂：无手牌可超度，抓牌+2`);
+          }
           break;
           
         case '鸣屋':
@@ -3288,11 +3373,27 @@ export class MultiplayerGame {
         }
           
         // ============ 生命4 ============
-        case '骰子鬼':
-          // 伤害+2（简化）
-          player.damage += 2;
-          this.addLog(`   ✨ 御魂：伤害+2`);
+        case '骰子鬼': {
+          // 超度1张手牌，退治生命不高于超度牌+2的妖怪
+          if (player.hand.length === 0) {
+            this.addLog(`   ✨ 御魂：没有手牌可超度`);
+            break;
+          }
+          // 第一步：选择超度手牌
+          this.state.pendingChoice = {
+            type: 'diceGhostExile',
+            playerId: player.id,
+            prompt: '选择1张手牌超度',
+            options: player.hand.map(c => ({
+              instanceId: c.instanceId,
+              name: c.name,
+              hp: c.hp ?? 0,
+              charm: (c as any).charm ?? 0
+            }))
+          };
+          this.addLog(`   ⏳ 等待选择超度手牌...`);
           break;
+        }
           
         case '涅槃之火':
           // 本回合式神技能鬼火消耗-1
@@ -3336,17 +3437,74 @@ export class MultiplayerGame {
           // 抓牌+1，弃置1张
           this.drawCards(player, 1);
           if (player.hand.length > 0) {
-            player.discard.push(player.hand.shift()!);
+            const discarded = player.hand.shift()!;
+            this.discard(player, discarded, 'active');
           }
           this.addLog(`   ✨ 御魂：抓牌+1，弃置1张`);
           break;
           
-        case '魍魉之匣':
-          // 抓牌+1，伤害+1
+        case '魍魉之匣': {
+          // 抓牌+1，伤害+1，【妨害】每名玩家展示牌库顶，由你决定保留或弃置
           this.drawCards(player, 1);
           player.damage += 1;
           this.addLog(`   ✨ 御魂：抓牌+1，伤害+1`);
+          
+          // 收集所有玩家（含自己）的牌库顶牌
+          const wangliangTargets: { playerId: string; playerName: string; card: CardInstance | null }[] = [];
+          for (const p of this.state.players) {
+            if (p.deck.length > 0) {
+              const topCard = p.deck[p.deck.length - 1]; // 不pop，先展示
+              wangliangTargets.push({
+                playerId: p.id,
+                playerName: p.name,
+                card: topCard
+              });
+              this.addLog(`   👁️ ${p.name} 牌库顶: ${topCard.name}`);
+            } else {
+              wangliangTargets.push({
+                playerId: p.id,
+                playerName: p.name,
+                card: null
+              });
+              this.addLog(`   👁️ ${p.name} 牌库为空`);
+            }
+          }
+          
+          // 检查是否有至少一名玩家有牌库
+          const hasAnyCard = wangliangTargets.some(t => t.card !== null);
+          
+          if (!hasAnyCard) {
+            this.addLog(`   ⚠️ 所有玩家牌库为空，跳过妨害效果`);
+          } else {
+            // 将自己排在第一位，其余保持原有顺序
+            const sortedTargets = [
+              ...wangliangTargets.filter(t => t.playerId === player.id),
+              ...wangliangTargets.filter(t => t.playerId !== player.id)
+            ];
+            // 设置 pendingChoice，传递所有玩家（含空牌库）
+            this.state.pendingChoice = {
+              type: 'wangliangChoice',
+              playerId: player.id,
+              prompt: '魍魉之匣：点选要弃置的牌库顶牌（未选中则保留）',
+              allTargets: sortedTargets.map(t => ({
+                playerId: t.playerId,
+                playerName: t.playerName,
+                card: t.card ? {
+                  instanceId: t.card.instanceId,
+                  cardId: t.card.cardId,
+                  name: t.card.name,
+                  hp: t.card.hp,
+                  cardType: t.card.cardType
+                } : null
+              })),
+              currentIndex: 0,
+              decisions: [] as { playerId: string; action: 'keep' | 'discard' }[]
+            };
+            this.notifyStateChange();
+            return; // 等待玩家响应
+          }
           break;
+        }
           
         // ============ 生命5 ============
         case '狂骨':
@@ -3886,11 +4044,12 @@ export class MultiplayerGame {
     const discardCount = ids.length;
 
     if (discardCount > 0) {
-      // 弃置选中的手牌
+      // 弃置选中的手牌（主动弃置，触发【触】）
       for (const id of ids) {
         const idx = player.hand.findIndex(c => c.instanceId === id);
         if (idx !== -1) {
-          player.discard.push(player.hand.splice(idx, 1)[0]!);
+          const card = player.hand.splice(idx, 1)[0]!;
+          this.discard(player, card, 'active');
         }
       }
       // 抓取等量的牌
@@ -3954,6 +4113,259 @@ export class MultiplayerGame {
   }
 
   /**
+   * 处理树妖弃牌选择响应
+   * @param playerId 玩家ID
+   * @param selectedId 选择的手牌instanceId
+   */
+  public handleTreeDemonDiscardResponse(playerId: string, selectedId: string): { success: boolean; error?: string } {
+    // 验证是否有等待的树妖弃牌选择
+    if (!this.state.pendingChoice || this.state.pendingChoice.type !== 'treeDemonDiscard') {
+      return { success: false, error: '没有待处理的树妖弃牌选择' };
+    }
+    // 验证是否是正确的玩家
+    if (this.state.pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+
+    // 从手牌中找到并弃置选中的牌
+    const idx = player.hand.findIndex(c => c.instanceId === selectedId);
+    if (idx === -1) {
+      // 超时/默认：弃置第一张
+      if (player.hand.length > 0) {
+        const card = player.hand.shift()!;
+        this.discard(player, card, 'active');
+        this.addLog(`   🗑️ 弃置 ${card.name}（默认）`);
+      }
+    } else {
+      const card = player.hand.splice(idx, 1)[0]!;
+      this.discard(player, card, 'active');
+      this.addLog(`   🗑️ 弃置 ${card.name}`);
+    }
+
+    // 清除等待状态
+    this.state.pendingChoice = undefined;
+
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+
+  /**
+   * 处理日女巳时选择响应
+   * @param playerId 玩家ID
+   * @param choice 选择: 'ghostFire' | 'draw' | 'damage'
+   */
+  public handleRinyuChoiceResponse(playerId: string, choice: string): { success: boolean; error?: string } {
+    // 验证是否有等待的日女巳时选择
+    if (!this.state.pendingChoice || this.state.pendingChoice.type !== 'rinyuChoice') {
+      return { success: false, error: '没有待处理的日女巳时选择' };
+    }
+    // 验证是否是正确的玩家
+    if (this.state.pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+
+    // 执行选择的效果
+    switch (choice) {
+      case 'ghostFire':
+        player.ghostFire = Math.min(player.ghostFire + 1, GAME_CONSTANTS.MAX_GHOST_FIRE);
+        this.addLog(`   🔥 日女巳时：鬼火+1`);
+        break;
+      case 'draw':
+        this.drawCards(player, 2);
+        this.addLog(`   🎴 日女巳时：抓牌+2`);
+        break;
+      case 'damage':
+      default:
+        player.damage += 2;
+        this.addLog(`   ⚔️ 日女巳时：伤害+2`);
+        break;
+    }
+
+    // 清除等待状态
+    this.state.pendingChoice = undefined;
+
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+
+  /**
+   * 处理蚌精超度手牌选择响应
+   * @param playerId 玩家ID
+   * @param selectedId 选择的手牌instanceId
+   */
+  public handleBangJingExileResponse(playerId: string, selectedId: string): { success: boolean; error?: string } {
+    // 验证是否有等待的蚌精超度选择
+    if (!this.state.pendingChoice || this.state.pendingChoice.type !== 'bangJingExile') {
+      return { success: false, error: '没有待处理的蚌精超度选择' };
+    }
+    // 验证是否是正确的玩家
+    if (this.state.pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+
+    // 从手牌中找到并超度选中的牌
+    const idx = player.hand.findIndex(c => c.instanceId === selectedId);
+    if (idx === -1) {
+      // 超时/默认：超度第一张
+      if (player.hand.length > 0) {
+        const card = player.hand.shift()!;
+        player.exiled.push(card);
+        this.addLog(`   ☁️ 超度 ${card.name}（默认）`);
+      }
+    } else {
+      const card = player.hand.splice(idx, 1)[0]!;
+      player.exiled.push(card);
+      this.addLog(`   ☁️ 超度 ${card.name}`);
+    }
+
+    // 超度后抓牌+2
+    this.drawCards(player, 2);
+    this.addLog(`   ✨ 蚌精：抓牌+2`);
+
+    // 清除等待状态
+    this.state.pendingChoice = undefined;
+
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+
+  /**
+   * 处理骰子鬼超度手牌选择响应（第一步）
+   * @param playerId 玩家ID
+   * @param selectedId 选择的手牌instanceId
+   */
+  public handleDiceGhostExileResponse(playerId: string, selectedId: string): { success: boolean; error?: string } {
+    // 验证是否有等待的骰子鬼超度选择
+    if (!this.state.pendingChoice || this.state.pendingChoice.type !== 'diceGhostExile') {
+      return { success: false, error: '没有待处理的骰子鬼超度选择' };
+    }
+    // 验证是否是正确的玩家
+    if (this.state.pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+
+    // 从手牌中找到并超度选中的牌
+    let exiledCard: CardInstance | undefined;
+    const idx = player.hand.findIndex(c => c.instanceId === selectedId);
+    if (idx === -1) {
+      // 超时/默认：按AI策略选择（声誉最低，同声誉时HP最高）
+      if (player.hand.length > 0) {
+        const sorted = [...player.hand].sort((a, b) => {
+          const charmA = (a as any).charm ?? 0;
+          const charmB = (b as any).charm ?? 0;
+          if (charmA !== charmB) return charmA - charmB;
+          return (b.hp || 0) - (a.hp || 0);
+        });
+        exiledCard = sorted[0];
+        const removeIdx = player.hand.findIndex(c => c.instanceId === exiledCard!.instanceId);
+        player.hand.splice(removeIdx, 1);
+        player.exiled.push(exiledCard!);
+        this.addLog(`   ☁️ 超度 ${exiledCard!.name}（默认）`);
+      }
+    } else {
+      exiledCard = player.hand.splice(idx, 1)[0]!;
+      player.exiled.push(exiledCard);
+      this.addLog(`   ☁️ 超度 ${exiledCard.name}`);
+    }
+
+    // 计算可退治的HP上限
+    const maxHp = (exiledCard?.hp || 0) + 2;
+
+    // 查找符合条件的游荡妖怪
+    const validTargets = this.state.field.yokaiSlots
+      .map((y, i) => ({ yokai: y, index: i }))
+      .filter(({ yokai }) => yokai !== null && (yokai.hp || 0) <= maxHp);
+
+    if (validTargets.length === 0) {
+      // 没有符合条件的妖怪，结束效果
+      this.addLog(`   ✨ 骰子鬼：没有可退治的妖怪（HP≤${maxHp}）`);
+      this.state.pendingChoice = undefined;
+      this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+      return { success: true };
+    }
+
+    // 第二步：选择退治目标
+    this.state.pendingChoice = {
+      type: 'diceGhostTarget',
+      playerId: player.id,
+      prompt: `选择1个HP≤${maxHp}的游荡妖怪退治`,
+      maxHp: maxHp,
+      options: validTargets.map(({ yokai, index }) => ({
+        instanceId: yokai!.instanceId,
+        cardId: yokai!.cardId,
+        name: yokai!.name,
+        hp: yokai!.hp ?? 0,
+        charm: (yokai as any)?.charm ?? 0,
+        slotIndex: index
+      }))
+    };
+    this.addLog(`   ⏳ 等待选择退治目标（HP≤${maxHp}）...`);
+
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+
+  /**
+   * 处理骰子鬼退治目标选择响应（第二步）
+   * @param playerId 玩家ID
+   * @param selectedId 选择的妖怪instanceId
+   */
+  public handleDiceGhostTargetResponse(playerId: string, selectedId: string): { success: boolean; error?: string } {
+    // 验证是否有等待的骰子鬼退治选择
+    if (!this.state.pendingChoice || this.state.pendingChoice.type !== 'diceGhostTarget') {
+      return { success: false, error: '没有待处理的骰子鬼退治选择' };
+    }
+    // 验证是否是正确的玩家
+    if (this.state.pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+
+    const options = (this.state.pendingChoice as any).options || [];
+
+    // 从游荡区找到并退治选中的妖怪
+    let targetOption = options.find((o: any) => o.instanceId === selectedId);
+    if (!targetOption) {
+      // 超时/默认：按AI策略选择（声誉最高，同声誉时HP最高）
+      const sorted = [...options].sort((a: any, b: any) => {
+        if (a.charm !== b.charm) return b.charm - a.charm;
+        return b.hp - a.hp;
+      });
+      targetOption = sorted[0];
+    }
+
+    if (targetOption) {
+      const slotIndex = targetOption.slotIndex;
+      const yokai = this.state.field.yokaiSlots[slotIndex];
+      if (yokai) {
+        this.state.field.yokaiSlots[slotIndex] = null;
+        player.discard.push(yokai);
+        this.addLog(`   ✨ 骰子鬼：退治 ${yokai.name}`);
+      }
+    }
+
+    // 清除等待状态
+    this.state.pendingChoice = undefined;
+
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+
+  /**
    * 执行魅妖效果：使用对手牌库顶牌的效果并将其置入弃牌区
    * @param player 当前玩家
    * @param target 目标牌信息
@@ -3976,8 +4388,8 @@ export class MultiplayerGame {
     // 这里使用简化版本：只执行基础效果，不支持递归选择
     this.executeSimpleCardEffect(player, card);
 
-    // 将该牌置入拥有者的弃牌堆
-    owner.discard.push(card);
+    // 将该牌置入拥有者的弃牌堆（主动弃置，触发【触】）
+    this.discard(owner, card, 'active');
     this.addLog(`   📥 ${card.name} 置入 ${target.ownerName} 弃牌堆`);
   }
 
@@ -4036,6 +4448,20 @@ export class MultiplayerGame {
         this.addLog(`      → 伤害+2（默认选择）`);
         break;
       case '蚌精':
+        // AI托管：选择价值最低的手牌超度（HP升序，同HP声誉升序）
+        if (player.hand.length > 0) {
+          const sortedHand = [...player.hand].sort((a, b) => {
+            if ((a.hp ?? 0) !== (b.hp ?? 0)) return (a.hp ?? 0) - (b.hp ?? 0);
+            return (a.charm ?? 0) - (b.charm ?? 0);
+          });
+          const cardToExile = sortedHand[0]!;
+          const idx = player.hand.findIndex(c => c.instanceId === cardToExile.instanceId);
+          if (idx !== -1) {
+            const card = player.hand.splice(idx, 1)[0]!;
+            player.exiled.push(card);
+            this.addLog(`      → 超度 ${card.name}`);
+          }
+        }
         this.drawCards(player, 2);
         this.addLog(`      → 抓牌+2`);
         break;
@@ -4085,9 +4511,11 @@ export class MultiplayerGame {
         this.addLog(`      → 效果跳过（需要选择另一张御魂）`);
         break;
       case '魍魉之匣':
+        // 完整效果（含妨害选择）在 handlePlayCard switch-case 中处理
+        // 这里仅执行基础效果（用于轮入道等触发的简化执行）
         this.drawCards(player, 1);
         player.damage += 1;
-        this.addLog(`      → 抓牌+1，伤害+1`);
+        this.addLog(`      → 抓牌+1，伤害+1（简化）`);
         break;
 
       default:
@@ -4155,6 +4583,122 @@ export class MultiplayerGame {
 
     // 清除等待状态
     this.state.pendingChoice = undefined;
+
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+
+  // ============ 魍魉之匣效果相关 ============
+
+  /**
+   * 处理魍魉之匣选择响应
+   * @param playerId 做出选择的玩家ID
+   * @param targetPlayerId 被选择的目标玩家ID
+   * @param action 'keep' 保留 或 'discard' 弃置
+   */
+  public handleWangliangResponse(
+    playerId: string,
+    targetPlayerId: string,
+    action: 'keep' | 'discard'
+  ): { success: boolean; error?: string } {
+    const pendingChoice = this.state.pendingChoice as any;
+    if (!pendingChoice || pendingChoice.type !== 'wangliangChoice') {
+      return { success: false, error: '没有待处理的魍魉之匣选择' };
+    }
+    if (pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+
+    // 找到目标玩家
+    const target = pendingChoice.allTargets.find((t: any) => t.playerId === targetPlayerId);
+    if (!target) {
+      return { success: false, error: '无效的目标玩家' };
+    }
+
+    // 找到目标玩家实体
+    const targetPlayer = this.getPlayer(targetPlayerId);
+    if (!targetPlayer) return { success: false, error: '目标玩家不存在' };
+
+    // 执行动作
+    if (action === 'discard') {
+      // 弃置：从牌库顶移到弃牌堆
+      const topCard = targetPlayer.deck.pop();
+      if (topCard) {
+        targetPlayer.discard.push(topCard);
+        this.addLog(`   🗑️ ${targetPlayer.name} 的 ${topCard.name} 被弃置`);
+      }
+    } else {
+      // 保留：不做任何操作
+      this.addLog(`   ✅ ${targetPlayer.name} 的 ${target.card.name} 保留在牌库顶`);
+    }
+
+    // 记录决策
+    pendingChoice.decisions.push({ playerId: targetPlayerId, action });
+    pendingChoice.currentIndex++;
+
+    // 检查是否所有目标都处理完毕（只计有牌库的玩家）
+    const validCount = pendingChoice.allTargets.filter((t: any) => t.card !== null).length;
+    if (pendingChoice.currentIndex >= validCount) {
+      // 所有选择完成，清除等待状态
+      this.state.pendingChoice = undefined;
+      this.addLog(`   ✨ 魍魉之匣妨害效果完成`);
+    }
+
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+
+  /**
+   * 处理魍魉之匣批量选择响应（一次性提交所有决策）
+   * @param playerId 做出选择的玩家ID
+   * @param decisions 所有决策 { playerId, action }[]
+   */
+  public handleWangliangBatchResponse(
+    playerId: string,
+    decisions: { playerId: string; action: 'keep' | 'discard' }[]
+  ): { success: boolean; error?: string } {
+    const pendingChoice = this.state.pendingChoice as any;
+    if (!pendingChoice || pendingChoice.type !== 'wangliangChoice') {
+      return { success: false, error: '没有待处理的魍魉之匣选择' };
+    }
+    if (pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+
+    // 验证决策数量：只需匹配有牌库的玩家数
+    const validTargets = pendingChoice.allTargets.filter((t: any) => t.card !== null);
+    if (decisions.length !== validTargets.length) {
+      return { success: false, error: `决策数量(${decisions.length})与有牌库玩家数(${validTargets.length})不匹配` };
+    }
+
+    // 执行所有决策
+    for (const decision of decisions) {
+      const targetPlayer = this.getPlayer(decision.playerId);
+      if (!targetPlayer) continue;
+
+      const target = pendingChoice.allTargets.find((t: any) => t.playerId === decision.playerId);
+      if (!target) continue;
+
+      if (decision.action === 'discard') {
+        const topCard = targetPlayer.deck.pop();
+        if (topCard) {
+          targetPlayer.discard.push(topCard);
+          this.addLog(`   🗑️ ${targetPlayer.name} 的 ${topCard.name} 被弃置`);
+        }
+      } else {
+        this.addLog(`   ✅ ${targetPlayer.name} 的 ${target.card.name} 保留在牌库顶`);
+      }
+    }
+
+    // 清除等待状态
+    this.state.pendingChoice = undefined;
+    this.addLog(`   ✨ 魍魉之匣妨害效果完成`);
 
     this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
     return { success: true };
@@ -4320,35 +4864,7 @@ export class MultiplayerGame {
       this.forceCloseAkajitaSelectForPlayer(p.id);
     }
     
-    // 自动处理未选择的死亡妖怪（默认退治）
-    const pendingList = (this.state as any).pendingDeathChoices || [];
-    for (const slotIndex of [...pendingList]) {
-      const yokai = this.state.field.yokaiSlots[slotIndex];
-      if (yokai && (yokai.hp || 0) <= 0) {
-        // 默认选择退治（放入弃牌堆）
-        this.ensureYokaiDiscardFaceStats(yokai);
-        player.discard.push(yokai);
-        this.state.field.yokaiSlots[slotIndex] = null;
-        this.addLog(`📥 ${player.name} 自动退治了 ${yokai.name}（+${yokai.charm || 0} 声誉）`);
-      }
-    }
-    // 清空待选择列表
-    (this.state as any).pendingDeathChoices = [];
-    
-    // 自动处理未选择的死亡鬼王（默认退治）
-    if ((this.state as any).pendingBossDeath) {
-      const boss = this.state.field.currentBoss;
-      if (boss && this.state.field.bossCurrentHp <= 0) {
-        // 默认选择退治（放入弃牌堆）
-        player.discard.push(boss as any);
-        this.addLog(`📥 ${player.name} 自动退治了鬼王 ${boss.name}（+${boss.charm || 0} 声誉）`);
-        
-        // 清除当前鬼王并翻出下一个
-        this.state.field.currentBoss = null;
-        this.revealBoss();
-      }
-      (this.state as any).pendingBossDeath = false;
-    }
+    // 注：妖怪/鬼王HP降为0时已直接退治，无需在此额外处理
     
     this.enterCleanupPhase();
     

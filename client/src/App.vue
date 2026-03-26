@@ -159,7 +159,7 @@
         <div class="yokai-panel">
           <div class="yokai-panel-header-row">
             <div class="panel-title yokai-panel-title">👻 游荡妖怪区</div>
-            <div v-if="showTurnCountdown" class="turn-countdown-bar">
+            <div v-if="showTurnCountdown" class="turn-countdown-bar" :class="{ 'my-turn': isMyTurn }">
               <span class="countdown-icon">⏱️</span>
               <span class="countdown-text">回合倒计时：{{ turnCountdownDisplay }}</span>
               <div v-if="turnCountdownMax > 0" class="countdown-progress" :style="{ width: (turnCountdown / turnCountdownMax * 100) + '%' }"></div>
@@ -302,7 +302,7 @@
             <span>⚔️</span><b>{{player?.damage||0}}</b>
           </div>
           <div class="hand-cards">
-            <div v-for="(c, idx) in (player?.hand || [])" :key="c.instanceId" 
+            <div v-for="(c, idx) in sortedHand" :key="c.instanceId" 
                  class="hand-card" 
                  :class="[cardType(c), {selecting: selectingCards, unplayable: !canPlay(c)}]"
                  :style="{ zIndex: idx + 1 }"
@@ -1370,6 +1370,38 @@ const yokai = computed(() => state.value?.field.yokaiSlots || [])
 const boss = computed(() => state.value?.field.currentBoss)
 const logs = computed(() => (state.value?.log || []).slice(-300))
 
+// 手牌排序显示：不能使用的居左，能使用的居右，内部保持原顺序
+const sortedHand = computed(() => {
+  const hand = player.value?.hand || []
+  if (hand.length === 0) return []
+  
+  // 为每张牌添加原始索引，用于保持内部顺序
+  const indexed = hand.map((c, idx) => ({ card: c, originalIndex: idx }))
+  
+  // 简化判断：不能打出的牌（令牌/恶评/非自己回合等）
+  const canPlayCard = (c: any): boolean => {
+    // 令牌和恶评永远不能打出
+    if (c.cardType === 'token' || c.name === '招福达摩') return false
+    if (c.cardType === 'penalty') return false
+    if (c.cardType === 'shikigami') return false
+    // 非自己回合不能打出
+    if (isMultiMode.value && !isMyTurn.value) return false
+    if (state.value?.turnPhase !== 'action') return false
+    return true
+  }
+  
+  // 分成两组：不能用的 和 能用的
+  const unplayable = indexed.filter(item => !canPlayCard(item.card))
+  const playable = indexed.filter(item => canPlayCard(item.card))
+  
+  // 各组内部按原始索引排序（保持抓牌顺序）
+  unplayable.sort((a, b) => a.originalIndex - b.originalIndex)
+  playable.sort((a, b) => a.originalIndex - b.originalIndex)
+  
+  // 不能用的在左，能用的在右
+  return [...unplayable, ...playable].map(item => item.card)
+})
+
 /** 客户端直接向 log 写入时使用（与服务器 logSeq 区分区间） */
 let clientDirectLogSeq = 1_000_000_000
 function takeClientDirectLogSeq(): number {
@@ -1384,12 +1416,14 @@ function logEntryRowKey(l: any, i: number): string | number {
 
 // ====== 智能滚动系统 ======
 const hasNewMessage = ref(false)
+let lastLogLength = 0 // 追踪上次日志长度，用于检测新消息
+let autoScrolling = false // 标记是否正在自动滚动中，避免批量消息竞态
 
 // 检测用户是否在底部（最新消息是否在可视区域）
 function isAtBottom(): boolean {
   if (!logRef.value) return true
   const el = logRef.value
-  const threshold = 30 // 允许30px的误差
+  const threshold = 50 // 允许50px的误差（增大阈值以容纳批量消息）
   return el.scrollHeight - el.scrollTop - el.clientHeight < threshold
 }
 
@@ -1409,11 +1443,27 @@ function scrollToBottom() {
   }
 }
 
-// 监听日志变化
-watch(logs, (newLogs, oldLogs) => {
+// 监听日志变化 - 使用长度追踪避免computed数组比较问题
+watch(() => state.value?.log?.length ?? 0, (newLen, oldLen) => {
   // 只在新增消息时处理
-  if (!newLogs || newLogs.length === 0) return
-  if (oldLogs && newLogs.length <= oldLogs.length) return
+  if (newLen <= 0) return
+  if (newLen <= lastLogLength) {
+    lastLogLength = newLen
+    return
+  }
+  
+  const addedCount = newLen - lastLogLength
+  lastLogLength = newLen
+  
+  // 如果正在自动滚动中（批量消息场景），直接滚动不判断
+  if (autoScrolling) {
+    nextTick(() => {
+      if (logRef.value) {
+        logRef.value.scrollTop = logRef.value.scrollHeight
+      }
+    })
+    return
+  }
   
   // 在DOM更新前先判断是否在底部
   const wasAtBottom = isAtBottom()
@@ -1421,16 +1471,20 @@ watch(logs, (newLogs, oldLogs) => {
   nextTick(() => {
     if (wasAtBottom) {
       // 之前在底部，自动滚动到新消息
+      autoScrolling = true
       if (logRef.value) {
         logRef.value.scrollTop = logRef.value.scrollHeight
       }
+      hasNewMessage.value = false // 确保清除提示
+      // 100ms后重置标记，允许处理下一批消息
+      setTimeout(() => { autoScrolling = false }, 100)
     } else {
       // 不在底部，显示新消息提示
       hasNewMessage.value = true
-      console.log('[智能滚动] 显示新消息提示')
+      console.log('[智能滚动] 显示新消息提示, 新增', addedCount, '条消息')
     }
   })
-}, { deep: true })
+}, { immediate: true })
 
 // 日志引用对象点击状态
 const logRefPopup = ref<{
@@ -3373,7 +3427,7 @@ async function confirmReplaceShikigami() {
   width:100%;
   height:calc(var(--s) * 150);
   background:#2D1F3D;
-  border:2px solid #D4A574;
+  border:calc(var(--s) * 2) solid #D4A574;
   box-sizing:border-box;
   display:flex;
   align-items:center;
@@ -3408,10 +3462,11 @@ async function confirmReplaceShikigami() {
 /* 玩家信息槽 - 6个玩家位 */
 .player-panel{
   position:absolute;
-  left:calc(var(--s) * 180);
+  left:calc(var(--s) * 150);
   top:calc(var(--s) * 15);
+  right:calc(var(--s) * 320);
   display:flex;
-  gap:calc(var(--s) * 25);
+  justify-content:space-between;
 }
 .player-info-slot{
   display:flex;
@@ -3446,7 +3501,7 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 120);
   height:calc(var(--s) * 120);
   background:#1a1a2e;
-  border:2px solid #D4A574;
+  border:calc(var(--s) * 2) solid #D4A574;
   display:flex;align-items:center;justify-content:center;
   font-size:calc(var(--s) * 32);
   color:#fff;
@@ -3457,7 +3512,7 @@ async function confirmReplaceShikigami() {
   border-color:#333;
 }
 .player-avatar.active{
-  border:3px solid #FFD700;
+  border:calc(var(--s) * 3) solid #FFD700;
   box-shadow:0 0 calc(var(--s) * 15) rgba(255,215,0,.6);
   animation:pulse-turn 1.5s infinite;
 }
@@ -3470,13 +3525,13 @@ async function confirmReplaceShikigami() {
   border-color:#333;
 }
 .player-stats{
-  display:flex;flex-direction:column;gap:0;
+  display:flex;flex-direction:column;gap:calc(var(--s) * 0);
 }
 .mini-stat{
   width:calc(var(--s) * 85);
   height:calc(var(--s) * 60);
   background:#151525;
-  border:1px solid #D4A574;
+  border:calc(var(--s) * 1) solid #D4A574;
   display:flex;align-items:center;justify-content:center;gap:calc(var(--s) * 5);
   font-size:calc(var(--s) * 24);
   color:#fff;
@@ -3495,8 +3550,8 @@ async function confirmReplaceShikigami() {
   position:absolute;
   width:calc(var(--s) * 16);
   height:calc(var(--s) * 22);
-  border-radius:2px;
-  border:1px solid rgba(255,255,255,.5);
+  border-radius:calc(var(--s) * 2);
+  border:calc(var(--s) * 1) solid rgba(255,255,255,.5);
 }
 .icon-hand-cards::before{
   background:linear-gradient(135deg,#e06090,#c04070);
@@ -3533,7 +3588,7 @@ async function confirmReplaceShikigami() {
   background:#151525;
   padding:calc(var(--s) * 4) calc(var(--s) * 8);
   border-radius:calc(var(--s) * 4);
-  border:1px solid #D4A574;
+  border:calc(var(--s) * 1) solid #D4A574;
 }
 .buffs{margin-top:calc(var(--s) * 6);display:flex;flex-wrap:wrap;gap:calc(var(--s) * 4);justify-content:center}
 .buff-tag{
@@ -3564,14 +3619,14 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 600);
   height:calc(var(--s) * 490);
   background:#151525;
-  border:2px solid #D4A574;
+  border:calc(var(--s) * 2) solid #D4A574;
   box-sizing:border-box;
   display:flex;flex-direction:column;align-items:center;
   padding:calc(var(--s) * 20);
 }
 .boss-card{
   background:linear-gradient(160deg,#3a0a0a,#1a0520);
-  border:2px solid #D4A574;
+  border:calc(var(--s) * 2) solid #D4A574;
   border-radius:calc(var(--s) * 8);
   text-align:center;cursor:pointer;
   width:calc(var(--s) * 540);
@@ -3670,10 +3725,10 @@ async function confirmReplaceShikigami() {
   50%{opacity:1}
 }
 .boss-remain{
-  color:#777;font-size:9px;
+  color:#777;font-size:calc(var(--s) * 9);
   background:rgba(0,0,0,.3);
-  padding:2px 8px;border-radius:10px;
-  border:1px solid rgba(255,255,255,.08);
+  padding:calc(var(--s) * 2) calc(var(--s) * 8);border-radius:calc(var(--s) * 10);
+  border:calc(var(--s) * 1) solid rgba(255,255,255,.08);
 }
 
 /* 游荡妖怪区 - left:600px, width:750px */
@@ -3684,7 +3739,7 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 750);
   height:calc(var(--s) * 650);
   background:#151525;
-  border:2px solid #D4A574;
+  border:calc(var(--s) * 2) solid #D4A574;
   box-sizing:border-box;
   display:flex;flex-direction:column;
   padding:calc(var(--s) * 15);
@@ -3718,7 +3773,7 @@ async function confirmReplaceShikigami() {
   margin-bottom:calc(var(--s) * 8);
   padding:calc(var(--s) * 6) calc(var(--s) * 10);
   background:rgba(255, 110, 110, 0.16);
-  border:1px solid rgba(255, 130, 130, 0.35);
+  border:calc(var(--s) * 1) solid rgba(255, 130, 130, 0.35);
   border-radius:calc(var(--s) * 8);
   overflow:hidden;
 }
@@ -3728,6 +3783,17 @@ async function confirmReplaceShikigami() {
 .turn-countdown-bar .countdown-text{
   font-size:calc(var(--s) * 16);
   color:#ffc1c1;
+}
+/* 自己回合时倒计时显示浅绿色 */
+.turn-countdown-bar.my-turn{
+  background:rgba(110, 255, 150, 0.16);
+  border-color:rgba(130, 255, 170, 0.35);
+}
+.turn-countdown-bar.my-turn .countdown-text{
+  color:#a8ffb8;
+}
+.turn-countdown-bar.my-turn .countdown-progress{
+  background:linear-gradient(90deg, rgba(110, 255, 150, 0.5), rgba(80, 220, 120, 0.3));
 }
 
 /* 游荡妖怪标签 */
@@ -3750,7 +3816,7 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 570);
   height:calc(var(--s) * 650);
   background:#151525;
-  border:2px solid #D4A574;
+  border:calc(var(--s) * 2) solid #D4A574;
   box-sizing:border-box;
   display:flex;flex-direction:column;
   padding:calc(var(--s) * 10);
@@ -3759,7 +3825,7 @@ async function confirmReplaceShikigami() {
 .info-box{
   flex:1;
   background:#1A1A2E;
-  border:1px solid #D4A574;
+  border:calc(var(--s) * 1) solid #D4A574;
   padding:calc(var(--s) * 10);
   overflow-y:auto;
   overflow-x:hidden;
@@ -3768,15 +3834,15 @@ async function confirmReplaceShikigami() {
 }
 /* 自定义滚动条样式 - 参考3.4节规范 */
 .info-box::-webkit-scrollbar{
-  width:6px;
+  width:calc(var(--s) * 6);
 }
 .info-box::-webkit-scrollbar-track{
   background:#1A1A2E;
-  border-radius:3px;
+  border-radius:calc(var(--s) * 3);
 }
 .info-box::-webkit-scrollbar-thumb{
   background:#D4A574;
-  border-radius:3px;
+  border-radius:calc(var(--s) * 3);
 }
 .info-box::-webkit-scrollbar-thumb:hover{
   background:#E5B685;
@@ -3816,7 +3882,7 @@ async function confirmReplaceShikigami() {
 }
 .info-line{
   background:#2D1F3D;
-  border:1px solid #D4A574;
+  border:calc(var(--s) * 1) solid #D4A574;
   padding:calc(var(--s) * 8) calc(var(--s) * 12);
   font-size:calc(var(--s) * 20);
   color:#fff;
@@ -3847,8 +3913,8 @@ async function confirmReplaceShikigami() {
   position:fixed;
   z-index:9999;
   background:linear-gradient(135deg, #2D1F3D 0%, #1A1A2E 100%);
-  border:2px solid #D4A574;
-  border-radius:8px;
+  border:calc(var(--s) * 2) solid #D4A574;
+  border-radius:calc(var(--s) * 8);
   overflow:hidden;
   width:140px;
   box-shadow:0 4px 20px rgba(0,0,0,0.5);
@@ -3958,7 +4024,7 @@ async function confirmReplaceShikigami() {
   gap:calc(var(--s) * 8);
   padding:calc(var(--s) * 4) calc(var(--s) * 8);
   background:#1A1A2E;
-  border:1px solid #D4A574;
+  border:calc(var(--s) * 1) solid #D4A574;
   border-radius:calc(var(--s) * 4);
   position:relative;
   flex-shrink:0;
@@ -3967,7 +4033,7 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 32);
   height:calc(var(--s) * 32);
   background:transparent;
-  border:1px solid #D4A574;
+  border:calc(var(--s) * 1) solid #D4A574;
   border-radius:calc(var(--s) * 4);
   color:#FFD700;
   cursor:pointer;
@@ -3982,7 +4048,7 @@ async function confirmReplaceShikigami() {
   height:calc(var(--s) * 32);
   min-width:0;
   background:#151525;
-  border:1px solid #3A3A5A;
+  border:calc(var(--s) * 1) solid #3A3A5A;
   border-radius:calc(var(--s) * 4);
   color:#fff;
   font-size:calc(var(--s) * 14);
@@ -4015,7 +4081,7 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 300);
   max-height:calc(var(--s) * 240);
   background:#1A1A2E;
-  border:1px solid #D4A574;
+  border:calc(var(--s) * 1) solid #D4A574;
   border-radius:calc(var(--s) * 8);
   padding:calc(var(--s) * 10);
   display:grid;
@@ -4062,7 +4128,7 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 150);
   height:calc(var(--s) * 100);
   background:#1A1A2E;
-  border:2px solid #D4A574;
+  border:calc(var(--s) * 2) solid #D4A574;
   color:#fff;
   font-size:calc(var(--s) * 22);
   cursor:pointer;
@@ -4106,7 +4172,7 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 245);
   height:100%;
   background:#151525;
-  border:2px solid #D4A574;
+  border:calc(var(--s) * 2) solid #D4A574;
   box-sizing:border-box;
   display:flex;
   padding:calc(var(--s) * 10);
@@ -4115,7 +4181,7 @@ async function confirmReplaceShikigami() {
 .avatar-box{
   width:calc(var(--s) * 120);
   height:calc(var(--s) * 120);
-  border:1px solid #D4A574;
+  border:calc(var(--s) * 1) solid #D4A574;
   background:#1A1A2E;
 }
 .stat-box{
@@ -4124,7 +4190,7 @@ async function confirmReplaceShikigami() {
 }
 .stat-item{
   background:#151525;
-  border:1px solid #D4A574;
+  border:calc(var(--s) * 1) solid #D4A574;
   padding:calc(var(--s) * 8);
   display:flex;align-items:center;gap:calc(var(--s) * 8);
   font-size:calc(var(--s) * 20);
@@ -4136,7 +4202,7 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 360);
   height:100%;
   background:#151525;
-  border:2px solid #D4A574;
+  border:calc(var(--s) * 2) solid #D4A574;
   box-sizing:border-box;
   display:flex;
   gap:calc(var(--s) * 20);
@@ -4147,7 +4213,7 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 150);
   height:calc(var(--s) * 120);
   background:#1A1A2E;
-  border:2px solid #D4A574;
+  border:calc(var(--s) * 2) solid #D4A574;
   display:flex;flex-direction:column;
   align-items:center;justify-content:center;
 }
@@ -4168,7 +4234,7 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 180);
   height:calc(var(--s) * 250);
   background:#1A1A2E;
-  border:1px solid #D4A574;
+  border:calc(var(--s) * 1) solid #D4A574;
   border-radius:calc(var(--s) * 4);
   cursor:pointer;
   display:flex;flex-direction:column;justify-content:flex-end;
@@ -4220,7 +4286,7 @@ async function confirmReplaceShikigami() {
   font-size:calc(var(--s) * 16);
   color:#e91e63;
   white-space:nowrap;font-weight:bold;
-  border:1px solid rgba(233,30,99,.5);
+  border:calc(var(--s) * 1) solid rgba(233,30,99,.5);
   z-index:2;
 }
 @keyframes canKillPulse{
@@ -4229,23 +4295,23 @@ async function confirmReplaceShikigami() {
 }
 
 .action-bar{
-  display:flex;gap:5px;align-items:center;
-  padding-top:5px;
-  border-top:1px solid rgba(255,255,255,.08);
+  display:flex;gap:calc(var(--s) * 5);align-items:center;
+  padding-top:calc(var(--s) * 5);
+  border-top:calc(var(--s) * 1) solid rgba(255,255,255,.08);
   margin-top:auto;flex-shrink:0;
 }
 .deck-num,.exile-num{
   background:rgba(0,0,0,.4);
-  border:1px solid rgba(255,255,255,.1);
-  padding:4px 8px;border-radius:4px;font-size:10px;
+  border:calc(var(--s) * 1) solid rgba(255,255,255,.1);
+  padding:calc(var(--s) * 4) calc(var(--s) * 8);border-radius:calc(var(--s) * 4);font-size:calc(var(--s) * 10);
   color:#aaa;min-width:28px;text-align:center;
 }
 .act-btn{
-  flex:1;padding:5px;
+  flex:1;padding:calc(var(--s) * 5);
   background:rgba(80,120,200,.2);
-  border:1px solid rgba(80,120,200,.4);
-  border-radius:5px;color:#b0c4de;
-  cursor:pointer;font-size:10px;
+  border:calc(var(--s) * 1) solid rgba(80,120,200,.4);
+  border-radius:calc(var(--s) * 5);color:#b0c4de;
+  cursor:pointer;font-size:calc(var(--s) * 10);
   transition:all .15s;
 }
 .act-btn:hover:not(:disabled){
@@ -4275,7 +4341,7 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 450);
   height:calc(var(--s) * 280);
   background:#151525;
-  border:2px solid #D4A574;
+  border:calc(var(--s) * 2) solid #D4A574;
   box-sizing:border-box;
   display:flex;flex-direction:column;
   padding:calc(var(--s) * 10);
@@ -4297,7 +4363,7 @@ async function confirmReplaceShikigami() {
   height:calc(var(--s) * 40);
   background:#333;
   border-radius:50%;
-  border:1px solid #D4A574;
+  border:calc(var(--s) * 1) solid #D4A574;
 }
 .fire-slot.active{
   background:linear-gradient(135deg,#ff6b35,#f7931e);
@@ -4307,7 +4373,7 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 135);
   height:calc(var(--s) * 192);
   background:#1A1A2E;
-  border:1px solid #D4A574;
+  border:calc(var(--s) * 1) solid #D4A574;
   border-radius:calc(var(--s) * 4);
   cursor:pointer;
   display:flex;flex-direction:column;justify-content:flex-end;
@@ -4373,8 +4439,8 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 80);
   height:calc(var(--s) * 50);
   background:#151525;
-  border:1px solid #D4A574;
-  border-radius:4px;
+  border:calc(var(--s) * 1) solid #D4A574;
+  border-radius:calc(var(--s) * 4);
   display:flex;flex-direction:column;align-items:center;justify-content:center;
 }
 .pile span{font-size:calc(var(--s) * 14);color:#aaa}
@@ -4388,7 +4454,7 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 1175);
   height:calc(var(--s) * 280);
   background:#2D1F3D;
-  border:2px solid #D4A574;
+  border:calc(var(--s) * 2) solid #D4A574;
   box-sizing:border-box;
   padding:calc(var(--s) * 10);
   overflow:hidden;
@@ -4402,7 +4468,7 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 100);
   height:calc(var(--s) * 70);
   background:#151525;
-  border:1px solid #D4A574;
+  border:calc(var(--s) * 1) solid #D4A574;
   display:flex;align-items:center;justify-content:center;gap:calc(var(--s) * 8);
   font-size:calc(var(--s) * 28);
 }
@@ -4417,9 +4483,9 @@ async function confirmReplaceShikigami() {
   justify-content:center;
   padding:0 calc(var(--s) * 5);
 }
-.hand-cards::-webkit-scrollbar{height:3px}
+.hand-cards::-webkit-scrollbar{height:calc(var(--s) * 3)}
 .hand-cards::-webkit-scrollbar-track{background:transparent}
-.hand-cards::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:2px}
+.hand-cards::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:calc(var(--s) * 2)}
 
 /* 手牌：保持3:4比例，自适应叠加 */
 .hand-card{
@@ -4431,7 +4497,7 @@ async function confirmReplaceShikigami() {
   display:flex;flex-direction:column;justify-content:flex-end;
   position:relative;overflow:hidden;
   isolation:isolate; /* 每张牌自成层叠上下文，避免与其他手牌的子层（底部遮罩）穿插 */
-  border:1px solid #D4A574;
+  border:calc(var(--s) * 1) solid #D4A574;
   box-shadow:0 calc(var(--s) * 2) calc(var(--s) * 8) rgba(0,0,0,.4);
   margin-left:calc(var(--s) * 8);  /* 默认正间距，牌少时展开 */
 }
@@ -4498,7 +4564,7 @@ async function confirmReplaceShikigami() {
 .hand-card.unplayable:hover::after{
   background:rgba(42, 46, 56, 0.62);
 }
-.hand-card.selecting{border:2px solid #ff9800;box-shadow:0 0 10px rgba(255,152,0,.5)}
+.hand-card.selecting{border:calc(var(--s) * 2) solid #ff9800;box-shadow:0 0 calc(var(--s) * 10) rgba(255,152,0,.5)}
 
 /* 手牌底部信息条 */
 .card-info{
@@ -4530,7 +4596,7 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 295);
   height:calc(var(--s) * 280);
   background:#2D1F3D;
-  border:2px solid #D4A574;
+  border:calc(var(--s) * 2) solid #D4A574;
   box-sizing:border-box;
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:calc(var(--s) * 10);
 }
@@ -4538,7 +4604,7 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 221);
   height:calc(var(--s) * 198);
   background:#539D9D;
-  border:2px solid #D4A574;
+  border:calc(var(--s) * 2) solid #D4A574;
   border-radius:calc(var(--s) * 8);
   color:#fff;
   font-size:calc(var(--s) * 32);
@@ -4569,9 +4635,9 @@ async function confirmReplaceShikigami() {
 .spell-type-list{display:flex;flex-direction:column;gap:10px;margin-bottom:20px}
 .spell-type-card{
   background:linear-gradient(135deg,#1a1a3e,#2a2a5e);
-  border:2px solid #4a4a8a;
-  border-radius:8px;
-  padding:12px 15px;
+  border:calc(var(--s) * 2) solid #4a4a8a;
+  border-radius:calc(var(--s) * 8);
+  padding:calc(var(--s) * 12) calc(var(--s) * 15);
   cursor:pointer;
   transition:all .2s;
 }
@@ -4622,9 +4688,9 @@ async function confirmReplaceShikigami() {
   margin-bottom:15px;
 }
 .salvage-card-img{
-  width:100px;height:140px;
-  border-radius:6px;object-fit:cover;
-  border:2px solid #667eea;
+  width:calc(var(--s) * 100);height:calc(var(--s) * 140);
+  border-radius:calc(var(--s) * 6);object-fit:cover;
+  border:calc(var(--s) * 2) solid #667eea;
   box-shadow:0 4px 15px rgba(102,126,234,.3);
 }
 .salvage-card-info{flex:1;display:flex;flex-direction:column;gap:6px}
@@ -4652,9 +4718,9 @@ async function confirmReplaceShikigami() {
   justify-content:center;padding:15px;
 }
 .yokai-target-card{
-  width:120px;padding:10px;
+  width:calc(var(--s) * 120);padding:calc(var(--s) * 10);
   background:rgba(0,0,0,.4);
-  border:2px solid #4a4a6a;border-radius:8px;
+  border:calc(var(--s) * 2) solid #4a4a6a;border-radius:calc(var(--s) * 8);
   cursor:pointer;transition:all .2s;
   text-align:center;
 }
@@ -4674,11 +4740,11 @@ async function confirmReplaceShikigami() {
 .card-select-modal{min-width:320px}
 .card-select-grid{display:flex;flex-wrap:wrap;gap:15px;justify-content:center;max-height:300px;overflow-y:auto;padding:15px}
 .select-card-item{
-  width:120px;height:168px;
-  border-radius:6px;overflow:hidden;
+  width:calc(var(--s) * 120);height:calc(var(--s) * 168);
+  border-radius:calc(var(--s) * 6);overflow:hidden;
   position:relative;
   display:flex;flex-direction:column;justify-content:flex-end;
-  border:3px solid #555;
+  border:calc(var(--s) * 3) solid #555;
   background:linear-gradient(160deg,#1a1a3e,#2a2a5e);
   cursor:pointer;transition:all .15s;
 }
@@ -4719,7 +4785,7 @@ async function confirmReplaceShikigami() {
   width:calc(var(--s) * 150);
   height:calc(var(--s) * 100);
   background:#1A1A2E;
-  border:2px solid #D4A574;
+  border:calc(var(--s) * 2) solid #D4A574;
   color:#fff;
   cursor:pointer;
   border-radius:calc(var(--s) * 4);
@@ -4736,9 +4802,9 @@ async function confirmReplaceShikigami() {
 /* 超度区弹窗 */
 .exiled-panel{
   background:linear-gradient(180deg,#1a1a2e 0%,#0d0d1a 100%);
-  border:3px solid #D4A574;
-  border-radius:12px;
-  padding:25px 30px;
+  border:calc(var(--s) * 3) solid #D4A574;
+  border-radius:calc(var(--s) * 12);
+  padding:calc(var(--s) * 25) calc(var(--s) * 30);
   text-align:center;
   max-width:90vw;
   max-height:80vh;
@@ -4754,15 +4820,15 @@ async function confirmReplaceShikigami() {
   margin-bottom:20px;
 }
 .exiled-card-item{
-  width:120px;
-  height:168px;
-  border-radius:6px;
+  width:calc(var(--s) * 120);
+  height:calc(var(--s) * 168);
+  border-radius:calc(var(--s) * 6);
   overflow:hidden;
   position:relative;
   display:flex;
   flex-direction:column;
   justify-content:flex-end;
-  border:2px solid #666;
+  border:calc(var(--s) * 2) solid #666;
   background:linear-gradient(160deg,#1a1a3e,#2a2a5e);
 }
 .exiled-card-item .card-art{
@@ -4801,9 +4867,9 @@ async function confirmReplaceShikigami() {
 .pile-box.deck-no-click:hover{background:inherit;border-color:#D4A574}
 .pile-view-panel{
   background:linear-gradient(180deg,#1a1a2e 0%,#0d0d1a 100%);
-  border:3px solid #D4A574;
-  border-radius:12px;
-  padding:25px 30px;
+  border:calc(var(--s) * 3) solid #D4A574;
+  border-radius:calc(var(--s) * 12);
+  padding:calc(var(--s) * 25) calc(var(--s) * 30);
   text-align:center;
   max-width:90vw;
   max-height:80vh;
@@ -4819,15 +4885,15 @@ async function confirmReplaceShikigami() {
   margin-bottom:20px;
 }
 .pile-card-item{
-  width:120px;
-  height:168px;
-  border-radius:6px;
+  width:calc(var(--s) * 120);
+  height:calc(var(--s) * 168);
+  border-radius:calc(var(--s) * 6);
   overflow:hidden;
   position:relative;
   display:flex;
   flex-direction:column;
   justify-content:flex-end;
-  border:2px solid #666;
+  border:calc(var(--s) * 2) solid #666;
   background:linear-gradient(160deg,#1a1a3e,#2a2a5e);
 }
 .pile-card-item .card-art{
@@ -4866,12 +4932,12 @@ async function confirmReplaceShikigami() {
 .spell-select-grid{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;max-height:320px;overflow-y:auto;padding:12px}
 /* 选卡界面卡片：与手牌样式一致 */
 .spell-select-card{
-  width:100px;
-  height:140px;
-  border-radius:6px;
+  width:calc(var(--s) * 100);
+  height:calc(var(--s) * 140);
+  border-radius:calc(var(--s) * 6);
   cursor:pointer;
   transition:all .15s;
-  border:2px solid #D4A574;
+  border:calc(var(--s) * 2) solid #D4A574;
   position:relative;
   overflow:hidden;
   display:flex;flex-direction:column;justify-content:flex-end;
@@ -5005,7 +5071,7 @@ async function confirmReplaceShikigami() {
 .panel-title{display:flex;align-items:center;justify-content:space-between;padding:0 2px}
 .shiki-btn{padding:2px 6px;font-size:9px;background:linear-gradient(135deg,#ff9800,#f57c00);border:none;border-radius:3px;color:#fff;cursor:pointer}
 .shiki-btn:hover{transform:scale(1.05)}
-.shiki-card.selecting{border:2px dashed #ff9800;animation:pulse 1s infinite}
+.shiki-card.selecting{border:calc(var(--s) * 2) dashed #ff9800;animation:pulse 1s infinite}
 
 @keyframes pulse{
   0%,100%{box-shadow:0 0 0 0 rgba(255,152,0,.4)}
@@ -5033,9 +5099,9 @@ async function confirmReplaceShikigami() {
   position:fixed;
   z-index:9999;
   background:linear-gradient(135deg,#2d2d44 0%,#1a1a2e 100%);
-  border:2px solid #D4A574;
-  border-radius:12px;
-  padding:16px 20px;
+  border:calc(var(--s) * 2) solid #D4A574;
+  border-radius:calc(var(--s) * 12);
+  padding:calc(var(--s) * 16) calc(var(--s) * 20);
   min-width:280px;
   max-width:360px;
   box-shadow:0 8px 32px rgba(0,0,0,.6);

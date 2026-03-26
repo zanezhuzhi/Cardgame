@@ -1724,19 +1724,22 @@ function logEntryRowKey(l: any, i: number): string | number {
 const hasNewMessage = ref(false)
 let lastLogLength = 0 // 追踪上次日志长度，用于检测新消息
 let autoScrolling = false // 标记是否正在自动滚动中，避免批量消息竞态
+let userIsAtBottom = true // 实时追踪用户是否在底部（通过 scroll 事件持续更新）
 
 // 检测用户是否在底部（最新消息是否在可视区域）
-function isAtBottom(): boolean {
+function checkIsAtBottom(): boolean {
   if (!logRef.value) return true
   const el = logRef.value
-  const threshold = 50 // 允许50px的误差（增大阈值以容纳批量消息）
+  const threshold = 30 // 允许30px的误差
   return el.scrollHeight - el.scrollTop - el.clientHeight < threshold
 }
 
-// 用户滚动时的处理
+// 用户滚动时的处理 - 实时更新底部状态
 function handleLogScroll() {
+  const atBottom = checkIsAtBottom()
+  userIsAtBottom = atBottom
   // 如果用户滚动到底部，清除新消息提示
-  if (isAtBottom()) {
+  if (atBottom) {
     hasNewMessage.value = false
   }
 }
@@ -1746,6 +1749,7 @@ function scrollToBottom() {
   if (logRef.value) {
     logRef.value.scrollTop = logRef.value.scrollHeight
     hasNewMessage.value = false
+    userIsAtBottom = true
   }
 }
 
@@ -1771,8 +1775,9 @@ watch(() => state.value?.log?.length ?? 0, (newLen, oldLen) => {
     return
   }
   
-  // 在DOM更新前先判断是否在底部
-  const wasAtBottom = isAtBottom()
+  // 使用 scroll 事件实时追踪的状态，而非当前瞬时测量
+  // 这避免了 Vue 响应式更新时 scrollHeight 已变化的问题
+  const wasAtBottom = userIsAtBottom
   
   nextTick(() => {
     if (wasAtBottom) {
@@ -1782,6 +1787,7 @@ watch(() => state.value?.log?.length ?? 0, (newLen, oldLen) => {
         logRef.value.scrollTop = logRef.value.scrollHeight
       }
       hasNewMessage.value = false // 确保清除提示
+      userIsAtBottom = true // 滚动后仍在底部
       // 100ms后重置标记，允许处理下一批消息
       setTimeout(() => { autoScrolling = false }, 100)
     } else {

@@ -3933,12 +3933,16 @@ export class MultiplayerGame {
         const card = player.hand.shift()!;
         // 牌库顶 = 数组头部(索引0)，用 unshift
         player.deck.unshift(card);
+        // 记录这张牌可被查看（玩家自己放置的，应该可以查看）
+        DeckRevealHelper.revealTopCard(player, playerId);
         this.addLog(`   📥 ${card.name} 被置于牌库顶（默认）`);
       }
     } else {
       const card = player.hand.splice(idx, 1)[0]!;
       // 牌库顶 = 数组头部(索引0)，用 unshift
       player.deck.unshift(card);
+      // 记录这张牌可被查看（玩家自己放置的，应该可以查看）
+      DeckRevealHelper.revealTopCard(player, playerId);
       this.addLog(`   📥 ${card.name} 被置于牌库顶`);
     }
 

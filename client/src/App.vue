@@ -255,9 +255,18 @@
           </div>
         </div>
         <div class="deck-discard-area">
-          <div class="pile-box deck-box deck-no-click" title="牌库顺序未知">
+          <div class="pile-box deck-box" 
+               :class="{ 'deck-no-click': !hasRevealedCards(player), 'deck-has-revealed': hasRevealedCards(player) }"
+               :title="hasRevealedCards(player) ? '点击查看已知卡牌' : '牌库顺序未知'"
+               @click="hasRevealedCards(player) && openRevealedDeck(player?.id)">
             <b>{{player?.deck?.length||0}}</b>
             <span>牌库</span>
+            <span v-if="hasRevealedCards(player)" class="deck-revealed-badge">👁️{{myRevealedDeckCards.length}}</span>
+            <!-- 魅妖查看提示 -->
+            <div v-if="meiYaoViewingAlert" class="meiyao-viewing-alert">
+              <span class="meiyao-icon">🎭</span>
+              <span>{{ meiYaoViewingAlert.viewerName }} 正在查看你的牌库</span>
+            </div>
           </div>
           <div class="pile-box discard-box" @click="showDiscard=true">
             <b>{{player?.discard?.length||0}}</b>
@@ -326,7 +335,7 @@
           </div>
         </div>
         <div class="end-panel">
-          <button class="end-btn" @click="endTurn" :disabled="state?.turnPhase!=='action'">
+          <button class="end-btn" :class="{ 'not-my-turn': !isMyTurn }" @click="endTurn" :disabled="state?.turnPhase!=='action' || !isMyTurn">
             结束回合 →
           </button>
           <div class="phase">{{phaseText}}</div>
@@ -454,13 +463,13 @@
           <div class="card-select-grid">
             <div v-for="c in cardSelectModal.candidates" :key="c.instanceId"
                  class="select-card-item" 
-                 :class="[c.cardType, {selected: cardSelectModal.selected.includes(c.instanceId)}]"
-                 @click="toggleCardSelect(c.instanceId)"
+                 :class="[c.cardType, {selected: cardSelectModal.selected.includes(c.instanceId), unusable: c._usable === false}]"
+                 @click="c._usable !== false && toggleCardSelect(c.instanceId)"
                  @mouseenter="showTooltip($event, c)"
                  @mouseleave="hideTooltip">
               <img v-if="getCardImage(c)" :src="getCardImage(c)" class="card-art" />
               <div class="card-info">
-                <div class="c-name">{{c.name}}</div>
+                <div class="c-name">{{c.name}}<span v-if="c._ownerName" class="owner-tag">{{c._ownerName}}</span></div>
                 <div class="c-stat">
                   <template v-if="c.cardType === 'spell'">⚔️{{c.damage||1}}</template>
                   <template v-else-if="c.cardType === 'yokai' || c.cardType === 'token'">❤️{{ yokaiFaceOrPrintedHp(c) }}</template>
@@ -468,16 +477,17 @@
                 </div>
               </div>
               <div class="select-check" v-if="cardSelectModal.selected.includes(c.instanceId)">✓</div>
+              <div class="unusable-badge" v-if="c._usable === false">不可用</div>
             </div>
           </div>
           <div class="modal-actions">
             <button class="btn primary" 
-                    :disabled="cardSelectModal.selected.length !== cardSelectModal.count"
+                    :disabled="cardSelectModal.selected.length < cardSelectModal.minCount || cardSelectModal.selected.length > cardSelectModal.maxCount"
                     @click="handleCardSelectConfirm">
-              确认
+              确认{{ cardSelectModal.minCount === 0 ? '（可不选）' : '' }}
             </button>
-            <button class="btn secondary" @click="cancelCardSelect" v-if="cardSelectModal.onConfirm">
-              取消
+            <button class="btn secondary" @click="cancelCardSelect" v-if="cardSelectModal.onConfirm || (cardSelectModal as any).allowCancel">
+              {{ (cardSelectModal as any).allowCancel ? '跳过' : '取消' }}
             </button>
           </div>
         </div>
@@ -495,6 +505,37 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- 弹窗：赤舌选择（对手选择置于牌库顶的卡牌） -->
+      <div class="modal" v-if="akajitaSelectModal.show">
+        <div class="modal-box akajita-select-modal">
+          <p class="modal-title">👅 赤舌：选择置于牌库顶</p>
+          <p class="modal-hint">你的弃牌堆中同时有基础术式和招福达摩，选择一张置于牌库顶</p>
+          <div class="akajita-countdown">
+            <span class="countdown-icon">⏱️</span>
+            <span class="countdown-text">{{ akajitaSelectModal.countdown }}s</span>
+            <div class="countdown-bar">
+              <div class="countdown-progress" :style="{ width: (akajitaSelectModal.countdown / 5 * 100) + '%' }"></div>
+            </div>
+          </div>
+          <div class="akajita-options">
+            <button v-for="opt in akajitaSelectModal.options" :key="opt.name"
+                    class="akajita-option-btn"
+                    :class="opt.name === '基础术式' ? 'spell-btn' : 'token-btn'"
+                    @click="handleAkajitaSelect(opt.name)">
+              <span class="opt-icon">{{ opt.name === '基础术式' ? '📜' : '🎎' }}</span>
+              <span class="opt-name">{{ opt.name }}</span>
+            </button>
+          </div>
+          <p class="akajita-timeout-hint">超时将自动选择【基础术式】</p>
+        </div>
+      </div>
+
+      <!-- 赤舌牌库提示浮窗（场景B：自动置顶） -->
+      <div v-if="akajitaDeckHint" class="akajita-deck-hint">
+        <span class="hint-icon">👅</span>
+        <span>已将【{{ akajitaDeckHint.cardName }}】置于牌库顶</span>
       </div>
 
       <!-- 弹窗：超度区查看（公共区域） -->
@@ -602,6 +643,48 @@
           </div>
           <p v-else class="empty-hint">弃牌堆为空</p>
           <button class="pile-close-btn" @click="showDiscard=false">关闭</button>
+        </div>
+      </div>
+
+      <!-- 弹窗：牌库已展示卡牌 -->
+      <div class="modal" v-if="showRevealedDeck && viewingRevealedDeck" @click.self="showRevealedDeck=false">
+        <div class="pile-view-panel revealed-deck-panel">
+          <h2 class="pile-view-title">👁️ {{ viewingRevealedDeck.ownerName }} 的牌库</h2>
+          <p class="pile-view-hint">
+            已知 {{ viewingRevealedDeck.revealed.length }} 张 / 共 {{ viewingRevealedDeck.deckSize }} 张
+          </p>
+          
+          <!-- 已展示的卡牌 -->
+          <div class="pile-card-list" v-if="viewingRevealedDeck.revealed.length">
+            <div v-for="c in viewingRevealedDeck.revealed" :key="c.instanceId" 
+                 class="pile-card-item revealed-card"
+                 :class="c.cardType"
+                 @mouseenter="showTooltip($event, c)"
+                 @mouseleave="hideTooltip">
+              <img v-if="getCardImage(c)" :src="getCardImage(c)" class="card-art" />
+              <div class="card-info">
+                <div class="c-name">{{c.name}}</div>
+                <div class="c-stat">
+                  <template v-if="c.cardType === 'spell'">⚔️{{c.damage||1}}</template>
+                  <template v-else-if="c.cardType === 'yokai' || c.cardType === 'token'">
+                    <span class="c-hp-face">❤️{{ c.hp || '?' }}</span>
+                  </template>
+                  <template v-else-if="c.cardType === 'penalty'">💔{{c.charm||0}}</template>
+                  <template v-else>🎁</template>
+                </div>
+              </div>
+              <span class="revealed-badge">👁️</span>
+            </div>
+          </div>
+          
+          <!-- 未知卡牌提示 -->
+          <div v-if="viewingRevealedDeck.unknownCount > 0" class="unknown-cards-hint">
+            <span class="card-back-icon">🂠</span>
+            <span>{{ viewingRevealedDeck.unknownCount }} 张未知卡牌</span>
+          </div>
+          
+          <p v-if="!viewingRevealedDeck.revealed.length" class="empty-hint">暂无已知卡牌</p>
+          <button class="pile-close-btn" @click="showRevealedDeck=false">关闭</button>
         </div>
       </div>
 
@@ -857,17 +940,20 @@
       <!-- 点击遮罩关闭弹出框 -->
       <div class="log-ref-overlay" v-if="logRefPopup.show" @click="closeLogRefPopup"></div>
     </Teleport>
-    <!-- 开发用：URL 加 ?devPanel=1（可与 mode=multi 同用） -->
-    <DevTestPanel v-if="showDevTestPanel" />
+    <!-- 开发用：URL 加 ?devPanel=1（可与 mode=multi 同用），生产构建时完全移除 -->
+    <component :is="DevTestPanel" v-if="DevTestPanel && showDevTestPanel" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, reactive, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, nextTick, reactive, onMounted, onUnmounted, watch, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { SinglePlayerGame } from './game/SinglePlayerGame'
 import { socketClient } from './network/SocketClient'
-import DevTestPanel from './dev/DevTestPanel.vue'
+// DevTestPanel 使用条件动态导入，生产构建时完全移除（Tree-Shaking）
+const DevTestPanel = import.meta.env.DEV 
+  ? defineAsyncComponent(() => import('./dev/DevTestPanel.vue'))
+  : null
 import type { GameState } from '../../shared/types/game'
 import type { CardInstance } from '../../shared/types/cards'
 
@@ -1026,6 +1112,142 @@ watch(() => socketClient.gameState.value, (newState) => {
       }
     }
 
+    // 监听 pendingChoice：多选手牌弹窗（天邪鬼赤等）
+    if (newState.pendingChoice?.type === 'selectCardsMulti' && newState.pendingChoice.playerId === myPlayerId.value) {
+      const pc = newState.pendingChoice as any
+      const player = newState.players.find(p => p.id === myPlayerId.value)
+      if (player) {
+        cardSelectModal.isServerMultiSelect = true
+        cardSelectModal.show = true
+        cardSelectModal.title = '🎴 选择要弃置的手牌'
+        cardSelectModal.hint = pc.prompt || '选择手牌（可不选）'
+        cardSelectModal.candidates = player.hand
+        cardSelectModal.minCount = pc.minCount ?? 0
+        cardSelectModal.maxCount = pc.maxCount ?? player.hand.length
+        cardSelectModal.count = cardSelectModal.maxCount  // 兼容旧逻辑
+        cardSelectModal.selected = []
+        cardSelectModal.resolve = (ids: string[]) => {
+          socketClient.send('game:selectCardsMultiResponse', { selectedIds: ids })
+        }
+      }
+    } else if (newState.pendingChoice?.type === 'selectCardPutTop' && newState.pendingChoice.playerId === myPlayerId.value) {
+      // 监听 pendingChoice：选1张牌置顶（天邪鬼黄等）
+      const pc = newState.pendingChoice as any
+      const player = newState.players.find(p => p.id === myPlayerId.value)
+      if (player && player.hand.length > 0) {
+        cardSelectModal.isServerMultiSelect = true
+        cardSelectModal.show = true
+        cardSelectModal.title = '📥 选择1张手牌置于牌库顶'
+        cardSelectModal.hint = pc.prompt || '选择1张手牌'
+        cardSelectModal.candidates = player.hand
+        cardSelectModal.minCount = 1
+        cardSelectModal.maxCount = 1
+        cardSelectModal.count = 1
+        cardSelectModal.selected = []
+        cardSelectModal.resolve = (ids: string[]) => {
+          socketClient.send('game:selectCardPutTopResponse', { selectedId: ids[0] || '' })
+        }
+      }
+    } else if (newState.pendingChoice?.type === 'meiYaoSelect' && newState.pendingChoice.playerId === myPlayerId.value) {
+      // 监听 pendingChoice：魅妖选择对手牌库顶牌
+      const pc = newState.pendingChoice as any
+      const candidates = pc.candidates || []
+      if (candidates.length > 0) {
+        // 构造虚拟卡牌对象用于显示
+        // 使用服务端传来的完整卡牌信息（包含cardId用于获取图片，usable标记可用性）
+        const hasUsable = pc.hasUsable !== false
+        const virtualCards: CardInstance[] = candidates.map((c: any) => ({
+          instanceId: c.instanceId,
+          cardId: c.cardId,           // 真实cardId用于获取图片
+          cardType: c.cardType || 'yokai',
+          name: c.name,               // 原始卡牌名
+          hp: c.hp,
+          maxHp: c.hp,
+          // 额外信息用于显示和判断
+          _ownerName: c.ownerName,
+          _usable: c.usable !== false, // 是否可用（令牌/恶评不可用）
+        }))
+        cardSelectModal.isServerMultiSelect = true
+        cardSelectModal.show = true
+        cardSelectModal.title = '🎭 魅妖：选择对手牌库顶牌'
+        cardSelectModal.hint = hasUsable 
+          ? `选择1张牌使用其效果（来自对手牌库）` 
+          : `对手牌库顶均为不可用牌（令牌/恶评）`
+        cardSelectModal.candidates = virtualCards
+        cardSelectModal.minCount = hasUsable ? 1 : 0  // 无可用牌时允许不选
+        cardSelectModal.maxCount = 1
+        cardSelectModal.count = hasUsable ? 1 : 0
+        cardSelectModal.selected = []
+        // 添加取消按钮标记
+        ;(cardSelectModal as any).allowCancel = !hasUsable
+        cardSelectModal.resolve = (ids: string[]) => {
+          socketClient.send('game:meiYaoSelectResponse', { selectedCardId: ids[0] || '' })
+        }
+      }
+    }
+    
+    // 魅妖查看提示：检测是否有人正在查看自己的牌库
+    if (newState.pendingChoice?.type === 'meiYaoSelect' && newState.pendingChoice.playerId !== myPlayerId.value) {
+      // 其他玩家正在使用魅妖，检查自己的牌库是否被展示
+      const myPlayer = newState.players.find(p => p.id === myPlayerId.value)
+      if (myPlayer?.revealedDeckCards?.some(r => r.revealedBy === newState.pendingChoice?.playerId)) {
+        const viewerPlayer = newState.players.find(p => p.id === newState.pendingChoice?.playerId)
+        meiYaoViewingAlert.value = { viewerName: viewerPlayer?.name || '对手' }
+      } else {
+        meiYaoViewingAlert.value = null
+      }
+    } else {
+      meiYaoViewingAlert.value = null
+    }
+    
+    // 赤舌选择：监听对手需要选择置于牌库顶的卡牌
+    console.log('[赤舌调试] pendingChoice:', newState.pendingChoice, 'myPlayerId:', myPlayerId.value)
+    if (newState.pendingChoice?.type === 'akajitaSelect') {
+      console.log('[赤舌调试] 检测到akajitaSelect, playerId:', newState.pendingChoice.playerId, '我是:', myPlayerId.value)
+      if (newState.pendingChoice.playerId === myPlayerId.value) {
+        const pc = newState.pendingChoice as any
+        console.log('[赤舌调试] 是我的选择! options:', pc.options, 'deadline:', pc.deadline)
+        // 场景A: 两张都有，需要玩家选择
+        if (pc.options?.length === 2) {
+          akajitaSelectModal.options = pc.options
+          akajitaSelectModal.countdown = Math.ceil((pc.deadline - Date.now()) / 1000)
+          akajitaSelectModal.show = true
+          // 启动倒计时
+          startAkajitaCountdown(pc.deadline)
+          console.log('[赤舌调试] 弹窗已显示!')
+        }
+      }
+    } else if (akajitaSelectModal.show) {
+      // pendingChoice 清空或不再是自己的赤舌选择，关闭弹窗
+      closeAkajitaSelect()
+    }
+    
+    // 赤舌场景B: 检测是否收到自动置顶提示（通过 akajitaNotify 字段）
+    const akajitaNotify = (newState as any).akajitaNotify as { playerId: string; cardName: string; timestamp: number }[] | undefined
+    if (akajitaNotify && akajitaNotify.length > 0) {
+      // 找到给自己的通知（且尚未显示过，通过 timestamp 判断）
+      const myNotify = akajitaNotify.find(n => 
+        n.playerId === myPlayerId.value && 
+        n.timestamp > (lastAkajitaNotifyTimestamp.value || 0)
+      )
+      if (myNotify) {
+        showAkajitaDeckHint(myNotify.cardName)
+        lastAkajitaNotifyTimestamp.value = myNotify.timestamp
+      }
+    }
+    
+    if (!newState.pendingChoice) {
+      // pending 清空时关闭多选弹窗
+      if (cardSelectModal.show && cardSelectModal.isServerMultiSelect) {
+        cardSelectModal.show = false
+        cardSelectModal.isServerMultiSelect = false
+        cardSelectModal.selected = []
+        cardSelectModal.resolve = null
+      }
+      // 清空赤舌选择弹窗
+      closeAkajitaSelect()
+    }
+
     // 超度弹窗：pending 清空时关闭（超时回合等）
     if (!(newState.pendingChoice?.type === 'salvageChoice' && newState.pendingChoice.playerId === myPlayerId.value)) {
       if (salvageChoiceModal.show) {
@@ -1058,6 +1280,9 @@ onUnmounted(() => {
   socketClient.off('gmResult', handleGMResult)
   clearShikigamiCountdown()
   clearTurnCountdown()
+  // 清理赤舌相关计时器
+  if (akajitaCountdownTimer) clearInterval(akajitaCountdownTimer)
+  if (akajitaDeckHintTimer) clearTimeout(akajitaDeckHintTimer)
 })
 
 const playerName = ref('阴阳师')
@@ -1102,6 +1327,9 @@ const allPlayers = computed(() => {
 const showExiled = ref(false)
 const showDeck = ref(false)
 const showDiscard = ref(false)
+const showRevealedDeck = ref(false)
+const revealedDeckOwner = ref<string | null>(null) // 正在查看谁的牌库展示
+const meiYaoViewingAlert = ref<{viewerName: string} | null>(null) // 魅妖正在查看自己牌库的提示
 const selectingTarget = ref(false)
 const selectingCards = ref(false)
 
@@ -1275,18 +1503,24 @@ const cardSelectModal = reactive<{
   hint: string
   candidates: CardInstance[]
   count: number
+  minCount: number
+  maxCount: number
   selected: string[]
   resolve: ((ids: string[]) => void) | null
   onConfirm: (() => void) | null
+  isServerMultiSelect: boolean  // 是否为服务端多选（天邪鬼赤等）
 }>({
   show: false,
   title: '选择卡牌',
   hint: '',
   candidates: [],
   count: 1,
+  minCount: 1,
+  maxCount: 1,
   selected: [],
   resolve: null,
-  onConfirm: null
+  onConfirm: null,
+  isServerMultiSelect: false
 })
 
 // 超度选择弹窗（唐纸伞妖等御魂效果）
@@ -1310,6 +1544,23 @@ const yokaiTargetModal = reactive<{
   candidates: [],
   prompt: ''
 })
+
+// 赤舌选择弹窗（对手选择置于牌库顶的卡牌）
+const akajitaSelectModal = reactive<{
+  show: boolean
+  countdown: number
+  options: { name: string; cardId: string }[]
+}>({
+  show: false,
+  countdown: 5,
+  options: []
+})
+let akajitaCountdownTimer: number | null = null
+
+// 赤舌牌库提示（显示自动置于牌库顶的卡牌）
+const akajitaDeckHint = ref<{ cardName: string } | null>(null)
+let akajitaDeckHintTimer: number | null = null
+const lastAkajitaNotifyTimestamp = ref<number>(0) // 用于避免重复显示通知
 
 // 目标选择弹窗
 const targetModal = reactive<{
@@ -1354,6 +1605,61 @@ const player = computed(() => {
     return state.value.players[myPlayerIndex.value]
   }
   return state.value.players[0]
+})
+
+// 获取指定玩家对当前玩家可见的已展示牌库卡牌
+function getVisibleRevealedCards(targetPlayer: any): any[] {
+  if (!targetPlayer?.revealedDeckCards?.length || !targetPlayer?.deck?.length) return []
+  if (!player.value) return []
+  
+  const myId = player.value.id
+  const ownerId = targetPlayer.id
+  
+  // 过滤可见的展示卡牌（触发者或拥有者可见）
+  const visibleInstanceIds = new Set(
+    targetPlayer.revealedDeckCards
+      .filter((r: any) => r.revealedBy === myId || ownerId === myId)
+      .map((r: any) => r.instanceId)
+  )
+  
+  // 返回牌库中对应的卡牌实例
+  return targetPlayer.deck.filter((c: any) => visibleInstanceIds.has(c.instanceId))
+}
+
+// 当前玩家自己的牌库是否有可见的展示卡牌
+const myRevealedDeckCards = computed(() => {
+  if (!player.value) return []
+  return getVisibleRevealedCards(player.value)
+})
+
+// 检查玩家牌库是否有可展示的卡牌
+function hasRevealedCards(p: any): boolean {
+  return getVisibleRevealedCards(p).length > 0
+}
+
+// 打开牌库展示弹窗
+function openRevealedDeck(targetPlayerId: string) {
+  revealedDeckOwner.value = targetPlayerId
+  showRevealedDeck.value = true
+}
+
+// 获取正在查看的牌库展示信息
+const viewingRevealedDeck = computed(() => {
+  if (!showRevealedDeck.value || !revealedDeckOwner.value || !state.value) return null
+  const targetPlayer = state.value.players.find(p => p.id === revealedDeckOwner.value)
+  if (!targetPlayer) return null
+  
+  const revealed = getVisibleRevealedCards(targetPlayer)
+  const deckSize = targetPlayer.deck?.length || 0
+  const unknownCount = deckSize - revealed.length
+  
+  return {
+    ownerName: targetPlayer.name,
+    ownerId: targetPlayer.id,
+    revealed,
+    unknownCount,
+    deckSize
+  }
 })
 
 // 是否轮到自己行动
@@ -2375,16 +2681,25 @@ function toggleCardSelect(id: string) {
   const idx = cardSelectModal.selected.indexOf(id)
   if (idx >= 0) {
     cardSelectModal.selected.splice(idx, 1)
-  } else if (cardSelectModal.selected.length < cardSelectModal.count) {
-    cardSelectModal.selected.push(id)
+  } else {
+    // 支持范围选择：使用 maxCount（如果设置了），否则使用 count
+    const maxAllowed = cardSelectModal.maxCount > 0 ? cardSelectModal.maxCount : cardSelectModal.count
+    if (cardSelectModal.selected.length < maxAllowed) {
+      cardSelectModal.selected.push(id)
+    }
   }
 }
 
 function resolveCardSelect() {
-  if (cardSelectModal.resolve && cardSelectModal.selected.length === cardSelectModal.count) {
+  // 支持范围选择：只要满足 minCount <= selected <= maxCount 即可确认
+  const selected = cardSelectModal.selected.length
+  const minOk = selected >= cardSelectModal.minCount
+  const maxOk = selected <= cardSelectModal.maxCount
+  if (cardSelectModal.resolve && minOk && maxOk) {
     cardSelectModal.resolve([...cardSelectModal.selected])
     cardSelectModal.show = false
     cardSelectModal.resolve = null
+    cardSelectModal.isServerMultiSelect = false
   }
 }
 
@@ -2406,6 +2721,50 @@ function handleYokaiTargetChoice(targetId: string) {
   })
   yokaiTargetModal.show = false
   yokaiTargetModal.candidates = []
+}
+
+// ===== 赤舌选择处理 =====
+function startAkajitaCountdown(deadline: number) {
+  if (akajitaCountdownTimer) {
+    clearInterval(akajitaCountdownTimer)
+  }
+  akajitaCountdownTimer = window.setInterval(() => {
+    const remaining = Math.ceil((deadline - Date.now()) / 1000)
+    akajitaSelectModal.countdown = Math.max(0, remaining)
+    if (remaining <= 0) {
+      // 超时：默认选择基础术式（服务端也会处理，这里只是更新UI）
+      closeAkajitaSelect()
+    }
+  }, 200)
+}
+
+function closeAkajitaSelect() {
+  if (akajitaCountdownTimer) {
+    clearInterval(akajitaCountdownTimer)
+    akajitaCountdownTimer = null
+  }
+  akajitaSelectModal.show = false
+  akajitaSelectModal.options = []
+  akajitaSelectModal.countdown = 5
+}
+
+function handleAkajitaSelect(cardName: string) {
+  socketClient.send('game:akajitaSelectResponse', {
+    selectedCard: cardName
+  })
+  closeAkajitaSelect()
+}
+
+function showAkajitaDeckHint(cardName: string) {
+  akajitaDeckHint.value = { cardName }
+  // 3秒后自动隐藏
+  if (akajitaDeckHintTimer) {
+    clearTimeout(akajitaDeckHintTimer)
+  }
+  akajitaDeckHintTimer = window.setTimeout(() => {
+    akajitaDeckHint.value = null
+    akajitaDeckHintTimer = null
+  }, 3000)
 }
 
 function handleCardSelectConfirm() {
@@ -2820,6 +3179,16 @@ function resetSpellExchangeState() {
 }
 
 function cancelCardSelect() {
+  // 如果是允许跳过的服务端多选（如魅妖无可用牌），发送空选择
+  if ((cardSelectModal as any).allowCancel && cardSelectModal.isServerMultiSelect && cardSelectModal.resolve) {
+    cardSelectModal.resolve([])
+    cardSelectModal.show = false
+    cardSelectModal.isServerMultiSelect = false
+    ;(cardSelectModal as any).allowCancel = false
+    cardSelectModal.selected = []
+    cardSelectModal.resolve = null
+    return
+  }
   // 取消卡牌选择，重置所有状态
   resetSpellExchangeState()
 }
@@ -4611,11 +4980,18 @@ async function confirmReplaceShikigami() {
   cursor:pointer;font-weight:bold;
   transition:all .18s;
 }
-.end-btn:hover:not(:disabled){
+.end-btn:hover:not(:disabled):not(.not-my-turn){
   background:#5DB5B5;
   box-shadow:0 0 calc(var(--s) * 20) rgba(83,157,157,.6);
 }
 .end-btn:disabled{opacity:.4;cursor:not-allowed}
+/* 非我回合：暗红/灰色，与回合倒计时进度条一致 */
+.end-btn.not-my-turn{
+  background:linear-gradient(180deg, #4a3040 0%, #3a2535 100%);
+  border-color:#6a4a5a;
+  color:#998;
+  cursor:default;
+}
 .phase{font-size:calc(var(--s) * 16);color:#aaa;text-align:center}
 
 /* 弹窗 - 适配1024x768 */
@@ -4771,6 +5147,38 @@ async function confirmReplaceShikigami() {
   z-index:2;
 }
 
+/* 不可用卡牌样式（令牌/恶评） */
+.select-card-item.unusable{
+  opacity:0.5;
+  filter:grayscale(60%);
+  cursor:not-allowed;
+  border-color:#555;
+}
+.select-card-item.unusable:hover{
+  transform:none;
+  border-color:#555;
+}
+.unusable-badge{
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  background:rgba(0,0,0,0.7);
+  color:#ff6b6b;
+  padding:4px 10px;
+  border-radius:4px;
+  font-size:12px;
+  font-weight:bold;
+  z-index:3;
+}
+.owner-tag{
+  display:block;
+  font-size:10px;
+  color:#9370DB;
+  font-weight:normal;
+  margin-top:2px;
+}
+
 /* 目标选择弹窗 */
 .target-modal{min-width:280px}
 .target-grid{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
@@ -4865,6 +5273,181 @@ async function confirmReplaceShikigami() {
 /* 牌库禁止点击 - 玩家无法知道牌库顺序 */
 .pile-box.deck-no-click{cursor:not-allowed;opacity:0.85}
 .pile-box.deck-no-click:hover{background:inherit;border-color:#D4A574}
+
+/* 牌库有展示卡牌时的样式 */
+.pile-box.deck-has-revealed{cursor:pointer;border-color:#9370DB;position:relative}
+.pile-box.deck-has-revealed:hover{background:#2D1F3D;border-color:#FFD700}
+.deck-revealed-badge{
+  position:absolute;
+  top:-6px;
+  right:-6px;
+  background:#9370DB;
+  color:#fff;
+  font-size:11px;
+  padding:2px 5px;
+  border-radius:8px;
+  box-shadow:0 2px 4px rgba(0,0,0,0.3);
+}
+
+/* 已展示卡牌弹窗样式 */
+.revealed-deck-panel .pile-card-item.revealed-card{position:relative}
+.revealed-card .revealed-badge{
+  position:absolute;
+  top:4px;
+  right:4px;
+  font-size:12px;
+  background:rgba(147,112,219,0.8);
+  padding:2px 4px;
+  border-radius:4px;
+}
+.unknown-cards-hint{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  margin:15px 0;
+  padding:12px;
+  background:rgba(255,255,255,0.05);
+  border-radius:8px;
+  color:#888;
+  font-size:14px;
+}
+.card-back-icon{font-size:24px;opacity:0.6}
+
+/* 魅妖查看提示样式 */
+.meiyao-viewing-alert{
+  position:absolute;
+  top:-40px;
+  left:50%;
+  transform:translateX(-50%);
+  background:linear-gradient(135deg, #9370DB 0%, #663399 100%);
+  color:#fff;
+  padding:6px 12px;
+  border-radius:12px;
+  font-size:12px;
+  white-space:nowrap;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  box-shadow:0 4px 12px rgba(147,112,219,0.5);
+  animation:meiyao-pulse 1.5s ease-in-out infinite;
+  z-index:100;
+}
+.meiyao-icon{font-size:16px}
+@keyframes meiyao-pulse{
+  0%,100%{box-shadow:0 4px 12px rgba(147,112,219,0.5)}
+  50%{box-shadow:0 4px 20px rgba(147,112,219,0.8)}
+}
+
+/* 赤舌选择弹窗样式 */
+.akajita-select-modal{
+  min-width:320px;
+  max-width:400px;
+  text-align:center;
+}
+.akajita-countdown{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  margin:15px 0;
+}
+.akajita-countdown .countdown-icon{font-size:18px}
+.akajita-countdown .countdown-text{
+  font-size:20px;
+  font-weight:bold;
+  color:#ff6b6b;
+  min-width:36px;
+}
+.akajita-countdown .countdown-bar{
+  flex:1;
+  max-width:150px;
+  height:8px;
+  background:rgba(255,255,255,0.1);
+  border-radius:4px;
+  overflow:hidden;
+}
+.akajita-countdown .countdown-progress{
+  height:100%;
+  background:linear-gradient(90deg, #ff6b6b 0%, #ffa500 100%);
+  border-radius:4px;
+  transition:width 0.2s linear;
+}
+.akajita-options{
+  display:flex;
+  gap:15px;
+  justify-content:center;
+  margin:20px 0;
+}
+.akajita-option-btn{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:8px;
+  padding:15px 25px;
+  border:2px solid #666;
+  border-radius:12px;
+  background:rgba(0,0,0,0.3);
+  color:#fff;
+  cursor:pointer;
+  transition:all 0.2s ease;
+  min-width:120px;
+}
+.akajita-option-btn:hover{
+  transform:scale(1.05);
+}
+.akajita-option-btn.spell-btn{
+  border-color:#4a90d9;
+  background:linear-gradient(135deg, rgba(74,144,217,0.2) 0%, rgba(74,144,217,0.1) 100%);
+}
+.akajita-option-btn.spell-btn:hover{
+  border-color:#6ab0f9;
+  box-shadow:0 0 15px rgba(74,144,217,0.5);
+}
+.akajita-option-btn.token-btn{
+  border-color:#d4a574;
+  background:linear-gradient(135deg, rgba(212,165,116,0.2) 0%, rgba(212,165,116,0.1) 100%);
+}
+.akajita-option-btn.token-btn:hover{
+  border-color:#f4c594;
+  box-shadow:0 0 15px rgba(212,165,116,0.5);
+}
+.akajita-option-btn .opt-icon{font-size:28px}
+.akajita-option-btn .opt-name{font-size:14px;font-weight:bold}
+.akajita-timeout-hint{
+  font-size:12px;
+  color:#888;
+  margin-top:10px;
+}
+
+/* 赤舌牌库提示浮窗 */
+.akajita-deck-hint{
+  position:fixed;
+  top:50%;
+  left:50%;
+  transform:translate(-50%, -50%);
+  background:linear-gradient(135deg, #8B4513 0%, #654321 100%);
+  color:#fff;
+  padding:15px 25px;
+  border-radius:12px;
+  font-size:16px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  box-shadow:0 8px 25px rgba(139,69,19,0.6);
+  animation:akajita-hint-appear 0.3s ease-out, akajita-hint-pulse 2s ease-in-out infinite 0.3s;
+  z-index:9999;
+}
+.akajita-deck-hint .hint-icon{font-size:24px}
+@keyframes akajita-hint-appear{
+  0%{opacity:0;transform:translate(-50%,-50%) scale(0.8)}
+  100%{opacity:1;transform:translate(-50%,-50%) scale(1)}
+}
+@keyframes akajita-hint-pulse{
+  0%,100%{box-shadow:0 8px 25px rgba(139,69,19,0.6)}
+  50%{box-shadow:0 8px 35px rgba(139,69,19,0.8)}
+}
+
 .pile-view-panel{
   background:linear-gradient(180deg,#1a1a2e 0%,#0d0d1a 100%);
   border:calc(var(--s) * 3) solid #D4A574;

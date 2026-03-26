@@ -66,22 +66,20 @@
         <pre v-if="pendingChoiceJson" class="dev-pre" @click="copy(pendingChoiceJson)">{{ pendingChoiceJson }}</pre>
         <div v-else class="dev-muted-inline">（无）</div>
 
-        <div class="dev-subtitle">players[]（计时 / 托管 / 在线）</div>
+        <div class="dev-subtitle">players[]</div>
         <div class="dev-player-grid">
-          <div v-for="row in playerDebugRows" :key="row.id" class="dev-player-card" :class="{ me: row.isMe }">
+          <div v-for="row in playerDebugRows" :key="row.id" class="dev-player-card" :class="{ me: row.isMe, offline: !row.isConnected }">
             <div class="dev-player-head">
               <span class="dev-p-idx">#{{ row.idx }}</span>
-              <code class="dev-code-tiny" @click.stop="copy(row.id)">{{ row.idShort }}</code>
               <span class="dev-p-name">{{ row.name }}</span>
               <span v-if="row.isMe" class="dev-p-badge">我</span>
+              <span v-if="!row.isConnected" class="dev-p-badge offline">离线</span>
+              <span v-if="row.isOfflineHosted" class="dev-p-badge hosted">托管</span>
+              <span v-if="row.isAI" class="dev-p-badge ai">AI</span>
             </div>
             <div class="dev-p-rows">
-              <div>AI {{ row.isAI }} · strat {{ row.aiStrategy ?? '—' }}</div>
-              <div>在线 {{ row.isConnected }} · 托管 {{ row.isOfflineHosted }}</div>
-              <div>disconnectedAt {{ row.disconnectedAt }}</div>
-              <div>lastActionAt {{ row.lastActionAt }}</div>
-              <div>鬼火 {{ row.ghostFire }} · 伤 {{ row.damage }} · 打牌 {{ row.cardsPlayed }}</div>
-              <div>手/库/弃 {{ row.handN }}/{{ row.deckN }}/{{ row.discardN }}</div>
+              <div>🔥{{ row.ghostFire }} ⚔️{{ row.damage }} 🃏{{ row.handN }}/{{ row.deckN }}/{{ row.discardN }}</div>
+              <div v-if="row.lastActionAgo">操作 {{ row.lastActionAgo }}</div>
             </div>
           </div>
         </div>
@@ -244,23 +242,29 @@ const playerDebugRows = computed(() => {
   return players.map((p: any, idx: number) => ({
     idx,
     id: p.id as string,
-    idShort: shortId(p.id),
     name: p.name ?? '—',
     isMe: p.id === playerId.value,
     isAI: !!p.isAI,
-    aiStrategy: p.aiStrategy as string | undefined,
     isConnected: p.isConnected !== false,
     isOfflineHosted: !!p.isOfflineHosted,
-    disconnectedAt: fmtTsAndAgo(p.disconnectedAt, now),
-    lastActionAt: fmtTsAndAgo(p.lastActionAt, now),
-    ghostFire: p.ghostFire ?? '—',
-    damage: p.damage ?? '—',
-    cardsPlayed: p.cardsPlayed ?? '—',
+    lastActionAgo: fmtAgoShort(p.lastActionAt, now),
+    ghostFire: p.ghostFire ?? 0,
+    damage: p.damage ?? 0,
     handN: p.hand?.length ?? 0,
     deckN: p.deck?.length ?? 0,
     discardN: p.discard?.length ?? 0,
   }))
 })
+
+// 简洁的相对时间格式（如 "5s前"、"2m前"）
+function fmtAgoShort(ts: number | undefined, now: number): string {
+  if (!ts) return ''
+  const diff = Math.floor((now - ts) / 1000)
+  if (diff < 0) return ''
+  if (diff < 60) return `${diff}s前`
+  if (diff < 3600) return `${Math.floor(diff / 60)}m前`
+  return `${Math.floor(diff / 3600)}h前`
+}
 
 const canGm = computed(() => !!roomId.value && status.value === 'connected')
 
@@ -293,19 +297,67 @@ async function copy(text: string) {
   }
 }
 
+// 精简玩家数据（移除大数组：hand, deck, discard, played, exiled）
+function compactPlayer(p: any) {
+  if (!p) return null
+  return {
+    id: p.id,
+    name: p.name,
+    ghostFire: p.ghostFire,
+    damage: p.damage,
+    reputation: p.reputation,
+    cardsPlayed: p.cardsPlayed,
+    isConnected: p.isConnected,
+    isOfflineHosted: p.isOfflineHosted,
+    isAI: p.isAI,
+    handCount: p.hand?.length ?? 0,
+    deckCount: p.deck?.length ?? 0,
+    discardCount: p.discard?.length ?? 0,
+    playedCount: p.played?.length ?? 0,
+    exiledCount: p.exiled?.length ?? 0,
+  }
+}
+
+// 精简场地数据
+function compactField(f: any) {
+  if (!f) return null
+  return {
+    yokaiSlots: f.yokaiSlots?.map((y: any) => y ? { name: y.name, hp: y.hp, maxHp: y.maxHp } : null),
+    currentBoss: f.currentBoss ? { name: f.currentBoss.name, hp: f.bossCurrentHp, maxHp: f.currentBoss.maxHp } : null,
+    bossCurrentHp: f.bossCurrentHp,
+  }
+}
+
+// 精简gameState（约5KB而不是100KB+）
+function compactGameState(gs: any) {
+  if (!gs) return null
+  return {
+    phase: gs.phase,
+    turnPhase: gs.turnPhase,
+    turnNumber: gs.turnNumber,
+    currentPlayerIndex: gs.currentPlayerIndex,
+    currentPlayerId: gs.players?.[gs.currentPlayerIndex]?.id,
+    pendingChoice: gs.pendingChoice,
+    pendingYokaiRefresh: gs.pendingYokaiRefresh,
+    turnHadKill: gs.turnHadKill,
+    players: gs.players?.map(compactPlayer),
+    field: compactField(gs.field),
+    log: gs.log?.slice(-10), // 只保留最近10条日志
+  }
+}
+
 async function copyDiagnosticJson() {
   const payload = {
     capturedAt: new Date().toISOString(),
     client: {
       serverUrl,
-      route: { path: route.path, query: { ...(route.query as Record<string, unknown>) } },
       socketId: playerId.value,
       playerName: socketClient.playerName.value,
       connectionStatus: status.value,
       latencyMs: latencyMs.value,
     },
-    room: roomDetail.value,
-    gameState: gs.value,
+    roomId: roomId.value,
+    gameState: compactGameState(gs.value),
   }
   await copy(JSON.stringify(payload, null, 2))
 }
@@ -544,6 +596,20 @@ async function copyDiagnosticJson() {
   border-radius: 4px;
   background: rgba(102, 126, 234, 0.4);
   color: #fff;
+}
+.dev-p-badge.offline {
+  background: rgba(231, 76, 60, 0.5);
+}
+.dev-p-badge.hosted {
+  background: rgba(241, 196, 15, 0.5);
+  color: #ffd;
+}
+.dev-p-badge.ai {
+  background: rgba(155, 89, 182, 0.5);
+}
+.dev-player-card.offline {
+  opacity: 0.7;
+  border-color: rgba(231, 76, 60, 0.4);
 }
 
 .dev-p-rows {

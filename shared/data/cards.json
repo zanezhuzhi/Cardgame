@@ -53,7 +53,8 @@
       "image": "式神01.png",
       "rarity": "SSR",
       "charm": 3,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 2
     },
     {
       "id": "shikigami_002",
@@ -68,7 +69,8 @@
       "image": "式神02.png",
       "rarity": "SSR",
       "charm": 3,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 1
     },
     {
       "id": "shikigami_003",
@@ -83,7 +85,8 @@
       "image": "式神03.png",
       "rarity": "SSR",
       "charm": 3,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 1
     },
     {
       "id": "shikigami_004",
@@ -98,7 +101,8 @@
       "image": "式神04.png",
       "rarity": "SSR",
       "charm": 3,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 1
     },
     {
       "id": "shikigami_005",
@@ -117,7 +121,8 @@
       "image": "式神05.png",
       "rarity": "SSR",
       "charm": 3,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 2
     },
     {
       "id": "shikigami_006",
@@ -132,7 +137,8 @@
       "image": "式神06.png",
       "rarity": "SR",
       "charm": 2,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 1
     },
     {
       "id": "shikigami_007",
@@ -147,7 +153,8 @@
       "image": "式神07.png",
       "rarity": "SR",
       "charm": 2,
-      "multiPlayer": true
+      "multiPlayer": true,
+      "gender": 2
     },
     {
       "id": "shikigami_008",
@@ -162,7 +169,8 @@
       "image": "式神08.png",
       "rarity": "SR",
       "charm": 2,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 1
     },
     {
       "id": "shikigami_009",
@@ -177,7 +185,8 @@
       "image": "式神09.png",
       "rarity": "SR",
       "charm": 2,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 2
     },
     {
       "id": "shikigami_010",
@@ -191,7 +200,8 @@
       "image": "式神10.png",
       "rarity": "SR",
       "charm": 2,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 2
     },
     {
       "id": "shikigami_011",
@@ -206,7 +216,8 @@
       "image": "式神11.png",
       "rarity": "SR",
       "charm": 2,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 2
     },
     {
       "id": "shikigami_012",
@@ -221,7 +232,8 @@
       "image": "式神12.png",
       "rarity": "SR",
       "charm": 2,
-      "multiPlayer": true
+      "multiPlayer": true,
+      "gender": 0
     },
     {
       "id": "shikigami_013",
@@ -235,7 +247,8 @@
       "image": "式神13.png",
       "rarity": "R",
       "charm": 1,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 2
     },
     {
       "id": "shikigami_014",
@@ -250,7 +263,8 @@
       "image": "式神14.png",
       "rarity": "R",
       "charm": 1,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 2
     },
     {
       "id": "shikigami_015",
@@ -264,7 +278,8 @@
       "image": "式神15.png",
       "rarity": "R",
       "charm": 1,
-      "multiPlayer": true
+      "multiPlayer": true,
+      "gender": 1
     },
     {
       "id": "shikigami_016",
@@ -279,7 +294,8 @@
       "image": "式神16.png",
       "rarity": "R",
       "charm": 1,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 1
     },
     {
       "id": "shikigami_017",
@@ -293,7 +309,8 @@
       "image": "式神17.png",
       "rarity": "R",
       "charm": 1,
-      "multiPlayer": true
+      "multiPlayer": true,
+      "gender": 1
     },
     {
       "id": "shikigami_018",
@@ -308,7 +325,8 @@
       "image": "式神18.png",
       "rarity": "R",
       "charm": 1,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 1
     },
     {
       "id": "shikigami_019",
@@ -327,7 +345,8 @@
       "image": "式神19.png",
       "rarity": "R",
       "charm": 1,
-      "multiPlayer": true
+      "multiPlayer": true,
+      "gender": 2
     },
     {
       "id": "shikigami_020",
@@ -341,7 +360,8 @@
       "image": "式神20.png",
       "rarity": "R",
       "charm": 1,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 2
     },
     {
       "id": "shikigami_021",
@@ -356,7 +376,8 @@
       "image": "式神21.png",
       "rarity": "R",
       "charm": 1,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 1
     },
     {
       "id": "shikigami_022",
@@ -371,7 +392,8 @@
       "image": "式神22.png",
       "rarity": "R",
       "charm": 1,
-      "multiPlayer": true
+      "multiPlayer": true,
+      "gender": 1
     },
     {
       "id": "shikigami_023",
@@ -386,7 +408,8 @@
       "image": "式神23.png",
       "rarity": "R",
       "charm": 1,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 1
     },
     {
       "id": "shikigami_024",
@@ -401,7 +424,8 @@
       "image": "式神24.png",
       "rarity": "R",
       "charm": 1,
-      "multiPlayer": false
+      "multiPlayer": false,
+      "gender": 2
     }
   ],
   "spell": [
@@ -482,7 +506,8 @@
       "armor": 0,
       "effect": "御魂：伤害+3。【触】回合结束时，若此牌在弃牌区，将其置入你的牌库底。",
       "arrival": "无。此牌是鬼王的首张。",
-      "image": "鬼王01.png"
+      "image": "鬼王01.png",
+      "gender": 0
     },
     {
       "id": "boss_002",
@@ -494,7 +519,8 @@
       "armor": 0,
       "effect": "御魂：鬼火+1，抓牌+1，伤害+2。",
       "arrival": "每位玩家展示手牌，并弃掉所有的阴阳术。（未弃牌者获得1张恶评）",
-      "image": "鬼王02.png"
+      "image": "鬼王02.png",
+      "gender": 0
     },
     {
       "id": "boss_003",
@@ -507,7 +533,8 @@
       "multiplayerOnly": true,
       "effect": "御魂/妨害：所有对手选择：随机弃掉1张手牌，或你抓牌+1。",
       "arrival": "每位玩家展示牌库顶5张牌，将所有生命>6以上的卡牌弃置，其他以任意顺序放回牌库顶。",
-      "image": "鬼王03.png"
+      "image": "鬼王03.png",
+      "gender": 2
     },
     {
       "id": "boss_004",
@@ -519,7 +546,8 @@
       "armor": 0,
       "effect": "御魂：抓牌+2，伤害+3。",
       "arrival": "每位玩家需要从手牌中展示3张阴阳术，否则每缺1张则弃1张手牌。",
-      "image": "鬼王04.png"
+      "image": "鬼王04.png",
+      "gender": 0
     },
     {
       "id": "boss_005",
@@ -531,7 +559,8 @@
       "armor": 0,
       "effect": "御魂：抓牌+1，伤害+3，将任意数量的「游荡妖怪」置入牌库底，并立刻补充相同数量的牌。",
       "arrival": "每位玩家展示手牌并超度1张御魂牌。若无法执行则获得1张[恶评]。",
-      "image": "鬼王05.png"
+      "image": "鬼王05.png",
+      "gender": 1
     },
     {
       "id": "boss_006",
@@ -543,7 +572,8 @@
       "armor": 0,
       "effect": "御魂：抓牌+1，鬼火+1，伤害+1。【自】：你的回合开始时，如果此牌在弃牌堆中，则将其置入手牌。",
       "arrival": "每位玩家将手牌生命高于6的卡牌弃置。",
-      "image": "鬼王06.png"
+      "image": "鬼王06.png",
+      "gender": 0
     },
     {
       "id": "boss_007",
@@ -556,7 +586,8 @@
       "multiplayerOnly": true,
       "effect": "御魂：抓牌+1。本回合中你可以将所有卡视作「中级符咒」来使用。【自】：你的回合开始时，如果此牌在弃牌堆中，则将其置入手牌。",
       "arrival": "每位玩家将整个牌库弃置，从弃牌区中超度1张生命高于7的御魂卡，并获得1张[恶评]。然后重洗牌库。",
-      "image": "鬼王07.png"
+      "image": "鬼王07.png",
+      "gender": 1
     },
     {
       "id": "boss_008",
@@ -568,7 +599,8 @@
       "armor": 0,
       "effect": "御魂/妨害：所有对手玩家将手牌数弃至3张，你可以获得其中生命值最高的御魂卡并将其置入手牌。",
       "arrival": "每位玩家在清理阶段补充完手牌后，随机将一张手牌背面朝上放置于各自的阴阳师下。当此鬼王被击败后将阴阳师下的所有卡牌弃置。",
-      "image": "鬼王08.png"
+      "image": "鬼王08.png",
+      "gender": 1
     },
     {
       "id": "boss_009",
@@ -580,7 +612,8 @@
       "armor": 0,
       "effect": "御魂：鬼火+2，伤害+7。",
       "arrival": "每位玩家按顺序展示手牌，弃掉生命值最高的1张手牌。所有式神翻面失去能力直至大蛇离场。",
-      "image": "鬼王09.png"
+      "image": "鬼王09.png",
+      "gender": 0
     },
     {
       "id": "boss_010",
@@ -593,7 +626,8 @@
       "multiplayerOnly": true,
       "effect": "御魂：抓牌+1，超度1张手牌，选择1个妖怪或鬼王，对其造成等同超度牌生命的伤害。【自】：你的回合开始时，如果此牌在弃牌堆中，则将其置入手牌。",
       "arrival": "每位玩家随机弃掉1张手牌，弃掉生命值最高的1位或多位玩家再弃置1张手牌。",
-      "image": "鬼王10.png"
+      "image": "鬼王10.png",
+      "gender": 3
     }
   ],
   "yokai": [
@@ -607,7 +641,8 @@
       "image": "游荡01.png",
       "charm": 1,
       "count": 2,
-      "multiPlayer": 0
+      "multiPlayer": 0,
+      "gender": 1
     },
     {
       "id": "yokai_002",
@@ -619,7 +654,8 @@
       "image": "游荡02.png",
       "charm": 0,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 3
     },
     {
       "id": "yokai_003",
@@ -631,7 +667,8 @@
       "image": "游荡03.png",
       "charm": 0,
       "count": 2,
-      "multiPlayer": 0
+      "multiPlayer": 0,
+      "gender": 1
     },
     {
       "id": "yokai_004",
@@ -643,7 +680,8 @@
       "image": "游荡04.png",
       "charm": 0,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 2
     },
     {
       "id": "yokai_005",
@@ -655,7 +693,8 @@
       "image": "游荡05.png",
       "charm": 0,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 1
     },
     {
       "id": "yokai_006",
@@ -667,7 +706,8 @@
       "image": "游荡06.png",
       "charm": 0,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 1
     },
     {
       "id": "yokai_007",
@@ -679,7 +719,8 @@
       "image": "游荡07.png",
       "charm": 0,
       "count": 2,
-      "multiPlayer": 0
+      "multiPlayer": 0,
+      "gender": 2
     },
     {
       "id": "yokai_008",
@@ -691,7 +732,8 @@
       "image": "游荡08.png",
       "charm": 0,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 0
     },
     {
       "id": "yokai_009",
@@ -703,7 +745,8 @@
       "image": "游荡09.png",
       "charm": 0,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 1
     },
     {
       "id": "yokai_010",
@@ -715,7 +758,8 @@
       "image": "游荡10.png",
       "charm": 0,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 2
     },
     {
       "id": "yokai_011",
@@ -727,7 +771,8 @@
       "image": "游荡11.png",
       "charm": 0,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 2
     },
     {
       "id": "yokai_012",
@@ -739,7 +784,8 @@
       "image": "游荡12.png",
       "charm": 0,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 2
     },
     {
       "id": "yokai_013",
@@ -751,7 +797,8 @@
       "image": "游荡13.png",
       "charm": 1,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 2
     },
     {
       "id": "yokai_014",
@@ -763,7 +810,8 @@
       "image": "游荡14.png",
       "charm": 1,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 1
     },
     {
       "id": "yokai_015",
@@ -775,7 +823,8 @@
       "image": "游荡15.png",
       "charm": 0,
       "count": 1,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 0
     },
     {
       "id": "yokai_016",
@@ -787,7 +836,8 @@
       "image": "游荡16.png",
       "charm": 1,
       "count": 2,
-      "multiPlayer": 0
+      "multiPlayer": 0,
+      "gender": 1
     },
     {
       "id": "yokai_017",
@@ -799,7 +849,8 @@
       "image": "游荡17.png",
       "charm": 1,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 3
     },
     {
       "id": "yokai_018",
@@ -811,7 +862,8 @@
       "image": "游荡18.png",
       "charm": 1,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 0
     },
     {
       "id": "yokai_019",
@@ -823,7 +875,8 @@
       "image": "游荡19.png",
       "charm": 0,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 1
     },
     {
       "id": "yokai_020",
@@ -835,7 +888,8 @@
       "image": "游荡20.png",
       "charm": 0,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 1
     },
     {
       "id": "yokai_021",
@@ -847,7 +901,8 @@
       "image": "游荡21.png",
       "charm": 0,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 0
     },
     {
       "id": "yokai_022",
@@ -859,7 +914,8 @@
       "image": "游荡22.png",
       "charm": 1,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 1
     },
     {
       "id": "yokai_023",
@@ -871,7 +927,8 @@
       "image": "游荡23.png",
       "charm": 0,
       "count": 2,
-      "multiPlayer": 0
+      "multiPlayer": 0,
+      "gender": 2
     },
     {
       "id": "yokai_024",
@@ -883,7 +940,8 @@
       "image": "游荡24.png",
       "charm": 1,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 0
     },
     {
       "id": "yokai_025",
@@ -895,7 +953,8 @@
       "image": "游荡25.png",
       "charm": 1,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 0
     },
     {
       "id": "yokai_026",
@@ -907,7 +966,8 @@
       "image": "游荡26.png",
       "charm": 1,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 2
     },
     {
       "id": "yokai_027",
@@ -919,7 +979,8 @@
       "image": "游荡27.png",
       "charm": 0,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 1
     },
     {
       "id": "yokai_028",
@@ -931,7 +992,8 @@
       "image": "游荡28.png",
       "charm": 0,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 1
     },
     {
       "id": "yokai_029",
@@ -943,7 +1005,8 @@
       "image": "游荡29.png",
       "charm": 2,
       "count": 4,
-      "multiPlayer": 0
+      "multiPlayer": 0,
+      "gender": 1
     },
     {
       "id": "yokai_030",
@@ -955,7 +1018,8 @@
       "image": "游荡30.png",
       "charm": 1,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 2
     },
     {
       "id": "yokai_031",
@@ -967,7 +1031,8 @@
       "image": "游荡31.png",
       "charm": 1,
       "count": 3,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 3
     },
     {
       "id": "yokai_032",
@@ -979,7 +1044,8 @@
       "image": "游荡32.png",
       "charm": 1,
       "count": 2,
-      "multiPlayer": 2
+      "multiPlayer": 2,
+      "gender": 2
     },
     {
       "id": "yokai_033",
@@ -991,7 +1057,8 @@
       "image": "游荡33.png",
       "charm": 1,
       "count": 2,
-      "multiPlayer": 2
+      "multiPlayer": 2,
+      "gender": 2
     },
     {
       "id": "yokai_034",
@@ -1003,7 +1070,8 @@
       "image": "游荡34.png",
       "charm": 1,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 1
     },
     {
       "id": "yokai_035",
@@ -1015,7 +1083,8 @@
       "image": "游荡35.png",
       "charm": 1,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 0
     },
     {
       "id": "yokai_036",
@@ -1027,7 +1096,8 @@
       "image": "游荡36.png",
       "charm": 1,
       "count": 2,
-      "multiPlayer": 1
+      "multiPlayer": 1,
+      "gender": 2
     },
     {
       "id": "yokai_037",
@@ -1039,7 +1109,8 @@
       "image": "游荡37.png",
       "charm": 2,
       "count": 2,
-      "multiPlayer": 0
+      "multiPlayer": 0,
+      "gender": 2
     },
     {
       "id": "yokai_038",
@@ -1051,7 +1122,8 @@
       "image": "游荡38.png",
       "charm": 2,
       "count": 2,
-      "multiPlayer": 0
+      "multiPlayer": 0,
+      "gender": 3
     }
   ],
   "playerSetup": {

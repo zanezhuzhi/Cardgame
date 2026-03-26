@@ -7,6 +7,49 @@
 import type { CardInstance, OnmyojiCard, ShikigamiCard, BossCard } from './cards';
 import type { TempBuff } from '../game/TempBuff';
 
+// ============ 伤害来源系统 ============
+
+/** 
+ * 伤害来源类型
+ * @description 用于区分不同来源的伤害，镜姬【妖】效果需要免疫阴阳术伤害
+ */
+export type DamageSourceType = 
+  | 'spell'       // 阴阳术（基础术式/中级符咒/高级符咒）
+  | 'yokai'       // 御魂效果（妖怪卡打出后的效果）
+  | 'shikigami'   // 式神技能
+  | 'boss'        // 鬼王来袭效果
+  | 'token'       // 令牌效果（如招福达摩）
+  | 'penalty'     // 恶评效果
+  | 'other';      // 其他来源
+
+/**
+ * 伤害来源信息
+ * @description 记录一次伤害的完整来源信息
+ */
+export interface DamageSource {
+  /** 伤害来源类型 */
+  type: DamageSourceType;
+  /** 来源卡牌ID（可选） */
+  cardId?: string;
+  /** 来源卡牌名称（可选） */
+  cardName?: string;
+  /** 来源玩家ID */
+  playerId: string;
+}
+
+/**
+ * 伤害分配项
+ * @description 描述对单个目标的伤害分配
+ */
+export interface DamageAllocation {
+  /** 目标卡牌实例ID（游荡妖怪或鬼王） */
+  targetId: string;
+  /** 伤害数值 */
+  damage: number;
+  /** 伤害来源 */
+  source: DamageSource;
+}
+
 // ============ 游戏阶段 ============
 
 /** 游戏整体阶段 */
@@ -62,12 +105,32 @@ export interface PlayerState {
 
   // 回合临时增益（回合结束自动清空）
   tempBuffs: TempBuff[];
+  
+  // 牌库展示状态（记录被查看过的牌库位置）
+  revealedDeckCards?: RevealedCard[];
 }
 
 export interface ShikigamiState {
   cardId: string;
   isExhausted: boolean;     // 是否已行动
   markers: Record<string, number>;  // 指示物
+}
+
+// ============ 牌库展示系统 ============
+
+/**
+ * 已展示的牌库卡牌信息
+ * @description 记录被查看过的牌库位置，用于UI展示
+ */
+export interface RevealedCard {
+  /** 卡牌实例ID */
+  instanceId: string;
+  /** 牌库位置：'top'(顶), 'bottom'(底), 或具体索引 */
+  position: 'top' | 'bottom' | number;
+  /** 触发展示的玩家ID */
+  revealedBy: string;
+  /** 展示时间戳 */
+  revealedAt: number;
 }
 
 // ============ 战场状态 ============
@@ -151,7 +214,7 @@ export interface GameState {
   /** 等待玩家做出选择（御魂效果、式神技能等） */
   pendingChoice?: {
     /** 选择类型 */
-    type: 'salvageChoice' | 'cardSelect' | 'yokaiTarget' | 'yokaiChoice';
+    type: 'salvageChoice' | 'cardSelect' | 'yokaiTarget' | 'yokaiChoice' | 'selectCardsMulti' | 'selectCardPutTop' | 'meiYaoSelect' | 'akajitaSelect';
     /** 等待的玩家ID */
     playerId: string;
     /** 选择相关的卡牌信息 */

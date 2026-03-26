@@ -198,28 +198,98 @@ registerEffect('天邪鬼青', async (ctx) => {
   return { success: true, message: '天邪鬼青：伤害+1', damage: 1 };
 });
 
+/**
+ * 天邪鬼赤 AI 决策函数
+ * @param hand 当前手牌
+ * @returns 应弃置的卡牌 instanceId 数组（按价值升序排列后全选，即"尽可能多弃低价值牌"）
+ * @description
+ * - 排序规则：HP 升序 → 同 HP 按声誉升序
+ * - 策略：全弃（将手牌全部换掉以滤牌），除非手牌仅 1 张且为高价值（HP≥5 或 声誉≥2）
+ */
+export function aiDecide_天邪鬼赤(hand: CardInstance[]): string[] {
+  if (hand.length === 0) return [];
+  
+  // 对手牌按价值升序排序（HP升序，同HP按声誉升序）
+  const sorted = [...hand].sort((a, b) => {
+    const hpA = a.hp ?? 0;
+    const hpB = b.hp ?? 0;
+    if (hpA !== hpB) return hpA - hpB;
+    const charmA = a.charm ?? 0;
+    const charmB = b.charm ?? 0;
+    return charmA - charmB;
+  });
+  
+  // 如果只有1张牌且是高价值（HP≥5 或 声誉≥2），不弃
+  if (sorted.length === 1) {
+    const card = sorted[0]!;
+    const hp = card.hp ?? 0;
+    const charm = card.charm ?? 0;
+    if (hp >= 5 || charm >= 2) {
+      return [];
+    }
+  }
+  
+  // 否则弃置全部低价值牌（即所有牌）以最大化滤牌效果
+  return sorted.map(c => c.instanceId);
+}
+
 // 天邪鬼赤 - 伤害+1，弃置任意手牌，抓等量牌
 registerEffect('天邪鬼赤', async (ctx) => {
   const { player, onSelectCards } = ctx;
   player.damage += 1;
   
-  if (player.hand.length > 0 && onSelectCards) {
-    const ids = await onSelectCards(player.hand, player.hand.length);
-    const discardCount = ids.length;
+  if (player.hand.length > 0) {
+    let ids: string[];
     
-    for (const id of ids) {
-      const idx = player.hand.findIndex(c => c.instanceId === id);
-      if (idx !== -1) {
-        player.discard.push(player.hand.splice(idx, 1)[0]!);
-      }
+    if (onSelectCards) {
+      ids = await onSelectCards(player.hand, player.hand.length);
+    } else {
+      // AI 接管：按价值选择弃牌
+      ids = aiDecide_天邪鬼赤(player.hand);
     }
     
-    drawCards(player, discardCount);
-    return { success: true, message: `天邪鬼赤：伤害+1，换${discardCount}张牌`, damage: 1, draw: discardCount };
+    const discardCount = ids.length;
+    
+    if (discardCount > 0) {
+      for (const id of ids) {
+        const idx = player.hand.findIndex(c => c.instanceId === id);
+        if (idx !== -1) {
+          player.discard.push(player.hand.splice(idx, 1)[0]!);
+        }
+      }
+      
+      drawCards(player, discardCount);
+      return { success: true, message: `天邪鬼赤：伤害+1，换${discardCount}张牌`, damage: 1, draw: discardCount };
+    }
   }
   
   return { success: true, message: '天邪鬼赤：伤害+1', damage: 1 };
 });
+
+/**
+ * 天邪鬼黄 AI 决策函数
+ * @param hand 当前手牌
+ * @returns 应置顶的卡牌 instanceId（选择价值最低的牌）
+ * @description
+ * - 排序规则：HP 升序 → 同 HP 按声誉升序
+ * - 选择价值最低的一张牌置顶（减少损失，且近期会再抽到）
+ */
+export function aiDecide_天邪鬼黄(hand: CardInstance[]): string {
+  if (hand.length === 0) return '';
+  
+  // 对手牌按价值升序排序（HP升序，同HP按声誉升序）
+  const sorted = [...hand].sort((a, b) => {
+    const hpA = a.hp ?? 0;
+    const hpB = b.hp ?? 0;
+    if (hpA !== hpB) return hpA - hpB;
+    const charmA = a.charm ?? 0;
+    const charmB = b.charm ?? 0;
+    return charmA - charmB;
+  });
+  
+  // 返回价值最低的牌
+  return sorted[0]!.instanceId;
+}
 
 // 天邪鬼黄 - 抓牌+2，将1张手牌放牌库顶
 registerEffect('天邪鬼黄', async (ctx) => {
@@ -232,7 +302,8 @@ registerEffect('天邪鬼黄', async (ctx) => {
       const ids = await onSelectCards(player.hand, 1);
       cardId = ids[0]!;
     } else {
-      cardId = player.hand[0]!.instanceId;
+      // AI 接管：选择价值最低的牌置顶
+      cardId = aiDecide_天邪鬼黄(player.hand);
     }
     
     const idx = player.hand.findIndex(c => c.instanceId === cardId);
@@ -382,17 +453,46 @@ registerEffect('兵主部', async (ctx) => {
   return { success: true, message: '兵主部：伤害+2', damage: 2 };
 });
 
+/**
+ * 魅妖 AI 决策函数
+ * @param validCards 合法展示牌列表
+ * @returns 应选择的卡牌 instanceId
+ * @description
+ * - 优先选择能造成更高伤害的牌（damage 字段）
+ * - 否则选第一张
+ */
+export function aiDecide_魅妖(validCards: CardInstance[]): string {
+  if (validCards.length === 0) return '';
+  
+  // 按伤害值降序排列
+  const sorted = [...validCards].sort((a, b) => {
+    const dmgA = a.damage ?? 0;
+    const dmgB = b.damage ?? 0;
+    return dmgB - dmgA;
+  });
+  
+  return sorted[0]!.instanceId;
+}
+
 // 魅妖 - [妨害] 对手展示牌库顶，选择生命<5的牌使用效果
 registerEffect('魅妖', async (ctx) => {
-  const { player, gameState, onSelectCards } = ctx;
+  const { player, gameState, onSelectTarget } = ctx;
   const opponents = gameState.players.filter(p => p.id !== player.id);
   
+  if (opponents.length === 0) {
+    return { success: true, message: '[妨害] 魅妖：无对手，跳过' };
+  }
+  
+  // 收集所有对手牌库顶的合法牌（HP < 5）
   const validCards: CardInstance[] = [];
+  const cardOwnerMap = new Map<string, PlayerState>(); // instanceId -> owner
+  
   for (const opp of opponents) {
     if (opp.deck.length > 0) {
       const topCard = opp.deck[opp.deck.length - 1]!;
-      if ((topCard.hp || 0) < 5) {
+      if ((topCard.hp ?? 0) < 5) {
         validCards.push(topCard);
+        cardOwnerMap.set(topCard.instanceId, opp);
       }
     }
   }
@@ -401,19 +501,43 @@ registerEffect('魅妖', async (ctx) => {
     return { success: true, message: '[妨害] 魅妖：没有符合条件的牌' };
   }
   
-  // 简化处理：选择第一张符合条件的牌
-  const selectedCard = validCards[0]!;
-  
-  // 使用效果后置入弃牌区（这里简化为直接弃置）
-  for (const opp of opponents) {
-    const idx = opp.deck.findIndex(c => c.instanceId === selectedCard.instanceId);
-    if (idx !== -1) {
-      opp.discard.push(opp.deck.splice(idx, 1)[0]!);
-      break;
-    }
+  // 选择一张牌
+  let selectedCardId: string;
+  if (onSelectTarget) {
+    selectedCardId = await onSelectTarget(validCards);
+  } else {
+    // AI 接管：优先选伤害高的牌
+    selectedCardId = aiDecide_魅妖(validCards);
   }
   
-  return { success: true, message: `[妨害] 魅妖：使用${selectedCard.name}的效果` };
+  const selectedCard = validCards.find(c => c.instanceId === selectedCardId);
+  if (!selectedCard) {
+    return { success: true, message: '[妨害] 魅妖：未选择有效牌' };
+  }
+  
+  const owner = cardOwnerMap.get(selectedCardId)!;
+  
+  // 执行该牌的效果（使用效果引擎）
+  let effectMessage = '';
+  if (selectedCard.cardType === 'yokai' && selectedCard.name) {
+    // 尝试执行御魂效果
+    const effectResult = await executeYokaiEffect(selectedCard.name, {
+      ...ctx,
+      card: selectedCard
+    });
+    effectMessage = effectResult.message || '';
+  }
+  
+  // 将牌从牌库移入拥有者弃牌区
+  const idx = owner.deck.findIndex(c => c.instanceId === selectedCardId);
+  if (idx !== -1) {
+    owner.discard.push(owner.deck.splice(idx, 1)[0]!);
+  }
+  
+  return { 
+    success: true, 
+    message: `[妨害] 魅妖：使用${selectedCard.name}的效果${effectMessage ? '（' + effectMessage + '）' : ''}` 
+  };
 });
 
 // ============================================
@@ -923,13 +1047,45 @@ registerEffect('青女房', async (ctx) => {
 // 三味 - 本回合每使用1张鬼火牌或阴阳术伤害+2
 registerEffect('三味', async (ctx) => {
   const { player } = ctx;
+  
+  // 1. 统计本回合已使用的「鬼火」牌和阴阳术数量
+  const played = (player as any).played as CardInstance[] | undefined;
+  let ghostFireCount = 0;
+  
+  if (played) {
+    for (const card of played) {
+      // 阴阳术 (spell)
+      if (card.cardType === 'spell') {
+        ghostFireCount++;
+      }
+      // 「鬼火」牌 (subtype包含"鬼火"的御魂)
+      else if (card.cardType === 'yokai') {
+        const tags = card.tags || [];
+        const subtype = (card as any).subtype || '';
+        if (tags.includes('鬼火') || subtype.includes('鬼火')) {
+          ghostFireCount++;
+        }
+      }
+    }
+  }
+  
+  // 2. 即时伤害加成
+  const immediateDamage = ghostFireCount * 2;
+  player.damage += immediateDamage;
+  
+  // 3. 添加buff用于之后使用阴阳术的伤害加成
   player.tempBuffs.push({
     type: 'SPELL_DAMAGE_BONUS' as any,
     value: 2,
     duration: 1,
     source: '三味'
   } as any);
-  return { success: true, message: '三味：本回合每使用阴阳术伤害+2' };
+  
+  const msg = ghostFireCount > 0 
+    ? `三味：已用${ghostFireCount}张鬼火牌/阴阳术，伤害+${immediateDamage}，之后每使用阴阳术再+2`
+    : '三味：本回合每使用阴阳术伤害+2';
+  
+  return { success: true, message: msg, damage: immediateDamage };
 });
 
 // ============================================

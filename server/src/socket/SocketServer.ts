@@ -793,6 +793,78 @@ export class SocketServer {
 
       callback?.(result);
     });
+
+    // 多选手牌响应（天邪鬼赤等卡牌效果）
+    socket.on('game:selectCardsMultiResponse' as any, (data: { selectedIds: string[] }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleSelectCardsMultiResponse(socket.id, data.selectedIds);
+
+      if (result.success) {
+        // 广播游戏状态更新
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
+    // 置顶手牌响应（天邪鬼黄等卡牌效果）
+    socket.on('game:selectCardPutTopResponse' as any, (data: { selectedId: string }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleSelectCardPutTopResponse(socket.id, data.selectedId);
+
+      if (result.success) {
+        // 广播游戏状态更新
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
+    // 魅妖选择响应
+    socket.on('game:meiYaoSelectResponse' as any, (data: { selectedCardId: string }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleMeiYaoSelectResponse(socket.id, data.selectedCardId);
+
+      if (result.success) {
+        // 广播游戏状态更新
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
+    // 赤舌选择响应
+    socket.on('game:akajitaSelectResponse' as any, (data: { selectedId: string }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleAkajitaSelectResponse(socket.id, data.selectedId);
+
+      if (result.success) {
+        // 广播游戏状态更新
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
   }
 
   /**

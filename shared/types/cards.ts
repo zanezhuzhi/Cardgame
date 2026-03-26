@@ -15,6 +15,46 @@ export type CardSubtype = '御魂' | '鬼火' | '令牌' | '妨害' | '持续';
 /** 效果类型标记 */
 export type EffectType = '启' | '触' | '永' | '妖' | '自';
 
+/**
+ * 卡牌性别属性（位掩码）
+ * - 0 (0b00): 无性别（既不是男也不是女）
+ * - 1 (0b01): 男性
+ * - 2 (0b10): 女性
+ * - 3 (0b11): 双性（既是男也是女）
+ * 
+ * 用于游戏效果判定，如"三尾狐女"只影响女性目标
+ */
+export type CardGender = 0 | 1 | 2 | 3;
+
+/** 性别位掩码常量 */
+export const Gender = {
+  NONE: 0 as CardGender,    // 无性别
+  MALE: 1 as CardGender,    // 男性
+  FEMALE: 2 as CardGender,  // 女性
+  BOTH: 3 as CardGender,    // 双性
+} as const;
+
+/**
+ * 判断是否为男性（男性或双性）
+ */
+export function isMale(gender: CardGender | undefined): boolean {
+  return ((gender ?? 0) & 1) !== 0;
+}
+
+/**
+ * 判断是否为女性（女性或双性）
+ */
+export function isFemale(gender: CardGender | undefined): boolean {
+  return ((gender ?? 0) & 2) !== 0;
+}
+
+/**
+ * 判断是否有性别（非无性别）
+ */
+export function hasGender(gender: CardGender | undefined): boolean {
+  return (gender ?? 0) !== 0;
+}
+
 // ============ 阴阳师卡 ============
 
 /** 阴阳师卡 - 只有名称和形象，无技能（为了玩家平衡） */
@@ -52,6 +92,7 @@ export interface ShikigamiCard {
   passive: ShikigamiPassive;
   skill: ShikigamiSkill;
   multiPlayer?: boolean;   // 是否为多人游戏卡（纸人符号）
+  gender?: CardGender;     // 性别 (0=无, 1=男, 2=女, 3=双)
   image: string;
 }
 
@@ -107,6 +148,7 @@ export interface BossCard {
   arrivalEffect: string;   // 来袭效果
   yokaiEffect: string;     // 御魂效果（击败后获得）
   multiPlayer?: boolean;   // 是否为多人游戏卡（纸人符号）
+  gender?: CardGender;     // 性别 (0=无, 1=男, 2=女, 3=双)
   image: string;
 }
 
@@ -123,6 +165,7 @@ export interface YokaiCard {
   effectType: EffectType;  // 效果类型
   fieldEffect?: string;    // 【妖】作为游荡妖怪时的效果
   multiPlayer?: boolean;   // 是否为多人游戏卡（纸人符号）
+  gender?: CardGender;     // 性别 (0=无, 1=男, 2=女, 3=双)
   image: string;
 }
 
@@ -149,6 +192,7 @@ export interface CardInstance {
   charm?: number;          // 声誉值
   effect?: string;         // 效果描述
   keywords?: string[];     // 关键词标签
+  gender?: CardGender;     // 性别 (0=无, 1=男, 2=女, 3=双)
   image: string;           // 图片
   // 状态标记
   isExhausted?: boolean;   // 是否已行动

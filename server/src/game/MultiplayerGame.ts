@@ -25,6 +25,9 @@ import type {
 import * as fs from 'fs';
 import * as path from 'path';
 
+// 导入牌库展示管理器
+import { DeckRevealHelper } from './DeckRevealHelper';
+
 // ============ TempBuff 简化管理 ============
 // 临时buff类型定义（与shared/game/TempBuff.ts同步）
 type TempBuffType = 
@@ -199,6 +202,9 @@ export class MultiplayerGame {
   
   /** 式神选择状态 */
   private shikigamiSelections: Map<string, string[]> = new Map();
+  
+  /** 赤舌选择超时计时器 */
+  private akajitaTimer?: NodeJS.Timeout;
   
   /** 是否已清理 */
   private cleaned: boolean = false;
@@ -928,6 +934,10 @@ export class MultiplayerGame {
    * 1人=无限，其余按规则映射。
    */
   private getTurnTimeoutMsByHumanCount(): number {
+    // 测试环境：禁用回合倒计时
+    if (process.env.DISABLE_TURN_TIMEOUT === '1') {
+      return 0;
+    }
     const humanCount = this.getHumanPlayerCount();
     if (humanCount <= 1) return 0;
     if (humanCount === 2) return 30000;
@@ -997,6 +1007,11 @@ export class MultiplayerGame {
       const opts: string[] = pc.options || [];
       const damageIdx = opts.findIndex((x: string) => String(x).includes('伤害'));
       this.handleYokaiChoiceResponse(playerId, damageIdx >= 0 ? damageIdx : 0);
+      return;
+    }
+    if (pc.type === 'selectCardsMulti') {
+      // 超时默认不弃任何牌（空数组）
+      this.handleSelectCardsMultiResponse(playerId, []);
       return;
     }
     (this.state as any).pendingChoice = undefined;
@@ -1140,6 +1155,9 @@ export class MultiplayerGame {
    */
   private startTurn(): void {
     const player = this.getCurrentPlayer();
+    
+    // 强制关闭赤舌选择（如果当前玩家有pending的赤舌选择，自动默认选基础术式）
+    this.forceCloseAkajitaSelectForPlayer(player.id);
     
     // 重置回合状态
     player.damage = 0;
@@ -2692,9 +2710,15 @@ export class MultiplayerGame {
         this.addLog(`🔄 ${player.name} 牌库耗尽，洗入弃牌堆`);
         player.deck = [...player.discard].sort(() => Math.random() - 0.5);
         player.discard = [];
+        // 洗牌后清空所有展示状态
+        DeckRevealHelper.clearAllRevealed(player);
       }
       const card = player.deck.shift();
-      if (card) player.hand.push(card);
+      if (card) {
+        // 清理展示状态（卡牌离开牌库）
+        DeckRevealHelper.removeRevealedCard(player, card.instanceId);
+        player.hand.push(card);
+      }
     }
   }
 
@@ -2938,17 +2962,20 @@ export class MultiplayerGame {
           
           // 如果牌库有牌，设置等待玩家选择是否超度
           if (player.deck.length > 0) {
-            const topCard = player.deck[0];
-            this.state.pendingChoice = {
-              type: 'salvageChoice',
-              playerId: player.id,
-              card: topCard,
-              prompt: `查看牌库顶牌【${topCard.name}】，是否超度？`
-            };
-            this.addLog(`   👁️ 查看牌库顶牌：${topCard.name}`, { 
-              visibility: 'private', 
-              playerId: player.id 
-            });
+            // 添加展示状态
+            const topCard = DeckRevealHelper.revealTopCard(player, player.id);
+            if (topCard) {
+              this.state.pendingChoice = {
+                type: 'salvageChoice',
+                playerId: player.id,
+                card: topCard,
+                prompt: `查看牌库顶牌【${topCard.name}】，是否超度？`
+              };
+              this.addLog(`   👁️ 查看牌库顶牌：${topCard.name}`, { 
+                visibility: 'private', 
+                playerId: player.id 
+              });
+            }
           } else {
             this.addLog(`   ⚠️ 牌库为空，无法查看`, { 
               visibility: 'private', 
@@ -3008,27 +3035,128 @@ export class MultiplayerGame {
         }
           
         case '天邪鬼赤':
-          // 伤害+1
+          // 伤害+1，弃置任意数量手牌，抓等量的牌
           player.damage += 1;
           this.addLog(`   ✨ 御魂：伤害+1`);
+          
+          // 如果有手牌，让玩家选择要弃置的牌
+          if (player.hand.length > 0) {
+            this.state.pendingChoice = {
+              type: 'selectCardsMulti',
+              playerId: player.id,
+              cards: player.hand.map(c => c.instanceId),
+              maxCount: player.hand.length,
+              minCount: 0,
+              prompt: '选择要弃置的手牌（可不选）'
+            };
+            this.addLog(`   🎯 御魂：选择要弃置的手牌...`);
+          }
           break;
           
         case '天邪鬼黄':
-          // 抓牌+2
+          // 抓牌+2，然后将1张手牌置于牌库顶
           this.drawCards(player, 2);
           this.addLog(`   ✨ 御魂：抓牌+2`);
+          // 如果有手牌，弹出选择界面让玩家选1张置顶
+          if (player.hand.length > 0) {
+            this.state.pendingChoice = {
+              type: 'selectCardPutTop',
+              playerId: player.id,
+              prompt: '选择1张手牌置于牌库顶',
+              count: 1
+            };
+            this.addLog(`   ⏳ 等待选择1张手牌置于牌库顶...`);
+          }
           break;
           
-        case '赤舌':
-          // [妨害] 对手弃牌堆顶牌置于牌库顶
-          for (const p of this.state.players) {
-            if (p.id === player.id) continue;
-            if (p.discard.length > 0) {
-              p.deck.push(p.discard.pop()!);
+        case '赤舌': {
+          // [妨害] 对手从弃牌堆选择基础术式或招福达摩置于牌库顶
+          // 收集需要处理的对手及其弃牌堆情况
+          console.log('[赤舌调试] 开始处理赤舌效果');
+          const akajitaTargets: { playerId: string; playerName: string; hasSpell: boolean; hasDaruma: boolean; spellCard?: CardInstance; darumaCard?: CardInstance }[] = [];
+          
+          for (const opponent of this.state.players) {
+            if (opponent.id === player.id) continue;
+            
+            // 筛选弃牌堆中的基础术式和招福达摩
+            const spellCard = opponent.discard.find(c => c.name === '基础术式');
+            const darumaCard = opponent.discard.find(c => c.name === '招福达摩');
+            console.log(`[赤舌调试] 对手 ${opponent.name}(${opponent.id}): 基础术式=${!!spellCard}, 招福达摩=${!!darumaCard}`);
+            
+            if (spellCard || darumaCard) {
+              akajitaTargets.push({
+                playerId: opponent.id,
+                playerName: opponent.name,
+                hasSpell: !!spellCard,
+                hasDaruma: !!darumaCard,
+                spellCard,
+                darumaCard
+              });
             }
           }
-          this.addLog(`   ✨ 御魂：[妨害]对手牌库顶添加弃牌`);
+          
+          if (akajitaTargets.length === 0) {
+            // 场景C：没有符合条件的牌，跳过
+            this.addLog(`   ✨ 御魂：[妨害]对手弃牌堆无符合条件的牌`);
+          } else {
+            // 逐个处理对手（当前简化：同时处理所有对手）
+            for (const target of akajitaTargets) {
+              const opponent = this.getPlayer(target.playerId);
+              if (!opponent) continue;
+              
+              if (target.hasSpell && target.hasDaruma) {
+                // 场景A：两者都有，需要对手选择
+                // 设置pendingChoice给该对手，5秒超时
+                console.log(`[赤舌调试] 场景A: ${target.playerName} 两张都有，设置pendingChoice`);
+                const deadline = Date.now() + 5000;
+                this.state.pendingChoice = {
+                  type: 'akajitaSelect',
+                  playerId: target.playerId,
+                  triggerPlayerId: player.id,  // 触发者
+                  prompt: '赤舌：选择1张牌置于牌库顶',
+                  deadline: deadline,  // 客户端使用deadline计算倒计时
+                  options: [
+                    { name: '基础术式', cardId: target.spellCard!.cardId },
+                    { name: '招福达摩', cardId: target.darumaCard!.cardId }
+                  ],
+                  // 保留原始数据用于执行
+                  candidates: [
+                    { type: 'spell', name: '基础术式', instanceId: target.spellCard!.instanceId },
+                    { type: 'daruma', name: '招福达摩', instanceId: target.darumaCard!.instanceId }
+                  ]
+                } as any;
+                console.log(`[赤舌调试] pendingChoice已设置:`, JSON.stringify(this.state.pendingChoice));
+                this.addLog(`   ⏳ 等待 ${target.playerName} 选择置于牌库顶的牌...`);
+                // 设置5秒超时
+                this.startAkajitaTimeout(target.playerId);
+                // 立即通知状态变更
+                this.notifyStateChange();
+                break; // 一次只处理一个对手的选择
+              } else {
+                // 场景B：只有一种，自动选中
+                const cardToMove = target.spellCard || target.darumaCard;
+                if (cardToMove) {
+                  const idx = opponent.discard.findIndex(c => c.instanceId === cardToMove.instanceId);
+                  if (idx !== -1) {
+                    const card = opponent.discard.splice(idx, 1)[0]!;
+                    opponent.deck.unshift(card); // 置于牌库顶
+                    
+                    // 通知该玩家（通过akajitaNotify）
+                    this.state.akajitaNotify = this.state.akajitaNotify || [];
+                    (this.state as any).akajitaNotify.push({
+                      playerId: target.playerId,
+                      cardName: card.name,
+                      timestamp: Date.now()
+                    });
+                    
+                    this.addLog(`   ✨ ${target.playerName} 的【${card.name}】被置于牌库顶`);
+                  }
+                }
+              }
+            }
+          }
           break;
+        }
           
         // ============ 生命3 ============
         case '灯笼鬼':
@@ -3081,10 +3209,83 @@ export class MultiplayerGame {
           this.addLog(`   ✨ 御魂：伤害+2`);
           break;
           
-        case '魅妖':
-          // [妨害] 简化处理
-          this.addLog(`   ✨ 御魂：[妨害]魅惑对手`);
+        case '魅妖': {
+          // [妨害] 每名对手展示牌库顶牌，选择其中1张生命<5的可用牌，使用其效果，置入弃牌区
+          // 1. 收集所有对手的牌库顶牌
+          const meiYaoCandidates: { ownerId: string; ownerName: string; card: CardInstance; usable: boolean }[] = [];
+          for (const opponent of this.state.players) {
+            if (opponent.id === player.id) continue;
+            if (opponent.deck.length > 0) {
+              // 添加展示状态：当前玩家查看对手牌库顶
+              const topCard = DeckRevealHelper.revealTopCard(opponent, player.id);
+              if (!topCard) continue;
+              
+              // 筛选生命<5的牌（策划：生命低于5）
+              if (topCard.hp !== undefined && topCard.hp < 5) {
+                // 判断是否可用（令牌和恶评不能"使用其效果"）
+                const isUsable = topCard.cardType !== 'token' && topCard.cardType !== 'penalty';
+                meiYaoCandidates.push({
+                  ownerId: opponent.id,
+                  ownerName: opponent.name,
+                  card: topCard,
+                  usable: isUsable
+                });
+              }
+              this.addLog(`   👁️ ${opponent.name} 牌库顶: ${topCard.name} (HP:${topCard.hp ?? '?'})`);
+            }
+          }
+
+          // 统计可用牌数量
+          const usableCount = meiYaoCandidates.filter(c => c.usable).length;
+
+          if (meiYaoCandidates.length === 0) {
+            // 没有HP<5的牌
+            this.addLog(`   ✨ 御魂：无可选牌（对手牌库空或无HP<5的牌）`);
+          } else if (usableCount === 0) {
+            // 有候选牌但全是令牌/恶评，显示给玩家看（展示有价值），但需要取消按钮
+            this.state.pendingChoice = {
+              type: 'meiYaoSelect',
+              playerId: player.id,
+              prompt: `对手牌库顶均为不可用牌`,
+              hasUsable: false,
+              candidates: meiYaoCandidates.map(c => ({
+                instanceId: c.card.instanceId,
+                cardId: c.card.cardId,
+                cardType: c.card.cardType,
+                name: c.card.name,
+                hp: c.card.hp,
+                ownerName: c.ownerName,
+                ownerId: c.ownerId,
+                usable: c.usable
+              }))
+            } as any;
+            this.addLog(`   ⏳ 对手牌库顶均为不可用牌...`);
+          } else if (usableCount === 1 && meiYaoCandidates.length === 1) {
+            // 只有一张可用牌且总共就一张，自动选择
+            const target = meiYaoCandidates[0];
+            this.executeMeiYaoEffect(player, target);
+          } else {
+            // 多张候选牌，需要玩家选择（传递所有牌，包括不可用的用于展示）
+            this.state.pendingChoice = {
+              type: 'meiYaoSelect',
+              playerId: player.id,
+              prompt: `选择1张对手牌库顶牌使用其效果（HP<5）`,
+              hasUsable: true,
+              candidates: meiYaoCandidates.map(c => ({
+                instanceId: c.card.instanceId,
+                cardId: c.card.cardId,
+                cardType: c.card.cardType,
+                name: c.card.name,
+                hp: c.card.hp,
+                ownerName: c.ownerName,
+                ownerId: c.ownerId,
+                usable: c.usable
+              }))
+            } as any;
+            this.addLog(`   ⏳ 等待选择对手牌库顶牌...`);
+          }
           break;
+        }
           
         // ============ 生命4 ============
         case '骰子鬼':
@@ -3539,6 +3740,8 @@ export class MultiplayerGame {
       // 执行超度：牌库顶 → 超度区
       const card = player.deck.shift();
       if (card) {
+        // 清理展示状态（卡牌离开牌库）
+        DeckRevealHelper.removeRevealedCard(player, card.instanceId);
         player.exiled.push(card);
         this.addLog(`   ✨ ${player.name} 超度了 ${card.name}`);
       }
@@ -3662,6 +3865,442 @@ export class MultiplayerGame {
   }
 
   /**
+   * 处理多选手牌响应（天邪鬼赤等卡牌效果）
+   * @param playerId 玩家ID
+   * @param selectedIds 选择的手牌instanceId数组
+   */
+  public handleSelectCardsMultiResponse(playerId: string, selectedIds: string[]): { success: boolean; error?: string } {
+    // 验证是否有等待的多选
+    if (!this.state.pendingChoice || this.state.pendingChoice.type !== 'selectCardsMulti') {
+      return { success: false, error: '没有待处理的手牌选择' };
+    }
+    // 验证是否是正确的玩家
+    if (this.state.pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+
+    const ids = selectedIds || [];
+    const discardCount = ids.length;
+
+    if (discardCount > 0) {
+      // 弃置选中的手牌
+      for (const id of ids) {
+        const idx = player.hand.findIndex(c => c.instanceId === id);
+        if (idx !== -1) {
+          player.discard.push(player.hand.splice(idx, 1)[0]!);
+        }
+      }
+      // 抓取等量的牌
+      this.drawCards(player, discardCount);
+      this.addLog(`   ✨ 御魂：弃置${discardCount}张牌，抓${discardCount}张牌`);
+    } else {
+      this.addLog(`   ↩️ ${player.name} 选择不换牌`, { visibility: 'private', playerId });
+    }
+
+    // 清除等待状态
+    this.state.pendingChoice = undefined;
+
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+
+  /**
+   * 处理选择手牌置顶响应（天邪鬼黄等）
+   * @param playerId 玩家ID
+   * @param selectedId 选择的手牌instanceId
+   */
+  public handleSelectCardPutTopResponse(playerId: string, selectedId: string): { success: boolean; error?: string } {
+    // 验证是否有等待的置顶选择
+    if (!this.state.pendingChoice || this.state.pendingChoice.type !== 'selectCardPutTop') {
+      return { success: false, error: '没有待处理的置顶选择' };
+    }
+    // 验证是否是正确的玩家
+    if (this.state.pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+
+    // 从手牌中找到并移除选中的牌
+    const idx = player.hand.findIndex(c => c.instanceId === selectedId);
+    if (idx === -1) {
+      // 超时/默认：选第一张
+      if (player.hand.length > 0) {
+        const card = player.hand.shift()!;
+        // 牌库顶 = 数组头部(索引0)，用 unshift
+        player.deck.unshift(card);
+        this.addLog(`   📥 ${card.name} 被置于牌库顶（默认）`);
+      }
+    } else {
+      const card = player.hand.splice(idx, 1)[0]!;
+      // 牌库顶 = 数组头部(索引0)，用 unshift
+      player.deck.unshift(card);
+      this.addLog(`   📥 ${card.name} 被置于牌库顶`);
+    }
+
+    // 清除等待状态
+    this.state.pendingChoice = undefined;
+
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+
+  /**
+   * 执行魅妖效果：使用对手牌库顶牌的效果并将其置入弃牌区
+   * @param player 当前玩家
+   * @param target 目标牌信息
+   */
+  private executeMeiYaoEffect(player: PlayerState, target: { ownerId: string; ownerName: string; card: CardInstance }) {
+    const owner = this.getPlayer(target.ownerId);
+    if (!owner) return;
+
+    // 从拥有者牌库移除该牌
+    const cardIdx = owner.deck.findIndex(c => c.instanceId === target.card.instanceId);
+    if (cardIdx === -1) return;
+    const card = owner.deck.splice(cardIdx, 1)[0]!;
+    
+    // 清理展示状态（卡牌离开牌库）
+    DeckRevealHelper.removeRevealedCard(owner, card.instanceId);
+
+    this.addLog(`   🎭 使用 ${target.ownerName} 的 ${card.name} 效果`);
+
+    // 执行该牌的效果（视为当前玩家打出）
+    // 这里使用简化版本：只执行基础效果，不支持递归选择
+    this.executeSimpleCardEffect(player, card);
+
+    // 将该牌置入拥有者的弃牌堆
+    owner.discard.push(card);
+    this.addLog(`   📥 ${card.name} 置入 ${target.ownerName} 弃牌堆`);
+  }
+
+  /**
+   * 执行简化版卡牌效果（用于魅妖等"使用其效果"场景）
+   * 只执行即时效果，不触发交互选择
+   */
+  private executeSimpleCardEffect(player: PlayerState, card: CardInstance) {
+    const cardName = card.name;
+    const hp = card.hp ?? 0;
+
+    // 基于卡牌名称执行简化效果
+    switch (cardName) {
+      // HP1
+      case '招福达摩':
+        // 令牌不能打出，声誉+1已在charm中
+        break;
+      
+      // HP2
+      case '唐纸伞妖':
+        player.damage += 1;
+        this.addLog(`      → 伤害+1`);
+        break;
+      case '天邪鬼青':
+        player.damage += 1;
+        this.addLog(`      → 伤害+1（默认选择）`);
+        break;
+      case '天邪鬼赤':
+        player.damage += 1;
+        this.addLog(`      → 伤害+1`);
+        break;
+      case '天邪鬼黄':
+        this.drawCards(player, 2);
+        this.addLog(`      → 抓牌+2`);
+        break;
+      case '天邪鬼绿':
+        // 退治效果需要选择，简化跳过
+        this.addLog(`      → 效果跳过（需要选择目标）`);
+        break;
+      case '赤舌':
+        // 妨害效果已在对手执行
+        break;
+
+      // HP3
+      case '灯笼鬼':
+        player.ghostFire = Math.min(player.ghostFire + 1, GAME_CONSTANTS.MAX_GHOST_FIRE);
+        this.drawCards(player, 1);
+        this.addLog(`      → 鬼火+1，抓牌+1`);
+        break;
+      case '树妖':
+        this.drawCards(player, 2);
+        this.addLog(`      → 抓牌+2`);
+        break;
+      case '日女巳时':
+        player.damage += 2;
+        this.addLog(`      → 伤害+2（默认选择）`);
+        break;
+      case '蚌精':
+        this.drawCards(player, 2);
+        this.addLog(`      → 抓牌+2`);
+        break;
+      case '鸣屋':
+        const dmg = player.discard.length === 0 ? 4 : 2;
+        player.damage += dmg;
+        this.addLog(`      → 伤害+${dmg}`);
+        break;
+      case '蝠翼':
+        this.drawCards(player, 1);
+        player.damage += 1;
+        this.addLog(`      → 抓牌+1，伤害+1`);
+        break;
+      case '兵主部':
+        player.damage += 2;
+        this.addLog(`      → 伤害+2`);
+        break;
+
+      // HP4
+      case '骰子鬼':
+        // 需要超度+退治，简化跳过
+        this.addLog(`      → 效果跳过（需要选择目标）`);
+        break;
+      case '涅槃之火':
+        TempBuffHelper.addBuff(player, { type: 'SKILL_COST_REDUCTION' as any, value: 1 });
+        this.addLog(`      → 式神技能费用-1`);
+        break;
+      case '雪幽魂':
+        this.drawCards(player, 1);
+        this.addLog(`      → 抓牌+1`);
+        break;
+      case '网切':
+        TempBuffHelper.addBuff(player, { type: 'HP_REDUCTION' as any, value: 1 });
+        this.addLog(`      → 妖怪生命-1`);
+        break;
+      case '铮':
+        this.drawCards(player, 1);
+        player.damage += 2;
+        this.addLog(`      → 抓牌+1，伤害+2`);
+        break;
+      case '薙魂':
+        this.drawCards(player, 1);
+        this.addLog(`      → 抓牌+1`);
+        break;
+      case '轮入道':
+        // 需要选择另一张御魂，简化跳过
+        this.addLog(`      → 效果跳过（需要选择另一张御魂）`);
+        break;
+      case '魍魉之匣':
+        this.drawCards(player, 1);
+        player.damage += 1;
+        this.addLog(`      → 抓牌+1，伤害+1`);
+        break;
+
+      default:
+        // 其他卡牌或阴阳术
+        if (card.cardType === 'spell') {
+          player.damage += (card.damage ?? 1);
+          this.addLog(`      → 伤害+${card.damage ?? 1}（阴阳术）`);
+        } else {
+          this.addLog(`      → 效果未实现`);
+        }
+        break;
+    }
+  }
+
+  /**
+   * 处理魅妖选择响应
+   * @param playerId 玩家ID
+   * @param selectedCardId 选中的牌instanceId
+   */
+  public handleMeiYaoSelectResponse(playerId: string, selectedCardId: string): { success: boolean; error?: string } {
+    const pendingChoice = this.state.pendingChoice as any;
+    if (!pendingChoice || pendingChoice.type !== 'meiYaoSelect') {
+      return { success: false, error: '没有待处理的魅妖选择' };
+    }
+    if (pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+
+    // 空选择 = 跳过（无可用牌时）
+    if (!selectedCardId) {
+      this.addLog(`   ✨ 魅妖：跳过（无可用牌）`);
+      this.state.pendingChoice = undefined;
+      this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+      return { success: true };
+    }
+
+    // 在候选列表中找到选中的牌（用instanceId匹配）
+    const candidates = pendingChoice.candidates || [];
+    const selected = candidates.find((c: any) => c.instanceId === selectedCardId);
+    if (!selected) {
+      return { success: false, error: '无效的选择' };
+    }
+    
+    // 检查选中的牌是否可用
+    if (selected.usable === false) {
+      return { success: false, error: '该牌不可用（令牌/恶评）' };
+    }
+
+    // 找到拥有者和该牌
+    const owner = this.getPlayer(selected.ownerId);
+    if (!owner) return { success: false, error: '牌拥有者不存在' };
+
+    const cardIdx = owner.deck.findIndex(c => c.instanceId === selectedCardId);
+    if (cardIdx === -1) return { success: false, error: '牌已不在牌库中' };
+
+    const card = owner.deck[cardIdx];
+    this.executeMeiYaoEffect(player, {
+      ownerId: selected.ownerId,
+      ownerName: selected.ownerName,
+      card: card
+    });
+
+    // 清除等待状态
+    this.state.pendingChoice = undefined;
+
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+
+  // ============ 赤舌效果相关 ============
+
+  /**
+   * 启动赤舌选择超时计时器（5秒）
+   */
+  private startAkajitaTimeout(playerId: string): void {
+    this.clearAkajitaTimeout();
+    this.akajitaTimer = setTimeout(() => {
+      this.handleAkajitaTimeout(playerId);
+    }, 5000);
+  }
+
+  /**
+   * 清除赤舌超时计时器
+   */
+  private clearAkajitaTimeout(): void {
+    if (this.akajitaTimer) {
+      clearTimeout(this.akajitaTimer);
+      this.akajitaTimer = undefined;
+    }
+  }
+
+  /**
+   * 赤舌超时处理：默认选择基础术式
+   */
+  private handleAkajitaTimeout(playerId: string): void {
+    const pendingChoice = this.state.pendingChoice as any;
+    if (!pendingChoice || pendingChoice.type !== 'akajitaSelect') return;
+    if (pendingChoice.playerId !== playerId) return;
+
+    // 默认选择基础术式
+    const spellCandidate = pendingChoice.candidates?.find((c: any) => c.type === 'spell');
+    if (spellCandidate) {
+      this.executeAkajitaSelect(playerId, spellCandidate.instanceId, true);
+    } else {
+      // fallback: 选择第一个
+      const firstCandidate = pendingChoice.candidates?.[0];
+      if (firstCandidate) {
+        this.executeAkajitaSelect(playerId, firstCandidate.instanceId, true);
+      }
+    }
+  }
+
+  /**
+   * 处理赤舌选择响应
+   * @param playerId 选择的玩家ID（被妨害的对手）
+   * @param selectedId 选中的牌instanceId
+   */
+  public handleAkajitaSelectResponse(playerId: string, selectedId: string): { success: boolean; error?: string } {
+    const pendingChoice = this.state.pendingChoice as any;
+    if (!pendingChoice || pendingChoice.type !== 'akajitaSelect') {
+      return { success: false, error: '没有待处理的赤舌选择' };
+    }
+    if (pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+
+    // 验证选择是否有效
+    const candidate = pendingChoice.candidates?.find((c: any) => c.instanceId === selectedId);
+    if (!candidate) {
+      return { success: false, error: '无效的选择' };
+    }
+
+    this.clearAkajitaTimeout();
+    this.executeAkajitaSelect(playerId, selectedId, false);
+    return { success: true };
+  }
+
+  /**
+   * 执行赤舌选择：将选中的牌从弃牌堆移到牌库顶
+   */
+  private executeAkajitaSelect(playerId: string, selectedId: string, isTimeout: boolean): void {
+    const player = this.getPlayer(playerId);
+    if (!player) return;
+
+    const pendingChoice = this.state.pendingChoice as any;
+    const candidate = pendingChoice?.candidates?.find((c: any) => c.instanceId === selectedId);
+
+    // 从弃牌堆找到该牌
+    const idx = player.discard.findIndex(c => c.instanceId === selectedId);
+    if (idx !== -1) {
+      const card = player.discard.splice(idx, 1)[0]!;
+      player.deck.unshift(card); // 置于牌库顶
+
+      const timeoutHint = isTimeout ? '（超时默认）' : '';
+      this.addLog(`   ✨ ${player.name} 选择将【${card.name}】置于牌库顶${timeoutHint}`);
+
+      // 设置通知（用于客户端显示提示）
+      (this.state as any).akajitaNotify = (this.state as any).akajitaNotify || [];
+      (this.state as any).akajitaNotify.push({
+        playerId: playerId,
+        cardName: card.name,
+        timestamp: Date.now()
+      });
+    }
+
+    // 清除等待状态
+    this.state.pendingChoice = undefined;
+
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+  }
+
+  /**
+   * 强制关闭指定玩家的赤舌选择（用于回合开始时、回合结束时）
+   * 如果该玩家有pending的赤舌选择，自动选择基础术式
+   */
+  private forceCloseAkajitaSelectForPlayer(playerId: string): void {
+    const pendingChoice = this.state.pendingChoice as any;
+    if (!pendingChoice || pendingChoice.type !== 'akajitaSelect') return;
+    if (pendingChoice.playerId !== playerId) return;
+
+    // 清除超时计时器
+    this.clearAkajitaTimer();
+
+    // 自动选择基础术式
+    const player = this.getPlayer(playerId);
+    if (!player) {
+      this.state.pendingChoice = undefined;
+      return;
+    }
+
+    // 找到基础术式
+    const spellCard = player.discard.find(c => c.name === '基础术式');
+    if (spellCard) {
+      const idx = player.discard.findIndex(c => c.instanceId === spellCard.instanceId);
+      if (idx !== -1) {
+        const card = player.discard.splice(idx, 1)[0]!;
+        player.deck.unshift(card); // 置于牌库顶
+        this.addLog(`   ✨ ${player.name} 的【${card.name}】被置于牌库顶（回合切换默认）`);
+
+        // 设置通知
+        (this.state as any).akajitaNotify = (this.state as any).akajitaNotify || [];
+        (this.state as any).akajitaNotify.push({
+          playerId: playerId,
+          cardName: card.name,
+          timestamp: Date.now()
+        });
+      }
+    }
+
+    // 清除等待状态
+    this.state.pendingChoice = undefined;
+  }
+
+  /**
    * 处理结束回合
    */
   private handleEndTurn(playerId: string): { success: boolean; error?: string } {
@@ -3671,6 +4310,11 @@ export class MultiplayerGame {
     
     const player = this.getPlayer(playerId);
     if (!player) return { success: false, error: '玩家不存在' };
+    
+    // 强制关闭所有玩家的赤舌选择（主回合结束时清理）
+    for (const p of this.state.players) {
+      this.forceCloseAkajitaSelectForPlayer(p.id);
+    }
     
     // 自动处理未选择的死亡妖怪（默认退治）
     const pendingList = (this.state as any).pendingDeathChoices || [];

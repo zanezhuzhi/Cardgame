@@ -6,3 +6,7 @@
 
 export * from './GameManager';
 export * from './DeckManager';
+export * from './DamageSystem';
+export * from './EffectClassification';
+export * from './TurnHistory';
+export * from './EffectiveHP';

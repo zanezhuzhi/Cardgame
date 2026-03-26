@@ -86,7 +86,7 @@ export interface GameState {
     /** 等待玩家做出选择（御魂效果、式神技能等） */
     pendingChoice?: {
         /** 选择类型 */
-        type: 'salvageChoice' | 'cardSelect' | 'yokaiTarget' | 'yokaiChoice';
+        type: 'salvageChoice' | 'cardSelect' | 'yokaiTarget' | 'yokaiChoice' | 'selectCardsMulti' | 'selectCardPutTop' | 'meiYaoSelect' | 'akajitaSelect';
         /** 等待的玩家ID */
         playerId: string;
         /** 选择相关的卡牌信息 */

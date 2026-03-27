@@ -848,6 +848,24 @@ export class SocketServer {
       callback?.(result);
     });
 
+    // 轮入道弃牌响应
+    socket.on('game:wheelMonkDiscardResponse' as any, (data: { selectedId: string }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleWheelMonkDiscardResponse(socket.id, data.selectedId);
+
+      if (result.success) {
+        // 广播游戏状态更新
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
     // 日女巳时选择响应
     socket.on('game:rinyuChoiceResponse' as any, (data: { choice: string }, callback?: (result: { success: boolean; error?: string }) => void) => {
       const room = this.roomManager.getPlayerRoom(socket.id);

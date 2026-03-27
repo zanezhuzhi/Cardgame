@@ -1,5 +1,10 @@
 # yokai_034_幽谷响
 
+> **文档版本**: v2.0  
+> **卡牌ID**: yokai_034  
+> **最后更新**: 2026年3月  
+> **框架依赖**: HarassmentPipeline, 鬼火上限系统 (maxGhostFire)
+
 ---
 
 ## 📋 基础信息

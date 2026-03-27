@@ -1,8 +1,9 @@
 # yokai_020_网切
 
-> **文档版本**: v1.0  
+> **文档版本**: v2.0  
 > **卡牌ID**: yokai_020  
-> **最后更新**: 2025年1月
+> **最后更新**: 2026年3月  
+> **框架依赖**: TempBuff 系统 (HP_REDUCTION), FieldState.hpModifier
 
 ---
 

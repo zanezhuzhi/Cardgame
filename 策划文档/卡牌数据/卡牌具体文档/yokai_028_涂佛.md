@@ -1,8 +1,9 @@
 # yokai_028_涂佛
 
-> **文档版本**: v1.0  
+> **文档版本**: v2.0  
 > **卡牌ID**: yokai_028  
-> **最后更新**: 2026年3月
+> **最后更新**: 2026年3月  
+> **框架依赖**: onSelectTarget 回调, FieldState.wanderingYokai
 
 ---
 

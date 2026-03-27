@@ -31,7 +31,7 @@ describe('效果分类系统', () => {
     });
     
     it('🟢 雪幽魂是妨害效果', () => {
-      expect(isHarassmentEffect('yokai_015')).toBe(true);
+      expect(isHarassmentEffect('yokai_018')).toBe(true);
     });
     
     it('🟢 魍魉之匣是妨害效果', () => {

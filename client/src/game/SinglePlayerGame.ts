@@ -677,6 +677,30 @@ export class SinglePlayerGame {
         }
         break;
       
+      // 轮入道：弃置1张生命≤6的御魂，执行其效果2次
+      // 需要手牌中有【其他】HP≤6的御魂
+      case '轮入道': {
+        const hasValidYokai = player.hand.some(c => 
+          c.instanceId !== card.instanceId && // 不能是轮入道本身
+          c.cardType === 'yokai' && 
+          (c.hp || 0) <= 6
+        );
+        if (!hasValidYokai) {
+          return { hasValidTarget: false, reason: '没有可弃置的御魂（生命≤6）' };
+        }
+        break;
+      }
+      
+      // 骰子鬼：超度1张手牌，退治HP≤超度牌HP+2的妖怪
+      // 需要手牌中有【其他】牌可超度
+      case '骰子鬼': {
+        const hasOtherCards = player.hand.some(c => c.instanceId !== card.instanceId);
+        if (!hasOtherCards) {
+          return { hasValidTarget: false, reason: '没有其他手牌可超度' };
+        }
+        break;
+      }
+      
       // ============ 鬼王御魂 ============
       
       // 贪嗔痴：需要超度1张手牌（手牌数>1，因为这张牌本身也在手牌中）

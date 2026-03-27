@@ -224,15 +224,34 @@ export interface GameState {
   pendingYokaiRefresh?: boolean;
   turnHadKill?: boolean;
   pendingChoice?: {
-    type: 'salvageChoice' | 'cardSelect' | 'yokaiTarget' | 'yokaiChoice';
+    type: 'salvageChoice' | 'cardSelect' | 'yokaiTarget' | 'yokaiChoice' 
+      | 'treeDemonDiscard' | 'rinyuChoice' | 'bangJingExile' | 'diceGhostExile' 
+      | 'diceGhostTarget' | 'selectCardsMulti' | 'selectCardPutTop' | 'wheelMonkDiscard'
+      | 'wangliangChoice' | 'meiYaoSelect' | 'akajitaSelect';
     playerId: string;
     card?: CardInstance;
     prompt?: string;
-    options?: string[];
+    options?: string[] | any[];
+    [key: string]: any;
   };
   // 式神选择阶段倒计时
   shikigamiSelectTimeout?: number;
   shikigamiSelectStartTime?: number;
+  
+  // 轮入道队列执行
+  wheelMonkQueue?: WheelMonkQueue;
+}
+
+/** 轮入道效果执行队列 */
+export interface WheelMonkQueue {
+  /** 被弃置的御魂名称 */
+  cardName: string;
+  /** 被弃置的御魂卡牌ID */
+  cardId: string;
+  /** 剩余执行次数（初始值2） */
+  remainingExecutions: number;
+  /** 执行玩家ID */
+  playerId: string;
 }
 
 /** 游戏动作 */

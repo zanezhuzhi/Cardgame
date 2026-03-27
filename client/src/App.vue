@@ -295,13 +295,30 @@
                 </div>
                 <div class="shiki-row2">
                   <span v-if="s.passive" class="shiki-skill-label">【触】{{s.passive.name}}</span>
-                  <span v-if="s.skill" class="shiki-skill-label">【启】{{s.skill.name}} 🔥{{s.skill.cost||0}}</span>
+                  <span v-if="s.skill" class="shiki-skill-label skill-cost-display">
+                    【启】{{s.skill.name}} 
+                    <template v-if="skillCostReduction > 0 && (s.skill.cost || 0) > 0">
+                      <span class="cost-original">🔥{{s.skill.cost}}</span>
+                      <span class="cost-reduced">🔥{{getActualSkillCost(s.skill.cost || 0)}}</span>
+                    </template>
+                    <template v-else>
+                      🔥{{s.skill.cost||0}}
+                    </template>
+                  </span>
                 </div>
               </div>
             </div>
           </div>
-          <div class="ghost-fire-bar">
-            <div v-for="i in 5" :key="i" class="fire-slot" :class="{active: i <= (player?.ghostFire||0)}"></div>
+          <!-- 鬼火槽 + 涅槃之火buff图标 -->
+          <div class="ghost-fire-row">
+            <div class="ghost-fire-bar">
+              <div v-for="i in 5" :key="i" class="fire-slot" :class="{active: i <= (player?.ghostFire||0)}"></div>
+            </div>
+            <!-- 涅槃之火buff图标 -->
+            <div v-if="skillCostReduction > 0" class="nirvana-buff-indicator" title="涅槃之火：式神技能鬼火消耗-1">
+              <span class="nirvana-icon">🔥</span>
+              <span class="nirvana-label">-{{skillCostReduction}}</span>
+            </div>
           </div>
         </div>
         
@@ -891,7 +908,15 @@
           <p>{{tooltip.passive.effect}}</p>
         </div>
         <div class="tooltip-skill" v-if="tooltip.skill">
-          <span class="skill-label">【{{tooltip.skill.name}} (🔥{{tooltip.skill.cost}})</span>
+          <span class="skill-label">
+            【{{tooltip.skill.name}} 
+            <template v-if="skillCostReduction > 0 && (tooltip.skill.cost || 0) > 0">
+              (<span class="cost-original">🔥{{tooltip.skill.cost}}</span> → <span class="cost-reduced">🔥{{getActualSkillCost(tooltip.skill.cost || 0)}}</span>)
+            </template>
+            <template v-else>
+              (🔥{{tooltip.skill.cost}})
+            </template>
+          </span>
           <p>{{tooltip.skill.effect}}</p>
         </div>
       </div>
@@ -1242,6 +1267,26 @@ watch(() => socketClient.gameState.value, (newState) => {
         cardSelectModal.selected = []
         cardSelectModal.resolve = (ids: string[]) => {
           socketClient.send('game:treeDemonDiscardResponse', { selectedId: ids[0] || '' })
+        }
+      }
+    } else if (newState.pendingChoice?.type === 'wheelMonkDiscard' && newState.pendingChoice.playerId === myPlayerId.value) {
+      // 监听 pendingChoice：轮入道弃牌选择
+      const pc = newState.pendingChoice as any
+      const player = newState.players.find(p => p.id === myPlayerId.value)
+      if (player) {
+        // 只显示符合条件的御魂（HP≤6）
+        const validCards = player.hand.filter((c: any) => pc.candidates?.includes(c.instanceId))
+        cardSelectModal.isServerMultiSelect = true
+        cardSelectModal.show = true
+        cardSelectModal.title = '🔄 轮入道：选择1张御魂弃置'
+        cardSelectModal.hint = pc.prompt || '选择1张御魂（效果将执行2次）'
+        cardSelectModal.candidates = validCards
+        cardSelectModal.minCount = 1
+        cardSelectModal.maxCount = 1
+        cardSelectModal.count = 1
+        cardSelectModal.selected = []
+        cardSelectModal.resolve = (ids: string[]) => {
+          socketClient.send('game:wheelMonkDiscardResponse', { selectedId: ids[0] || '' })
         }
       }
     } else if (newState.pendingChoice?.type === 'rinyuChoice' && newState.pendingChoice.playerId === myPlayerId.value) {
@@ -2516,10 +2561,25 @@ const activeBuffs = computed(() => {
       buffs.push({ type: b.type, label: '退治→手牌' })
     } else if (b.type === 'COST_REDUCTION') {
       buffs.push({ type: b.type, label: `🔥-${b.value}` })
+    } else if (b.type === 'SKILL_COST_REDUCTION') {
+      buffs.push({ type: b.type, label: `🔥技能-${b.value}` })
     }
   }
   return buffs
 })
+
+// 涅槃之火技能减费效果计算（多张叠加）
+const skillCostReduction = computed(() => {
+  const tempBuffs = player.value?.tempBuffs || []
+  return tempBuffs
+    .filter((b: any) => b.type === 'SKILL_COST_REDUCTION')
+    .reduce((sum: number, b: any) => sum + (b.value || 0), 0)
+})
+
+// 计算实际技能消耗（考虑涅槃之火减费）
+function getActualSkillCost(baseCost: number): number {
+  return Math.max(0, baseCost - skillCostReduction.value)
+}
 
 const phaseText = computed(() => {
   const p = state.value?.turnPhase
@@ -4955,11 +5015,18 @@ async function confirmReplaceShikigami() {
   gap:calc(var(--s) * 10);
   padding:calc(var(--s) * 10);
 }
+/* 鬼火槽 + buff图标的容器 */
+.ghost-fire-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--s) * 12);
+  margin-top: auto;
+  padding-bottom: calc(var(--s) * 10);
+}
 .ghost-fire-bar{
   display:flex;
   gap:calc(var(--s) * 5);
-  margin-top:auto;
-  padding-bottom:calc(var(--s) * 10);
 }
 .fire-slot{
   width:calc(var(--s) * 40);
@@ -5029,6 +5096,54 @@ async function confirmReplaceShikigami() {
 .shiki-skill-label{
   font-size:calc(var(--s) * 10);
   color:#c8b896;
+}
+
+/* 涅槃之火减费显示样式 */
+.skill-cost-display {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--s) * 2);
+}
+.cost-original {
+  text-decoration: line-through;
+  color: #888;
+  opacity: 0.6;
+}
+.cost-reduced {
+  color: #4CAF50;
+  font-weight: bold;
+  text-shadow: 0 0 calc(var(--s) * 4) rgba(76, 175, 80, 0.6);
+  animation: cost-glow 1.5s ease-in-out infinite alternate;
+}
+@keyframes cost-glow {
+  from { text-shadow: 0 0 calc(var(--s) * 4) rgba(76, 175, 80, 0.4); }
+  to { text-shadow: 0 0 calc(var(--s) * 8) rgba(76, 175, 80, 0.8); }
+}
+
+/* 涅槃之火buff图标（与鬼火槽平行显示） */
+.nirvana-buff-indicator {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--s) * 2);
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.2), rgba(76, 175, 80, 0.1));
+  border: calc(var(--s) * 1) solid #4CAF50;
+  border-radius: calc(var(--s) * 20);
+  padding: calc(var(--s) * 6) calc(var(--s) * 12);
+  animation: nirvana-pulse 2s ease-in-out infinite;
+}
+@keyframes nirvana-pulse {
+  0%, 100% { box-shadow: 0 0 calc(var(--s) * 4) rgba(76, 175, 80, 0.3); }
+  50% { box-shadow: 0 0 calc(var(--s) * 8) rgba(76, 175, 80, 0.6); }
+}
+.nirvana-icon {
+  font-size: calc(var(--s) * 18);
+  filter: drop-shadow(0 0 calc(var(--s) * 3) rgba(255, 107, 53, 0.6));
+}
+.nirvana-label {
+  font-size: calc(var(--s) * 16);
+  font-weight: bold;
+  color: #4CAF50;
+  text-shadow: 0 0 calc(var(--s) * 3) rgba(76, 175, 80, 0.5);
 }
 
 /* 牌库面板 - 移入式神区内部 */

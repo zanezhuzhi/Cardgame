@@ -1,8 +1,9 @@
 # yokai_026_针女
 
-> **文档版本**: v1.0  
+> **文档版本**: v2.0  
 > **卡牌ID**: yokai_026  
-> **最后更新**: 2026年3月
+> **最后更新**: 2026年3月  
+> **框架依赖**: TempBuff 系统 (ON_SKILL_USED), TurnHistory (usedSkills)
 
 ---
 

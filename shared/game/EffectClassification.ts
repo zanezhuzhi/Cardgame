@@ -39,7 +39,7 @@ export const HARASSMENT_CARDS: EffectClassification[] = [
   // 妖怪卡 - 妨害效果
   { cardId: 'yokai_007', cardName: '赤舌', category: 'harassment', description: '对手从弃牌堆选牌置于牌库顶' },
   { cardId: 'yokai_008', cardName: '魅妖', category: 'harassment', description: '使用对手牌库顶符合条件的效果' },
-  { cardId: 'yokai_015', cardName: '雪幽魂', category: 'harassment', description: '对手弃置恶评或获得恶评' },
+  { cardId: 'yokai_018', cardName: '雪幽魂', category: 'harassment', description: '对手弃置恶评或获得恶评' },
   { cardId: 'yokai_016', cardName: '魍魉之匣', category: 'harassment', description: '每名对手获得1张恶评' },
   { cardId: 'yokai_024', cardName: '返魂香', category: 'harassment', description: '对手弃置手牌或获得恶评' },
   { cardId: 'yokai_025', cardName: '镇墓兽', category: 'harassment', description: '指定禁止退治的目标' },

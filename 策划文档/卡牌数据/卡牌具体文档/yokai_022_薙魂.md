@@ -1,5 +1,12 @@
 # yokai_022_薙魂
 
+> **文档版本**: v2.0  
+> **卡牌ID**: yokai_022  
+> **最后更新**: 2026年3月  
+> **框架依赖**: TurnHistory (playedCards 统计), onSelectCards 回调
+
+---
+
 ## 📋 基础信息
 
 | 属性 | 值 |

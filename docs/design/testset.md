@@ -146,3 +146,85 @@ cd server && npm test
 
 ---
 
+## 8) 开发问题与注意事项汇总
+
+> 以下是开发过程中遇到的典型问题和设计陷阱，用自然语言描述便于后续开发者理解和避免。
+
+### 8.1 架构层面的"双重实现"陷阱
+
+**问题描述**：在项目早期，`shared/game/effects/YokaiEffects.ts` 和 `server/src/game/MultiplayerGame.ts` 中分别实现了相同卡牌效果的逻辑。这导致测试只覆盖了 shared 层的纯函数，而服务端的 switch-case 硬编码逻辑从未被验证。
+
+**典型表现**：树妖、日女巳时、蚌精等卡牌在单元测试中全部通过，但实际游戏中行为错误（如交互选择被跳过）。
+
+**根因分析**：服务端直接通过 switch-case 执行效果，绕过了 shared 层定义的带交互的完整逻辑。
+
+**解决方案**：
+- 确保服务端调用 `shared` 层的 `executeYokaiEffect()` / `ShikigamiSkillEngine` 统一入口
+- 任何需要玩家交互的效果必须通过 `pendingChoice` 状态机协调
+- 新增效果时禁止在服务端重复实现相同逻辑
+
+---
+
+### 8.2 pendingChoice 交互机制的三处同步
+
+**问题描述**：每当新增一种 pendingChoice 类型（如 `treeDemonDiscard`、`bangJingExile`），必须同时修改三个位置，否则交互流程会断裂。
+
+**必改位置**：
+1. `server/src/game/MultiplayerGame.ts` — 设置 `pendingChoice` + 新增 `handleXxxResponse()` 处理函数
+2. `server/src/socket/SocketServer.ts` — 新增 `socket.on('game:xxxResponse')` 事件监听
+3. `client/src/App.vue` — 在 `watch(gameState)` 中添加对应 UI 弹窗逻辑
+
+**防遗漏建议**：在卡牌具体文档中预先定义所需的 pendingChoice 类型，开发时对照检查。
+
+---
+
+### 8.3 妖怪【触】被动技能的统一检测
+
+**问题描述**：部分妖怪（如树妖、食发鬼、影鳄）拥有"在弃牌堆时触发"的【触】效果。早期各处 `discard.push()` 调用分散，未统一检测【触】导致效果遗漏。
+
+**解决方案**：将弃牌操作重构为 `discardCard(card, source)` 原子函数，内置【触】检测逻辑。所有弃牌操作必须通过此函数执行。
+
+---
+
+### 8.4 牌库操作后的可见性同步
+
+**问题描述**：赤舌等卡牌会将牌置顶并"公开给对手查看"。如果仅执行 `deck.unshift()` 而不更新 `revealedDeckCards`，对手将看不到应公开的信息。
+
+**解决方案**：任何"公开查看"类效果必须同时更新 `revealedDeckCards` 数据结构，确保客户端正确渲染对手的已知牌信息。
+
+---
+
+### 8.5 Vue 响应式陷阱
+
+**问题描述**：聊天界面的自动滚动功能失效，原因是 `userIsAtBottom` 被定义为普通 JavaScript 变量而非 `ref()`，导致响应式追踪失败。
+
+**通用建议**：
+- 任何需要在模板中使用或在 watch/computed 中追踪的变量必须使用 `ref()` 或 `reactive()`
+- 在 `onMounted` 中初始化涉及 DOM 操作的状态
+
+---
+
+### 8.6 技术框架文档索引
+
+当前已建立的技术框架文档，涵盖了各类卡牌的实现规范：
+
+| 框架 | 文档 | 说明 |
+|------|------|------|
+| 式神引擎 | [shikigami-framework.md](shikigami-framework.md) | 24个式神的技能引擎、事件钩子、妨害抵抗管线 |
+| 妖怪效果 | [yokai-framework.md](yokai-framework.md) | 38个妖怪的效果注册、EffectContext 上下文 |
+| 鬼王效果 | [boss-framework.md](boss-framework.md) | 10个鬼王的阶段系统、来袭/御魂效果 |
+
+---
+
+### 8.7 待解决的技术债务
+
+| 优先级 | 问题 | 影响范围 | 备注 |
+|:------:|------|----------|------|
+| 🔴高 | 伤害来源类型系统 | 镜姬【妖】需区分阴阳术伤害/其他伤害 | 需实现 `DamageSource` 枚举 |
+| 🔴高 | 妨害/来袭效果分类标签 | 青女房/铮等防御型卡牌 | 需实现 `EffectTag` 标签系统 |
+| 🟡中 | 回合历史记录系统 | 三味/破势/薙魂等统计型卡牌 | 需在 GameState 添加 TurnHistory |
+| 🟡中 | 动态HP计算系统 | 网切临时HP减益 | 需实现 `getEffectiveHp()` |
+| 🟢低 | 多人模式交互请求 | RemoteAdapter.ts | 当前 TODO 标记 |
+
+---
+

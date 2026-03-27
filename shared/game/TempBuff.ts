@@ -33,7 +33,20 @@ export type TempBuffType =
   | 'DISCARD_FOR_DAMAGE'             // 弃牌触发加伤（白狼冥想）
 
   // ----- 回合结构相关 -----
-  | 'SKIP_CLEANUP';                  // 跳过清理阶段（食梦貘沉睡）
+  | 'SKIP_CLEANUP'                   // 跳过清理阶段（食梦貘沉睡）
+
+  // ----- 式神技能相关（新增） -----
+  | 'SKILL_COST_REDUCTION'           // 式神技能鬼火消耗-N（涅槃之火）
+  | 'HARASS_COUNT'                   // 本回合妨害次数追踪（HarassmentPipeline 用）
+  | 'EXTRA_TURN'                     // 额外回合（追月神觉醒技）
+  | 'DRAW_BONUS'                     // 本回合抓牌额外+N（花鸟卷抵抗后的补偿等）
+  | 'KACHOU_RESIST_USED'             // 花鸟卷抵抗已使用标记（每回合限1次）
+  | 'USHI_HARASS_REWARD'             // 丑时之女：首次妨害时抓牌+1
+  | 'SLEEP_STATE'                    // 食梦貘沉睡状态标记（区分 SKIP_CLEANUP 的语义）
+  | 'YUMEKUI_DREAM_SHIELD'           // 食梦貘梦境保护（沉睡中受妨害弃牌触发）
+  | 'SKILL_DAMAGE_PER_FIRE'          // 按鬼火数加伤（书翁墨龙：每消耗N鬼火+M伤害）
+  | 'KILL_DRAW_BONUS'                // 退治妖怪时抓牌（山兔蹦跳：每退治抓+1牌）
+  | 'IMMUNITY_HARASSMENT';           // 妨害完全免疫（青女房展示后本次免疫标记）
 
 // ============ 基础 Buff 结构 ============
 
@@ -112,6 +125,75 @@ export interface SkipCleanupBuff extends BaseTempBuff {
   type: 'SKIP_CLEANUP';
 }
 
+// ----- 式神技能相关（新增） -----
+
+/** 式神技能鬼火消耗减少（涅槃之火） */
+export interface SkillCostReductionBuff extends BaseTempBuff {
+  type: 'SKILL_COST_REDUCTION';
+  value: number;            // 减少的鬼火消耗量（可叠加）
+  source?: string;          // 来源卡牌名（如 '涅槃之火'）
+}
+
+/** 本回合妨害次数追踪（HarassmentPipeline 内部使用） */
+export interface HarassCountBuff extends BaseTempBuff {
+  type: 'HARASS_COUNT';
+  value: number;            // 本回合妨害次数
+}
+
+/** 额外回合（追月神觉醒技） */
+export interface ExtraTurnBuff extends BaseTempBuff {
+  type: 'EXTRA_TURN';
+}
+
+/** 本回合抓牌额外+N */
+export interface DrawBonusBuff extends BaseTempBuff {
+  type: 'DRAW_BONUS';
+  bonus: number;            // 抓牌时额外+N
+  remainingCount: number;   // -1 = 无限次
+}
+
+/** 花鸟卷抵抗已使用标记（每回合限1次） */
+export interface KachouResistUsedBuff extends BaseTempBuff {
+  type: 'KACHOU_RESIST_USED';
+}
+
+/** 丑时之女：首次妨害时抓牌+1 */
+export interface UshiHarassRewardBuff extends BaseTempBuff {
+  type: 'USHI_HARASS_REWARD';
+  drawBonus: number;        // 抓牌数（默认1）
+  triggered: boolean;       // 是否已触发
+}
+
+/** 食梦貘沉睡状态标记 */
+export interface SleepStateBuff extends BaseTempBuff {
+  type: 'SLEEP_STATE';
+}
+
+/** 食梦貘梦境保护（沉睡中受妨害弃牌触发） */
+export interface YumekuiDreamShieldBuff extends BaseTempBuff {
+  type: 'YUMEKUI_DREAM_SHIELD';
+  discardCount: number;     // 受妨害时弃牌数
+}
+
+/** 按鬼火数加伤（书翁墨龙） */
+export interface SkillDamagePerFireBuff extends BaseTempBuff {
+  type: 'SKILL_DAMAGE_PER_FIRE';
+  damagePerFire: number;    // 每消耗1鬼火+M伤害
+  firePaid: number;         // 已消耗的鬼火数
+}
+
+/** 退治妖怪时抓牌（山兔蹦跳） */
+export interface KillDrawBonusBuff extends BaseTempBuff {
+  type: 'KILL_DRAW_BONUS';
+  drawCount: number;        // 每次退治抓N张（山兔：1）
+  remainingCount: number;   // -1 = 无限次
+}
+
+/** 妨害完全免疫（青女房展示后的标记） */
+export interface ImmunityHarassmentBuff extends BaseTempBuff {
+  type: 'IMMUNITY_HARASSMENT';
+}
+
 // ============ 联合类型 ============
 
 export type TempBuff =
@@ -125,7 +207,19 @@ export type TempBuff =
   | NextYokaiDoubleBuff
   | FirstKillToHandBuff
   | DiscardForDamageBuff
-  | SkipCleanupBuff;
+  | SkipCleanupBuff
+  // 式神技能相关（新增）
+  | SkillCostReductionBuff
+  | HarassCountBuff
+  | ExtraTurnBuff
+  | DrawBonusBuff
+  | KachouResistUsedBuff
+  | UshiHarassRewardBuff
+  | SleepStateBuff
+  | YumekuiDreamShieldBuff
+  | SkillDamagePerFireBuff
+  | KillDrawBonusBuff
+  | ImmunityHarassmentBuff;
 
 // ============ TempBuff 管理器 ============
 
@@ -320,6 +414,16 @@ export class TempBuffManager {
   /** 是否需要跳过清理阶段（食梦貘） */
   shouldSkipCleanup(): boolean {
     return this.has('SKIP_CLEANUP');
+  }
+
+  /**
+   * 获取式神技能消耗减少量（涅槃之火）
+   * 多张叠加时累加所有 value
+   * @returns 总减少量（用于计算实际消耗 = 原消耗 - 返回值，最低为 0）
+   */
+  getSkillCostReduction(): number {
+    const buffs = this.get<SkillCostReductionBuff>('SKILL_COST_REDUCTION');
+    return buffs.reduce((sum, b) => sum + b.value, 0);
   }
 
   // ── 序列化 ──────────────────────────────────────────────────────

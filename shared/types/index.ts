@@ -9,6 +9,12 @@ export * from './cards';
 // 导出游戏状态类型
 export * from './game';
 
+// 导出 PendingChoice 类型
+export * from './pendingChoice';
+
+// 导出式神技能引擎类型
+export * from './shikigami';
+
 // 房间相关类型
 export interface RoomInfo {
   id: string;

@@ -1,5 +1,10 @@
 # yokai_036_阴摩罗
 
+> **文档版本**: v2.0  
+> **卡牌ID**: yokai_036  
+> **最后更新**: 2026年3月  
+> **框架依赖**: EndOfTurnEffects 系统, onSelectCards 回调
+
 ---
 
 ## 📋 基础信息

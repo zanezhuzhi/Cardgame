@@ -6,6 +6,7 @@
 
 import type { CardInstance, OnmyojiCard, ShikigamiCard, BossCard } from './cards';
 import type { TempBuff } from '../game/TempBuff';
+import type { PendingChoice } from './pendingChoice';
 
 // ============ 伤害来源系统 ============
 
@@ -114,6 +115,12 @@ export interface ShikigamiState {
   cardId: string;
   isExhausted: boolean;     // 是否已行动
   markers: Record<string, number>;  // 指示物
+
+  /** 本回合各技能已使用次数 { skillId: count } */
+  skillUsesThisTurn: Record<string, number>;
+
+  /** 状态标记（如 'sleep' 沉睡等） */
+  statusFlags: string[];
 }
 
 // ============ 牌库展示系统 ============
@@ -212,18 +219,23 @@ export interface GameState {
   
   // ====== 玩家选择等待 ======
   /** 等待玩家做出选择（御魂效果、式神技能等） */
-  pendingChoice?: {
-    /** 选择类型 */
-    type: 'salvageChoice' | 'cardSelect' | 'yokaiTarget' | 'yokaiChoice' | 'selectCardsMulti' | 'selectCardPutTop' | 'meiYaoSelect' | 'akajitaSelect';
-    /** 等待的玩家ID */
-    playerId: string;
-    /** 选择相关的卡牌信息 */
-    card?: CardInstance;
-    /** 提示文本 */
-    prompt?: string;
-    /** 可选项 */
-    options?: string[];
-  };
+  pendingChoice?: PendingChoice;
+  
+  // ====== 轮入道队列执行 ======
+  /** 轮入道效果执行队列（完整执行N次，每次包含交互选择） */
+  wheelMonkQueue?: WheelMonkQueue;
+}
+
+/** 轮入道效果执行队列 */
+export interface WheelMonkQueue {
+  /** 被弃置的御魂名称 */
+  cardName: string;
+  /** 被弃置的御魂卡牌ID */
+  cardId: string;
+  /** 剩余执行次数（初始值2） */
+  remainingExecutions: number;
+  /** 执行玩家ID */
+  playerId: string;
 }
 
 // ============ 游戏日志 ============

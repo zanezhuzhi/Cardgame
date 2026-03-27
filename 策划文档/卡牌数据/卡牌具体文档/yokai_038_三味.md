@@ -1,5 +1,10 @@
 # yokai_038_三味
 
+> **文档版本**: v2.0  
+> **卡牌ID**: yokai_038  
+> **最后更新**: 2026年3月  
+> **框架依赖**: DiscardTrigger 系统, TurnHistory (playedCards/usedGhostFire/usedSpells)
+
 ---
 
 ## 📋 基础信息

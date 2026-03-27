@@ -1952,6 +1952,87 @@ describe('骰子鬼', () => {
       expect(aiDecide_骰子鬼_退治([])).toBe('');
     });
   });
+
+  describe('🔴 边界测试：多次使用骰子鬼', () => {
+    it('超度2次退治2只妖怪', async () => {
+      // 准备3张手牌
+      player.hand = [
+        { ...createTestCard('yokai', '赤舌'), hp: 2, charm: 1 },
+        { ...createTestCard('spell', '基础术式'), hp: 0, charm: 0 },
+        { ...createTestCard('yokai', '灯笼鬼'), hp: 3, charm: 0 }
+      ];
+      
+      // 场上放2只HP=2和HP=4的妖怪
+      const yokai2 = { ...createTestCard('yokai', '天邪鬼青'), hp: 2, charm: 0, instanceId: 'y-2' };
+      const yokai4 = { ...createTestCard('yokai', '骰子鬼'), hp: 4, charm: 1, instanceId: 'y-4' };
+      gameState.field.wanderingYokai = [yokai2, yokai4];
+      
+      // 第一次：超度HP=2的赤舌，可退治HP≤4的妖怪
+      const result1 = await executeYokaiEffect('骰子鬼', {
+        player, gameState,
+        card: createTestCard('yokai', '骰子鬼'),
+        onSelectCards: async (cards) => {
+          const card = cards.find(c => c.name === '赤舌');
+          return card ? [card.instanceId] : [];
+        },
+        onSelectTarget: async (targets) => {
+          return targets[0]?.instanceId || '';
+        }
+      });
+      
+      expect(result1.success).toBe(true);
+      expect(player.exiled.length).toBe(1);
+      expect(player.exiled[0]!.name).toBe('赤舌');
+      expect(player.hand.length).toBe(2);
+      
+      // 场上应只剩1只妖怪
+      expect(gameState.field.wanderingYokai.length).toBe(1);
+      
+      // 第二次：超度HP=3的灯笼鬼，可退治HP≤5的妖怪
+      const result2 = await executeYokaiEffect('骰子鬼', {
+        player, gameState,
+        card: createTestCard('yokai', '骰子鬼'),
+        onSelectCards: async (cards) => {
+          const card = cards.find(c => c.name === '灯笼鬼');
+          return card ? [card.instanceId] : [];
+        },
+        onSelectTarget: async (targets) => {
+          return targets[0]?.instanceId || '';
+        }
+      });
+      
+      expect(result2.success).toBe(true);
+      expect(player.exiled.length).toBe(2);
+      expect(player.hand.length).toBe(1); // 只剩基础术式
+      
+      // 场上应无妖怪
+      expect(gameState.field.wanderingYokai.length).toBe(0);
+    });
+    
+    it('超度高HP牌可以退治更强的妖怪', async () => {
+      // 准备1张HP=5的妖怪
+      const highHpCard = { ...createTestCard('yokai', '心眼'), hp: 5, charm: 0 };
+      player.hand = [highHpCard];
+      
+      // 场上放HP=7的妖怪（需要超度HP≥5的牌才能退治）
+      const yokai7 = { ...createTestCard('yokai', '幽谷响'), hp: 7, charm: 1, instanceId: 'y-7' };
+      gameState.field.wanderingYokai = [yokai7];
+      
+      const result = await executeYokaiEffect('骰子鬼', {
+        player, gameState,
+        card: createTestCard('yokai', '骰子鬼'),
+        onSelectTarget: async (targets) => {
+          return targets[0]?.instanceId || '';
+        }
+      });
+      
+      expect(result.success).toBe(true);
+      expect(player.exiled.length).toBe(1);
+      expect(player.exiled[0]!.name).toBe('心眼');
+      // HP=5的牌可以退治HP≤7的妖怪
+      expect(gameState.field.wanderingYokai.length).toBe(0);
+    });
+  });
 });
 describe('涅槃之火', () => {
   let player: PlayerState;
@@ -2320,6 +2401,61 @@ describe('伤魂鸟', () => {
     expect(result.success).toBe(true);
     expect(player.damage).toBe(0);
   });
+
+  // 边界测试：两次独立超度
+  it('🔴 两次使用伤魂鸟，各自独立超度和计算伤害', async () => {
+    // 准备6张手牌
+    player.hand = [
+      createTestCard('spell', '牌1'),
+      createTestCard('spell', '牌2'),
+      createTestCard('spell', '牌3'),
+      createTestCard('spell', '牌4'),
+      createTestCard('spell', '牌5'),
+      createTestCard('spell', '牌6')
+    ];
+    
+    // 第一次超度2张
+    const result1 = await executeYokaiEffect('伤魂鸟', {
+      player, gameState,
+      card: createTestCard('yokai', '伤魂鸟'),
+      onSelectCards: async (cards) => cards.slice(0, 2).map(c => c.instanceId)
+    });
+    
+    expect(result1.success).toBe(true);
+    expect(player.exiled.length).toBe(2);
+    expect(player.damage).toBe(4); // 2 * 2
+    expect(player.hand.length).toBe(4);
+    
+    // 第二次超度3张
+    const result2 = await executeYokaiEffect('伤魂鸟', {
+      player, gameState,
+      card: createTestCard('yokai', '伤魂鸟'),
+      onSelectCards: async (cards) => cards.slice(0, 3).map(c => c.instanceId)
+    });
+    
+    expect(result2.success).toBe(true);
+    expect(player.exiled.length).toBe(5); // 2 + 3
+    expect(player.damage).toBe(10); // 4 + 6 (3*2)
+    expect(player.hand.length).toBe(1);
+  });
+  
+  it('🔴 可以选择超度0张牌（不增加伤害）', async () => {
+    player.hand = [
+      createTestCard('spell', '牌1'),
+      createTestCard('spell', '牌2')
+    ];
+    
+    const result = await executeYokaiEffect('伤魂鸟', {
+      player, gameState,
+      card: createTestCard('yokai', '伤魂鸟'),
+      onSelectCards: async () => [] // 选择0张
+    });
+    
+    expect(result.success).toBe(true);
+    expect(player.exiled.length).toBe(0);
+    expect(player.damage).toBe(0);
+    expect(player.hand.length).toBe(2); // 手牌不变
+  });
 });
 
 // ============================================
@@ -2431,6 +2567,165 @@ describe('三味', () => {
 });
 
 // ============================================
+// 雪幽魂测试
+// ============================================
+describe('雪幽魂', () => {
+  let player: PlayerState;
+  let opponent: PlayerState;
+  let gameState: GameState;
+
+  beforeEach(() => {
+    player = createTestPlayer();
+    player.id = 'player1';
+    player.deck = [createTestCard('spell'), createTestCard('spell')];
+    
+    opponent = createTestPlayer();
+    opponent.id = 'opponent1';
+    opponent.hand = [];
+    
+    gameState = createTestGameState(player);
+    gameState.players = [player, opponent];
+    
+    // 初始化恶评牌库
+    gameState.field.penaltyPile = [
+      {
+        instanceId: 'penalty_1',
+        cardId: 'penalty_001',
+        cardType: 'penalty',
+        name: '农夫',
+        hp: 0,
+        maxHp: 0
+      }
+    ];
+  });
+
+  it('🟢 正常流程：打出者抓牌+1', async () => {
+    const initialHandCount = player.hand.length;
+    const initialDeckCount = player.deck.length;
+    
+    const result = await executeYokaiEffect('雪幽魂', {
+      player, gameState,
+      card: createTestCard('yokai', '雪幽魂')
+    });
+    
+    expect(result.success).toBe(true);
+    expect(player.hand.length).toBe(initialHandCount + 1);
+    expect(player.deck.length).toBe(initialDeckCount - 1);
+  });
+
+  it('🟢 对手无恶评时，获得1张恶评到弃牌堆', async () => {
+    opponent.hand = [];
+    opponent.discard = [];
+    const penaltyPileCount = gameState.field.penaltyPile!.length;
+    
+    await executeYokaiEffect('雪幽魂', {
+      player, gameState,
+      card: createTestCard('yokai', '雪幽魂')
+    });
+    
+    // 【获得】规则：恶评进入对手弃牌堆
+    expect(opponent.hand.length).toBe(0); // 手牌不变
+    expect(opponent.discard.length).toBe(1); // 弃牌堆+1
+    expect(opponent.discard[0]!.cardType).toBe('penalty');
+    expect(gameState.field.penaltyPile!.length).toBe(penaltyPileCount - 1);
+  });
+
+  it('🟢 对手有1张恶评时，自动弃置该恶评', async () => {
+    const existingPenalty: CardInstance = {
+      instanceId: 'existing_penalty',
+      cardId: 'penalty_001',
+      cardType: 'penalty',
+      name: '农夫',
+      hp: 0,
+      maxHp: 0
+    };
+    opponent.hand = [existingPenalty];
+    
+    await executeYokaiEffect('雪幽魂', {
+      player, gameState,
+      card: createTestCard('yokai', '雪幽魂')
+    });
+    
+    // 恶评从手牌移动到弃牌堆
+    expect(opponent.hand.length).toBe(0);
+    expect(opponent.discard.length).toBe(1);
+    expect(opponent.discard[0]!.instanceId).toBe('existing_penalty');
+  });
+
+  it('🟢 对手有多张恶评时，AI优先弃置农夫', async () => {
+    const farmer: CardInstance = {
+      instanceId: 'farmer_1',
+      cardId: 'penalty_001',
+      cardType: 'penalty',
+      name: '农夫',
+      hp: 0,
+      maxHp: 0
+    };
+    const samurai: CardInstance = {
+      instanceId: 'samurai_1',
+      cardId: 'penalty_002',
+      cardType: 'penalty',
+      name: '武士',
+      hp: 0,
+      maxHp: 0
+    };
+    opponent.hand = [samurai, farmer]; // 武士在前，农夫在后
+    
+    await executeYokaiEffect('雪幽魂', {
+      player, gameState,
+      card: createTestCard('yokai', '雪幽魂')
+    });
+    
+    // AI应弃置农夫（惩罚更低）
+    expect(opponent.hand.length).toBe(1);
+    expect(opponent.hand[0]!.cardId).toBe('penalty_002'); // 武士保留
+    expect(opponent.discard[0]!.cardId).toBe('penalty_001'); // 农夫被弃置
+  });
+
+  it('🟢 恶评牌库耗尽时，创建农夫（无限供应）', async () => {
+    opponent.hand = [];
+    opponent.discard = [];
+    gameState.field.penaltyPile = []; // 恶评牌库为空
+    
+    await executeYokaiEffect('雪幽魂', {
+      player, gameState,
+      card: createTestCard('yokai', '雪幽魂')
+    });
+    
+    // 仍然获得农夫（进入弃牌堆）
+    expect(opponent.discard.length).toBe(1);
+    expect(opponent.discard[0]!.cardType).toBe('penalty');
+    expect(opponent.discard[0]!.name).toBe('农夫');
+  });
+
+  it('🟢 多名对手都被处理', async () => {
+    const opponent2 = createTestPlayer();
+    opponent2.id = 'opponent2';
+    opponent2.hand = [];
+    opponent2.discard = [];
+    opponent.discard = [];
+    gameState.players = [player, opponent, opponent2];
+    
+    // 添加足够的恶评牌
+    gameState.field.penaltyPile = [
+      { instanceId: 'p1', cardId: 'penalty_001', cardType: 'penalty', name: '农夫', hp: 0, maxHp: 0 },
+      { instanceId: 'p2', cardId: 'penalty_001', cardType: 'penalty', name: '农夫', hp: 0, maxHp: 0 }
+    ];
+    
+    await executeYokaiEffect('雪幽魂', {
+      player, gameState,
+      card: createTestCard('yokai', '雪幽魂')
+    });
+    
+    // 两名对手都获得恶评（进入弃牌堆）
+    expect(opponent.discard.length).toBe(1);
+    expect(opponent2.discard.length).toBe(1);
+    expect(opponent.discard[0]!.cardType).toBe('penalty');
+    expect(opponent2.discard[0]!.cardType).toBe('penalty');
+  });
+});
+
+// ============================================
 // 新增测试：修复后的完整逻辑验证
 // ============================================
 describe('轮入道（递归执行）', () => {
@@ -2485,6 +2780,160 @@ describe('轮入道（递归执行）', () => {
     });
 
     expect(result.success).toBe(false);
+  });
+
+  // ========== 轮入道验收测试 ==========
+  
+  it('🟢 弃置日女巳时，两次可做不同选择', async () => {
+    const nvshishi = createTestCard('yokai', '日女巳时');
+    nvshishi.hp = 3;
+    player.hand = [nvshishi];
+    player.ghostFire = 2;
+    player.damage = 0;
+    
+    let callCount = 0;
+    const result = await executeYokaiEffect('轮入道', {
+      player, gameState,
+      card: createTestCard('yokai', '轮入道'),
+      onSelectCards: async (cards) => [cards[0]!.instanceId],
+      onChoice: async (options) => {
+        callCount++;
+        if (callCount === 1) return 0; // 第一次选择鬼火+1
+        return options.length - 1;      // 第二次选择伤害+2
+      }
+    });
+
+    expect(result.success).toBe(true);
+    expect(callCount).toBe(2);
+    expect(player.ghostFire).toBe(3); // 原2 + 1
+    expect(player.damage).toBe(2);    // +2
+  });
+
+  it('🟢 弃置涅槃之火，减费效果叠加两次', async () => {
+    const nirvana = createTestCard('yokai', '涅槃之火');
+    nirvana.hp = 4;
+    player.hand = [nirvana];
+    player.tempBuffs = [];
+
+    const result = await executeYokaiEffect('轮入道', {
+      player, gameState,
+      card: createTestCard('yokai', '轮入道'),
+      onSelectCards: async (cards) => [cards[0]!.instanceId]
+    });
+
+    expect(result.success).toBe(true);
+    // 涅槃之火效果：鬼火+1，技能费用-1
+    // 执行两次后：鬼火+2，费用应减少2
+    expect(player.ghostFire).toBe(4); // 原2 + 2
+    const costReductions = player.tempBuffs.filter(b => b.type === 'SKILL_COST_REDUCTION');
+    expect(costReductions.length).toBe(2); // 两次减费buff
+  });
+
+  it('🟢 弃置网切，HP减少效果不重复叠加（状态覆盖）', async () => {
+    const wangqie = createTestCard('yokai', '网切');
+    wangqie.hp = 4;
+    player.hand = [wangqie];
+    
+    // 场上放置妖怪
+    const fieldYokai = createTestCard('yokai', '灯笼鬼');
+    fieldYokai.hp = 4;
+    gameState.field.yokaiSlots = [fieldYokai, null, null, null, null, null];
+
+    const result = await executeYokaiEffect('轮入道', {
+      player, gameState,
+      card: createTestCard('yokai', '轮入道'),
+      onSelectCards: async (cards) => [cards[0]!.instanceId]
+    });
+
+    expect(result.success).toBe(true);
+    // 网切效果：场上生命≤6的妖怪生命-1
+    // 即使执行两次，HP减少应该是状态效果，不应该叠加到-2
+    const hpReductions = player.tempBuffs.filter(b => b.type === 'HP_REDUCTION');
+    expect(hpReductions.length).toBe(1); // 状态不叠加，只有1个
+  });
+
+  it('🟢 弃置生命正好为6的御魂', async () => {
+    const yokai6hp = createTestCard('yokai', '镜姬');
+    yokai6hp.hp = 6;
+    player.hand = [yokai6hp];
+
+    const result = await executeYokaiEffect('轮入道', {
+      player, gameState,
+      card: createTestCard('yokai', '轮入道'),
+      onSelectCards: async (cards) => [cards[0]!.instanceId]
+    });
+
+    expect(result.success).toBe(true);
+    expect(player.discard.some(c => c.name === '镜姬')).toBe(true);
+  });
+
+  it('🔴 生命>6的御魂不能被选择', async () => {
+    const yokai7hp = createTestCard('yokai', '幽谷响');
+    yokai7hp.hp = 7;
+    player.hand = [yokai7hp];
+
+    const result = await executeYokaiEffect('轮入道', {
+      player, gameState,
+      card: createTestCard('yokai', '轮入道')
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.message).toContain('没有符合条件');
+  });
+
+  it('🔴 手牌为空时失败', async () => {
+    player.hand = [];
+
+    const result = await executeYokaiEffect('轮入道', {
+      player, gameState,
+      card: createTestCard('yokai', '轮入道')
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  // ========== 【触】弃置触发测试 ==========
+  it('🟢 【触】弃置树妖时先触发抓牌+2，再执行两次树妖效果', async () => {
+    const treeDemon = createTestCard('yokai', '树妖');
+    treeDemon.hp = 5;
+    player.hand = [treeDemon];
+    player.deck = Array(10).fill(null).map(() => createTestCard('spell'));
+    
+    const result = await executeYokaiEffect('轮入道', {
+      player, gameState,
+      card: createTestCard('yokai', '轮入道'),
+      onSelectCards: async (cards) => [cards[0]!.instanceId]
+    });
+
+    expect(result.success).toBe(true);
+    // 【触】弃置抓牌+2 + 树妖效果(抓牌+2,弃置1)*2
+    // 初始手牌0 → 【触】+2 → 树妖效果1(+2,-1) → 树妖效果2(+2,-1) = 4张手牌
+    expect(player.hand.length).toBe(4);
+    // 弃牌堆: 树妖本身(1) + 树妖效果弃置(2) = 3张
+    expect(player.discard.length).toBe(3);
+    expect(player.discard[0]!.name).toBe('树妖'); // 轮入道弃置的树妖
+  });
+
+  it('🟢 【触】弃置三味时先触发抓牌+3，再执行两次三味效果', async () => {
+    const sanmi = createTestCard('yokai', '三味');
+    sanmi.hp = 4;
+    player.hand = [sanmi];
+    player.deck = Array(12).fill(null).map(() => createTestCard('spell'));
+    
+    // 三味效果: 本回合每使用阴阳术伤害+2（它不抓牌）
+    // 【触】弃置抓牌+3
+    const result = await executeYokaiEffect('轮入道', {
+      player, gameState,
+      card: createTestCard('yokai', '轮入道'),
+      onSelectCards: async (cards) => [cards[0]!.instanceId]
+    });
+
+    expect(result.success).toBe(true);
+    // 【触】弃置抓牌+3（三味效果不抓牌）
+    expect(player.hand.length).toBe(3);
+    // 三味添加了2次SPELL_DAMAGE_BONUS buff
+    const bonusBuffs = player.tempBuffs.filter(b => (b as any).source === '三味');
+    expect(bonusBuffs.length).toBe(2);
   });
 });
 

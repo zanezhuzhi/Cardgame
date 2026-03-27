@@ -54,10 +54,21 @@ Cardgame/
 - `策划文档/备忘录.md`：开发中零散需求与待办（随时追加，正式规格请写入对应专题文档）
 
 ### 技术（再看）
+
+**卡牌效果技术框架**
+
+| 框架 | 文档 | 说明 |
+|------|------|------|
+| 式神引擎 | [shikigami-framework.md](docs/design/shikigami-framework.md) | ShikigamiSkillEngine 架构、技能类型、事件钩子、妨害抵抗管线 |
+| 妖怪效果 | [yokai-framework.md](docs/design/yokai-framework.md) | YokaiEffects 注册模式、EffectContext 上下文、38个妖怪索引 |
+| 鬼王效果 | [boss-framework.md](docs/design/boss-framework.md) | Boss阶段系统、来袭/御魂效果、10个鬼王索引 |
+
+**其他技术文档**
+
 - `tools/README.md`：根目录工具索引（手测清单等，与主界面解耦）
 - `docs/design/testset.md`：测试开关、测试流程、GM测试(测试中已暴露的问题)
 - `docs/MULTIPLAYER_ARCHITECTURE.md`：多人架构
-- `docs/CLIENT_VISUAL_FX_TECH_PLAN.md`：逻辑稳定后的美化阶段——Vue 与 Pixi 分层、粒子与资源策略（对标 2D 卡牌战斗反馈）
+- `docs/CLIENT_VISUAL_FX_TECH_PLAN.md`：逻辑稳定后的美化阶段——Vue 与 Pixi 分层、粒子与资源策略
 - `PROGRESS.md`：当前开发进度
 
 ### 关键代码

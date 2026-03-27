@@ -155,10 +155,10 @@ function findClaudePath(): string {
  */
 function callClaude(prompt: string): string {
   const claudePath = findClaudePath();
-  // 使用 claude -p 模式（print mode，非交互）
+  // 使用 claude -p --bare 模式（非交互 + 使用 ANTHROPIC_API_KEY 认证）
   const result = spawnSync(
     claudePath,
-    ['-p', '--output-format', 'text'],
+    ['-p', '--bare', '--output-format', 'text'],
     {
       input: prompt,
       encoding: 'utf-8',

@@ -113,14 +113,51 @@ function buildUserMessage(
 }
 
 /**
+ * 查找 claude CLI 的可执行路径
+ * 按优先级尝试: PATH > npm global bin > 常见安装路径
+ */
+function findClaudePath(): string {
+  // 1. 先试 PATH 中的 claude
+  try {
+    const where = spawnSync('where', ['claude'], { encoding: 'utf-8', timeout: 5000 });
+    if (where.status === 0 && where.stdout.trim()) {
+      const first = where.stdout.trim().split(/\r?\n/)[0];
+      console.log(`🔍 在 PATH 中找到 claude: ${first}`);
+      return first;
+    }
+  } catch { /* ignore */ }
+
+  // 2. 常见 npm global 安装路径（Windows）
+  const candidates = [
+    join(process.env.APPDATA || '', 'npm', 'claude.cmd'),
+    join(process.env.USERPROFILE || '', 'AppData', 'Roaming', 'npm', 'claude.cmd'),
+    'C:\\Users\\zhuzhi\\AppData\\Roaming\\npm\\claude.cmd',
+  ];
+
+  for (const p of candidates) {
+    try {
+      if (require('fs').existsSync(p)) {
+        console.log(`🔍 在常见路径找到 claude: ${p}`);
+        return p;
+      }
+    } catch { /* ignore */ }
+  }
+
+  // 3. fallback: 直接返回 'claude'，让系统自己找
+  console.log('🔍 未找到 claude 完整路径，尝试直接调用...');
+  return 'claude';
+}
+
+/**
  * 调用本地 Claude CLI（claude 命令行工具）
  * 需要先安装: npm install -g @anthropic-ai/claude-code
  * 或使用 claude 官方 CLI: https://docs.anthropic.com/zh-CN/docs/claude-cli
  */
 function callClaude(prompt: string): string {
+  const claudePath = findClaudePath();
   // 使用 claude -p 模式（print mode，非交互）
   const result = spawnSync(
-    'claude',
+    claudePath,
     ['-p', '--output-format', 'text'],
     {
       input: prompt,
@@ -128,11 +165,12 @@ function callClaude(prompt: string): string {
       env: { ...process.env },
       timeout: 5 * 60 * 1000, // 5分钟超时
       maxBuffer: 10 * 1024 * 1024,
+      shell: true, // 用 shell 执行以支持 .cmd 文件
     }
   );
 
   if (result.error) {
-    throw new Error(`调用 Claude CLI 失败: ${result.error.message}\n提示: 请确认已安装 claude CLI 并配置 ANTHROPIC_API_KEY`);
+    throw new Error(`调用 Claude CLI 失败: ${result.error.message}\nclaude 路径: ${claudePath}\n提示: 请确认已安装 claude CLI 并配置 ANTHROPIC_API_KEY`);
   }
 
   if (result.status !== 0) {

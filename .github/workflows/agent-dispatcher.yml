@@ -36,7 +36,6 @@ permissions:
 defaults:
   run:
     shell: cmd
-    working-directory: d:\Cardgame
 
 jobs:
   dispatch:
@@ -51,8 +50,9 @@ jobs:
       # ── 1. 验证本地项目目录存在 ──────────────────────────────────────────────
       - name: 验证本地项目目录
         run: |
+          cd /d d:\Cardgame
           echo 📂 工作目录: %CD%
-          if not exist "d:\Cardgame\shared" (
+          if not exist "shared" (
             echo ❌ 本地项目目录不存在
             exit /b 1
           )
@@ -61,29 +61,36 @@ jobs:
       # ── 2. 解析评论，确定目标 Agent ─────────────────────────────────────────
       - name: 解析目标 Agent
         id: parse
-        shell: pwsh
+        shell: bash
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          $body = $env:COMMENT_BODY
-          $agent = ""
+          BODY="$COMMENT_BODY"
+          AGENT=""
 
-          if ($body -match "^/dev\s+\S+") { $agent = "pm" }
-          elseif ($body -match "^@pm\b") { $agent = "pm" }
-          elseif ($body -match "^@designer\b") { $agent = "designer" }
-          elseif ($body -match "^@programmer\b") { $agent = "programmer" }
-          elseif ($body -match "^@reviewer\b") { $agent = "reviewer" }
-          elseif ($body -match "^@qa\b") { $agent = "qa" }
+          if echo "$BODY" | grep -qE "^/dev "; then
+            AGENT="pm"
+          elif echo "$BODY" | grep -qiE "^@pm"; then
+            AGENT="pm"
+          elif echo "$BODY" | grep -qiE "^@designer"; then
+            AGENT="designer"
+          elif echo "$BODY" | grep -qiE "^@programmer"; then
+            AGENT="programmer"
+          elif echo "$BODY" | grep -qiE "^@reviewer"; then
+            AGENT="reviewer"
+          elif echo "$BODY" | grep -qiE "^@qa"; then
+            AGENT="qa"
+          fi
 
-          if ($agent -eq "") {
-            Write-Host "ℹ️  评论不包含 Agent 指令，跳过。"
-            "agent=" >> $env:GITHUB_OUTPUT
-            "skip=true" >> $env:GITHUB_OUTPUT
-          } else {
-            Write-Host "✅ 目标 Agent: $agent"
-            "agent=$agent" >> $env:GITHUB_OUTPUT
-            "skip=false" >> $env:GITHUB_OUTPUT
-          }
+          if [ -z "$AGENT" ]; then
+            echo "ℹ️  评论不包含 Agent 指令，跳过。"
+            echo "agent=" >> "$GITHUB_OUTPUT"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "✅ 目标 Agent: $AGENT"
+            echo "agent=$AGENT" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
       # ── 3. 设置 Node.js ─────────────────────────────────────────────────────
       - name: Setup Node.js
@@ -96,6 +103,7 @@ jobs:
       - name: 安装依赖
         if: steps.parse.outputs.skip != 'true'
         run: |
+          cd /d d:\Cardgame
           if exist package.json ( npm install --prefer-offline )
           cd shared && npm install --prefer-offline && cd ..
           npm install -g tsx 2>nul
@@ -126,10 +134,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPO: ${{ github.repository }}
         run: |
+          cd /d d:\Cardgame
           set AGENT=${{ steps.parse.outputs.agent }}
           set ISSUE_NUMBER=${{ github.event.issue.number }}
           echo 🚀 启动 %AGENT% Agent...
-          npx tsx agents/runner.ts --agent "%AGENT%" --issue-number "%ISSUE_NUMBER%"
+          npx tsx agents\runner.ts --agent "%AGENT%" --issue-number "%ISSUE_NUMBER%"
 
       # ── 7. 失败时发布错误评论 ────────────────────────────────────────────────
       - name: 发布失败通知

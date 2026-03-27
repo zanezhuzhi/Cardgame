@@ -37,11 +37,13 @@ jobs:
     runs-on: self-hosted  # 使用本地 runner，避免消耗 Actions 分钟数
 
     steps:
-      # ── 1. Checkout 最新代码 ────────────────────────────────────────────────
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
+      # ── 1. 直接使用本地代码目录（跳过网络 checkout，避免 GitHub 连接不稳定）
+      - name: 切换到本地项目目录
+        run: |
+          # self-hosted runner 直接用本地代码，无需从 GitHub 拉取
+          cd /d d:\Cardgame
+          echo "📂 工作目录: $(pwd)"
+          echo "✅ 使用本地代码，跳过 checkout"
 
       # ── 2. 解析评论，确定目标 Agent ─────────────────────────────────────────
       - name: 解析目标 Agent
@@ -133,6 +135,7 @@ jobs:
           )
 
           echo "🚀 启动 $AGENT Agent..."
+          cd /d d:\Cardgame
           npx tsx agents/runner.ts \
             --agent "$AGENT" \
             --issue-number "$ISSUE_NUMBER" \

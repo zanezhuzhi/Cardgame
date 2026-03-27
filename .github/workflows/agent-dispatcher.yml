@@ -32,6 +32,12 @@ permissions:
   issues: write
   contents: read
 
+# 所有 run 步骤默认使用 cmd shell（Windows self-hosted runner）
+defaults:
+  run:
+    shell: cmd
+    working-directory: d:\Cardgame
+
 jobs:
   dispatch:
     name: 解析评论 & 调度 Agent
@@ -42,47 +48,42 @@ jobs:
     runs-on: self-hosted  # 使用本地 runner，避免消耗 Actions 分钟数
 
     steps:
-      # ── 1. 直接使用本地代码目录（跳过网络 checkout，避免 GitHub 连接不稳定）
-      - name: 切换到本地项目目录
+      # ── 1. 验证本地项目目录存在 ──────────────────────────────────────────────
+      - name: 验证本地项目目录
         run: |
-          # self-hosted runner 直接用本地代码，无需从 GitHub 拉取
-          cd /d d:\Cardgame
-          echo "📂 工作目录: $(pwd)"
-          echo "✅ 使用本地代码，跳过 checkout"
+          echo 📂 工作目录: %CD%
+          if not exist "d:\Cardgame\shared" (
+            echo ❌ 本地项目目录不存在
+            exit /b 1
+          )
+          echo ✅ 本地项目目录确认
 
       # ── 2. 解析评论，确定目标 Agent ─────────────────────────────────────────
       - name: 解析目标 Agent
         id: parse
+        shell: pwsh
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          BODY="${COMMENT_BODY}"
-          AGENT=""
+          $body = $env:COMMENT_BODY
+          $agent = ""
 
-          # 匹配规则（按优先级）
-          if echo "$BODY" | grep -qE "^/dev\s+\S+"; then
-            AGENT="pm"
-          elif echo "$BODY" | grep -qiE "^@pm\b"; then
-            AGENT="pm"
-          elif echo "$BODY" | grep -qiE "^@designer\b"; then
-            AGENT="designer"
-          elif echo "$BODY" | grep -qiE "^@programmer\b"; then
-            AGENT="programmer"
-          elif echo "$BODY" | grep -qiE "^@reviewer\b"; then
-            AGENT="reviewer"
-          elif echo "$BODY" | grep -qiE "^@qa\b"; then
-            AGENT="qa"
-          fi
+          if ($body -match "^/dev\s+\S+") { $agent = "pm" }
+          elseif ($body -match "^@pm\b") { $agent = "pm" }
+          elseif ($body -match "^@designer\b") { $agent = "designer" }
+          elseif ($body -match "^@programmer\b") { $agent = "programmer" }
+          elseif ($body -match "^@reviewer\b") { $agent = "reviewer" }
+          elseif ($body -match "^@qa\b") { $agent = "qa" }
 
-          if [ -z "$AGENT" ]; then
-            echo "ℹ️  评论不包含 Agent 指令，跳过。"
-            echo "agent=" >> $GITHUB_OUTPUT
-            echo "skip=true" >> $GITHUB_OUTPUT
-          else
-            echo "✅ 目标 Agent: $AGENT"
-            echo "agent=$AGENT" >> $GITHUB_OUTPUT
-            echo "skip=false" >> $GITHUB_OUTPUT
-          fi
+          if ($agent -eq "") {
+            Write-Host "ℹ️  评论不包含 Agent 指令，跳过。"
+            "agent=" >> $env:GITHUB_OUTPUT
+            "skip=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "✅ 目标 Agent: $agent"
+            "agent=$agent" >> $env:GITHUB_OUTPUT
+            "skip=false" >> $env:GITHUB_OUTPUT
+          }
 
       # ── 3. 设置 Node.js ─────────────────────────────────────────────────────
       - name: Setup Node.js
@@ -95,12 +96,9 @@ jobs:
       - name: 安装依赖
         if: steps.parse.outputs.skip != 'true'
         run: |
-          # 安装项目根依赖（如果有）
-          [ -f package.json ] && npm install --prefer-offline || true
-          # 安装 shared 依赖（用于运行测试）
+          if exist package.json ( npm install --prefer-offline )
           cd shared && npm install --prefer-offline && cd ..
-          # 安装 tsx（用于运行 runner.ts）
-          npm install -g tsx 2>/dev/null || true
+          npm install -g tsx 2>nul
 
       # ── 5. 发布"正在处理"评论 ───────────────────────────────────────────────
       - name: 发布处理中通知
@@ -128,24 +126,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPO: ${{ github.repository }}
         run: |
-          AGENT="${{ steps.parse.outputs.agent }}"
-          ISSUE_NUMBER="${{ github.event.issue.number }}"
-          ISSUE_BODY=$(cat << 'ISSUE_EOF'
-          ${{ github.event.issue.body }}
-          ISSUE_EOF
-          )
-          COMMENT_BODY=$(cat << 'COMMENT_EOF'
-          ${{ github.event.comment.body }}
-          COMMENT_EOF
-          )
-
-          echo "🚀 启动 $AGENT Agent..."
-          cd /d d:\Cardgame
-          npx tsx agents/runner.ts \
-            --agent "$AGENT" \
-            --issue-number "$ISSUE_NUMBER" \
-            --issue-body "$ISSUE_BODY" \
-            --comment-body "$COMMENT_BODY"
+          set AGENT=${{ steps.parse.outputs.agent }}
+          set ISSUE_NUMBER=${{ github.event.issue.number }}
+          echo 🚀 启动 %AGENT% Agent...
+          npx tsx agents/runner.ts --agent "%AGENT%" --issue-number "%ISSUE_NUMBER%"
 
       # ── 7. 失败时发布错误评论 ────────────────────────────────────────────────
       - name: 发布失败通知
@@ -159,5 +143,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `❌ **${agent} Agent 执行失败**\n\n请查看 [Action 日志](${runUrl}) 了解详情。\n\n常见原因：\n- \`ANTHROPIC_API_KEY\` 未配置\n- \`claude\` CLI 未安装\n- self-hosted runner 未启动`
+              body: `❌ **${agent} Agent 执行失败**\n\n请查看 [Action 日志](${runUrl}) 了解详情。\n\n常见原因：\n- \`ANTHROPIC_API_KEY\` 未配置\n- self-hosted runner 未启动`
             });

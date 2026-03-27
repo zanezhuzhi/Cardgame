@@ -1,0 +1,153 @@
+# .github/workflows/agent-dispatcher.yml
+# 监听 GitHub Issue 评论，自动调度对应 Agent
+#
+# 触发格式（Issue 评论中写入）:
+#   /dev 唐纸伞妖          → 触发 pm agent
+#   @designer ...          → 触发 designer agent
+#   @programmer ...        → 触发 programmer agent
+#   @reviewer ...          → 触发 reviewer agent
+#   @qa ...                → 触发 qa agent
+#   @pm ...                → 触发 pm agent
+#
+# 所需 Secrets（在 GitHub repo Settings > Secrets 中配置）:
+#   ANTHROPIC_API_KEY   — Claude API Key
+#   GITHUB_TOKEN        — 自动由 GitHub Actions 提供，无需手动配置
+#
+# Runner 要求: self-hosted（本地机器）
+#   注册命令: 见 https://docs.github.com/cn/actions/hosting-your-own-runners
+
+name: 🤖 Agent Dispatcher
+
+on:
+  issue_comment:
+    types: [created]
+
+# 防止同一 Issue 并发运行多个 Agent
+concurrency:
+  group: agent-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: 解析评论 & 调度 Agent
+    # 只响应 Issue（不响应 PR）中的评论
+    if: github.event.issue.pull_request == null
+    runs-on: self-hosted  # 使用本地 runner，避免消耗 Actions 分钟数
+
+    steps:
+      # ── 1. Checkout 最新代码 ────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── 2. 解析评论，确定目标 Agent ─────────────────────────────────────────
+      - name: 解析目标 Agent
+        id: parse
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          BODY="${COMMENT_BODY}"
+          AGENT=""
+
+          # 匹配规则（按优先级）
+          if echo "$BODY" | grep -qE "^/dev\s+\S+"; then
+            AGENT="pm"
+          elif echo "$BODY" | grep -qiE "^@pm\b"; then
+            AGENT="pm"
+          elif echo "$BODY" | grep -qiE "^@designer\b"; then
+            AGENT="designer"
+          elif echo "$BODY" | grep -qiE "^@programmer\b"; then
+            AGENT="programmer"
+          elif echo "$BODY" | grep -qiE "^@reviewer\b"; then
+            AGENT="reviewer"
+          elif echo "$BODY" | grep -qiE "^@qa\b"; then
+            AGENT="qa"
+          fi
+
+          if [ -z "$AGENT" ]; then
+            echo "ℹ️  评论不包含 Agent 指令，跳过。"
+            echo "agent=" >> $GITHUB_OUTPUT
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ 目标 Agent: $AGENT"
+            echo "agent=$AGENT" >> $GITHUB_OUTPUT
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      # ── 3. 设置 Node.js ─────────────────────────────────────────────────────
+      - name: Setup Node.js
+        if: steps.parse.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # ── 4. 安装依赖 ──────────────────────────────────────────────────────────
+      - name: 安装依赖
+        if: steps.parse.outputs.skip != 'true'
+        run: |
+          # 安装项目根依赖（如果有）
+          [ -f package.json ] && npm install --prefer-offline || true
+          # 安装 shared 依赖（用于运行测试）
+          cd shared && npm install --prefer-offline && cd ..
+          # 安装 tsx（用于运行 runner.ts）
+          npm install -g tsx 2>/dev/null || true
+
+      # ── 5. 发布"正在处理"评论 ───────────────────────────────────────────────
+      - name: 发布处理中通知
+        if: steps.parse.outputs.skip != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const agent = '${{ steps.parse.outputs.agent }}';
+            const emoji = {
+              pm: '📋', designer: '📐', programmer: '💻',
+              reviewer: '🔍', qa: '🧪'
+            }[agent] || '🤖';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `${emoji} **${agent} Agent** 已接收任务，正在处理中...\n\n> 触发评论: ${context.payload.comment.body.slice(0, 100)}`
+            });
+
+      # ── 6. 运行 Agent ────────────────────────────────────────────────────────
+      - name: 运行 Agent
+        if: steps.parse.outputs.skip != 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          AGENT="${{ steps.parse.outputs.agent }}"
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          ISSUE_BODY=$(cat << 'ISSUE_EOF'
+          ${{ github.event.issue.body }}
+          ISSUE_EOF
+          )
+          COMMENT_BODY=$(cat << 'COMMENT_EOF'
+          ${{ github.event.comment.body }}
+          COMMENT_EOF
+          )
+
+          echo "🚀 启动 $AGENT Agent..."
+          npx tsx agents/runner.ts \
+            --agent "$AGENT" \
+            --issue-number "$ISSUE_NUMBER" \
+            --issue-body "$ISSUE_BODY" \
+            --comment-body "$COMMENT_BODY"
+
+      # ── 7. 失败时发布错误评论 ────────────────────────────────────────────────
+      - name: 发布失败通知
+        if: failure() && steps.parse.outputs.skip != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const agent = '${{ steps.parse.outputs.agent }}';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `❌ **${agent} Agent 执行失败**\n\n请查看 [Action 日志](${runUrl}) 了解详情。\n\n常见原因：\n- \`ANTHROPIC_API_KEY\` 未配置\n- \`claude\` CLI 未安装\n- self-hosted runner 未启动`
+            });

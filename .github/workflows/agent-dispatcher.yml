@@ -27,6 +27,11 @@ concurrency:
   group: agent-issue-${{ github.event.issue.number }}
   cancel-in-progress: false
 
+# 授予 GITHUB_TOKEN 写 Issue 评论的权限（issue_comment 触发默认只读）
+permissions:
+  issues: write
+  contents: read
+
 jobs:
   dispatch:
     name: 解析评论 & 调度 Agent

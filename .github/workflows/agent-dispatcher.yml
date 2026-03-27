@@ -30,8 +30,10 @@ concurrency:
 jobs:
   dispatch:
     name: 解析评论 & 调度 Agent
-    # 只响应 Issue（不响应 PR）中的评论
-    if: github.event.issue.pull_request == null
+    # 只响应 Issue（不响应 PR）中的评论，且只允许仓库 Owner 触发
+    if: |
+      github.event.issue.pull_request == null &&
+      github.event.comment.user.login == github.repository_owner
     runs-on: self-hosted  # 使用本地 runner，避免消耗 Actions 分钟数
 
     steps:

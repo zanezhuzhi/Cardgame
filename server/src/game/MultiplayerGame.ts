@@ -1194,8 +1194,47 @@ export class MultiplayerGame {
     // 式神引擎：回合开始 → 重置疲劳/使用计数/清理指示物
     this.skillEngine.onTurnStart(player as any);
     
+    // 鬼王【自】效果：回合开始时从弃牌堆回收（蜃气楼、荒骷髅、贪嗔痴）
+    this.checkBossRecoveryOnTurnStart(player);
+    
     // 进入鬼火阶段
     this.enterGhostFirePhase();
+  }
+  
+  /**
+   * 回合开始时检查鬼王【自】回收效果
+   * 蜃气楼、荒骷髅、贪嗔痴：若在弃牌堆则回到手牌
+   */
+  private checkBossRecoveryOnTurnStart(player: PlayerState): void {
+    const recoverableBosses = ['蜃气楼', '荒骷髅', '贪嗔痴'];
+    
+    for (const bossName of recoverableBosses) {
+      const bossIdx = player.discard.findIndex(c => 
+        c.cardType === 'boss' && c.name === bossName
+      );
+      
+      if (bossIdx !== -1) {
+        const bossCard = player.discard.splice(bossIdx, 1)[0]!;
+        player.hand.push(bossCard);
+        this.addLog(`🔄 【自】${player.name} 的 ${bossName} 从弃牌堆回到手牌`);
+      }
+    }
+  }
+  
+  /**
+   * 回合结束时检查麒麟【触】效果
+   * 麒麟：若在弃牌堆则归牌库底
+   */
+  private checkKirinEndOfTurn(player: PlayerState): void {
+    const kirinIdx = player.discard.findIndex(c => 
+      c.cardType === 'boss' && c.name === '麒麟'
+    );
+    
+    if (kirinIdx !== -1) {
+      const kirinCard = player.discard.splice(kirinIdx, 1)[0]!;
+      player.deck.unshift(kirinCard); // 放到牌库底（unshift放到数组开头=牌库底）
+      this.addLog(`🔄 【触】${player.name} 的麒麟归入牌库底`);
+    }
   }
 
   /**
@@ -1337,6 +1376,9 @@ export class MultiplayerGame {
     this.discardMany(player, player.played, 'rule');
     player.played = [];
     
+    // 5.5. 麒麟【触】效果：回合结束时从弃牌堆归牌库底
+    this.checkKirinEndOfTurn(player);
+    
     // 6. 重置本回合打牌计数
     player.cardsPlayed = 0;
     
@@ -1349,10 +1391,27 @@ export class MultiplayerGame {
     // 9. 抓5张牌
     this.drawCards(player, GAME_CONSTANTS.STARTING_HAND_SIZE);
     
-    // 9. 补充妖怪
+    // 10. 补充妖怪
     this.fillYokaiSlots();
     
-    // 10. 记录上一回合是否达成击杀（游荡妖怪/鬼王生命扣至0，强于离场规则）
+    // 11. 如果本回合击败了鬼王，翻出下一张鬼王并执行来袭效果
+    if ((this.state as any).pendingBossReveal) {
+      (this.state as any).pendingBossReveal = false;
+      this.revealBoss();
+      // 来袭效果会影响已抽好的手牌
+    }
+    
+    // 12. 检查游戏是否结束（最后一个鬼王被击败）
+    if ((this.state as any).pendingGameEnd) {
+      (this.state as any).pendingGameEnd = false;
+      this.endGame();
+      return;
+    }
+    
+    // 13. 清空伤害（实际上在步骤3已清空，这里是规则文档的顺序）
+    // player.damage = 0; // 已在步骤3执行
+    
+    // 14. 记录上一回合是否达成击杀（游荡妖怪/鬼王生命扣至0，强于离场规则）
     this.state.lastPlayerKilledYokai = hadKillThisTurn;
     
     this.addLog(`🔄 ${player.name} 回合结束`);
@@ -2608,92 +2667,125 @@ export class MultiplayerGame {
     
     // 执行鬼王来袭效果（麒麟除外）
     if (boss.name !== '麒麟') {
-      this.executeBossArrivalEffect(boss);
+      // 异步执行来袭效果，不阻塞主流程
+      this.executeBossArrivalEffect(boss).catch(err => {
+        this.addLog(`   ⚠️ 来袭效果执行失败: ${err}`);
+      });
     }
   }
   
   /**
    * 执行鬼王来袭效果
+   * 统一调用共享层 BossEffects.ts 的实现
    */
-  private executeBossArrivalEffect(boss: BossCard): void {
+  private async executeBossArrivalEffect(boss: BossCard): Promise<void> {
     const bossName = boss.name;
+    this.addLog(`   👹 ${bossName} 来袭！`);
     
+    // 使用共享层的 BossEffects
+    const { executeBossArrival, clearOrochiEffect, clearEarthquakeCatfishEffect } = await import('../../../shared/game/effects/BossEffects');
+    
+    const context = {
+      gameState: this.state,
+      bossCard: boss as CardInstance,
+      // 选择卡牌回调（用于需要玩家选择的效果）
+      onSelectCards: async (cards: CardInstance[], count: number): Promise<string[]> => {
+        // 默认自动选择：按HP从低到高选
+        const sorted = [...cards].sort((a, b) => (a.hp || 0) - (b.hp || 0));
+        return sorted.slice(0, count).map(c => c.instanceId);
+      },
+      // 二选一回调
+      onChoice: async (options: string[]): Promise<number> => {
+        // 默认选第一个选项
+        return 0;
+      }
+    };
+    
+    try {
+      const result = await executeBossArrival(bossName, context);
+      
+      if (result.message) {
+        this.addLog(`   💀 ${result.message}`);
+      }
+      
+      // 特殊效果日志
+      this.logBossArrivalDetails(bossName);
+      
+    } catch (error) {
+      this.addLog(`   ⚠️ 来袭效果执行出错: ${error}`);
+    }
+  }
+  
+  /**
+   * 记录鬼王来袭的详细日志
+   */
+  private logBossArrivalDetails(bossName: string): void {
     switch (bossName) {
-      case '鬼灵歌伎':
-        // 每位玩家恶评+1（简化：给每人加1张农夫卡）
-        this.addLog(`   👹 来袭：每位玩家获得1张「恶评：农夫」`);
+      case '石距':
         for (const player of this.state.players) {
-          const penaltyCard: CardInstance = {
-            instanceId: `penalty_farmer_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            cardId: 'penalty_farmer',
-            cardType: 'penalty',
-            name: '恶评：农夫',
-            damage: 0,
-            charm: -1,
-          };
-          player.discard.push(penaltyCard);
+          const spellCount = player.discard.filter(c => c.cardType === 'spell').length;
+          if (spellCount > 0) {
+            this.addLog(`      ${player.name} 弃置了 ${spellCount} 张阴阳术`);
+          } else {
+            this.addLog(`      ${player.name} 无阴阳术，获得1张恶评`);
+          }
         }
         break;
         
-      case '鸦天狗':
-        // 每位玩家弃置1张手牌
-        this.addLog(`   👹 来袭：每位玩家弃置1张手牌`);
+      case '鬼灵歌伎':
         for (const player of this.state.players) {
-          if (player.hand.length > 0) {
-            // 简化：随机弃置1张（主动弃置，触发【触】）
-            const randIdx = Math.floor(Math.random() * player.hand.length);
-            const card = player.hand.splice(randIdx, 1)[0];
-            this.discard(player, card, 'active');
+          this.addLog(`      ${player.name} 牌库顶HP>6的牌已弃置`);
+        }
+        break;
+        
+      case '土蜘蛛':
+        for (const player of this.state.players) {
+          const spellCount = player.hand.filter(c => c.cardType === 'spell').length;
+          const missing = Math.max(0, 3 - spellCount);
+          if (missing > 0) {
+            this.addLog(`      ${player.name} 缺少 ${missing} 张阴阳术，弃置了 ${missing} 张手牌`);
           }
         }
         break;
         
       case '胧车':
-        // 每位玩家超度1张御魂（简化：自动超度弃牌堆中最低HP的御魂）
-        this.addLog(`   👹 来袭：每位玩家超度1张御魂`);
         for (const player of this.state.players) {
-          const yokais = player.discard.filter(c => c.cardType === 'yokai');
-          if (yokais.length > 0) {
-            yokais.sort((a, b) => (a.hp || 0) - (b.hp || 0));
-            const toExile = yokais[0];
-            const idx = player.discard.indexOf(toExile);
-            if (idx >= 0) {
-              player.discard.splice(idx, 1);
-              if (!player.exiled) player.exiled = [];
-              player.exiled.push(toExile);
-              this.addLog(`      ${player.name} 超度了 ${toExile.name}`);
-            }
+          const exiledCount = player.exiled?.length || 0;
+          if (exiledCount > 0) {
+            this.addLog(`      ${player.name} 超度了御魂`);
+          } else {
+            this.addLog(`      ${player.name} 无御魂可超度，获得恶评`);
+          }
+        }
+        break;
+        
+      case '蜃气楼':
+        for (const player of this.state.players) {
+          const highHpCards = player.discard.filter(c => (c.hp || 0) > 6);
+          if (highHpCards.length > 0) {
+            this.addLog(`      ${player.name} 弃置了HP>6的手牌`);
           }
         }
         break;
         
       case '荒骷髅':
-        // 超度弃牌堆中生命>7的御魂
-        this.addLog(`   👹 来袭：超度弃牌堆中生命>7的御魂`);
         for (const player of this.state.players) {
-          const toExile = player.discard.filter(c => (c.cardType === 'yokai' || c.cardType === 'boss') && (c.hp || 0) > 7);
-          for (const card of toExile) {
-            const idx = player.discard.indexOf(card);
-            if (idx >= 0) {
-              player.discard.splice(idx, 1);
-              if (!player.exiled) player.exiled = [];
-              player.exiled.push(card);
-              this.addLog(`      ${player.name} 的 ${card.name} 被超度`);
-            }
-          }
+          this.addLog(`      ${player.name} 牌库已全弃，超度HP>7御魂，获得恶评，重洗牌库`);
         }
         break;
         
       case '地震鲶':
-        // 隐藏牌库顶（简化：暂不处理）
-        this.addLog(`   👹 来袭：牌库顶1张牌被隐藏`);
+        this.addLog(`      每回合清理阶段后，随机1张手牌将被放到阴阳师下`);
         break;
         
-      default:
-        // 其他鬼王无来袭效果或待实现
-        if ((boss as any).arrivalEffect) {
-          this.addLog(`   ⚠️ 来袭效果待实现: ${(boss as any).arrivalEffect}`);
+      case '八岐大蛇':
+        for (const player of this.state.players) {
+          this.addLog(`      ${player.name} 弃置了最高HP手牌，式神失去能力`);
         }
+        break;
+        
+      case '贪嗔痴':
+        this.addLog(`      手牌HP最高的玩家额外弃置了1张手牌`);
         break;
     }
   }
@@ -4066,6 +4158,7 @@ export class MultiplayerGame {
 
   /**
    * 击败鬼王
+   * 注意：鬼王翻出时机在清理阶段（抽牌后），不在这里立即翻出
    */
   private defeatBoss(player: PlayerState): void {
     const boss = this.state.field.currentBoss!;
@@ -4076,20 +4169,71 @@ export class MultiplayerGame {
     
     this.addLog(`👹 ${player.name} 击败鬼王 ${boss.name}！获得 ${boss.charm || 0} 声誉`);
     
+    // 清理鬼王特殊效果
+    this.clearBossEffect(boss.name);
+    
     // 检查游戏是否结束
     if (this.state.field.bossDeck.length === 0) {
-      this.endGame();
-      return;
+      // 标记游戏将在清理阶段结束
+      (this.state as any).pendingGameEnd = true;
+    } else {
+      // 标记需要在清理阶段翻出新鬼王（抽牌后、清空伤害前）
+      (this.state as any).pendingBossReveal = true;
     }
     
-    // 翻出下一个鬼王
-    this.revealBoss();
+    // 清空当前鬼王（已被击败）
+    this.state.field.currentBoss = null;
+    this.state.field.bossCurrentHp = 0;
     
     this.notifyStateChange({
       type: 'BOSS_DEFEATED',
       boss,
       playerId: player.id,
     });
+  }
+  
+  /**
+   * 清理鬼王特殊效果
+   * 当鬼王被击败时调用，用于恢复被鬼王影响的状态
+   */
+  private clearBossEffect(bossName: string): void {
+    switch (bossName) {
+      case '八岐大蛇':
+        // 恢复式神能力
+        this.addLog(`   🔄 八岐大蛇离场，式神能力恢复`);
+        for (const player of this.state.players) {
+          for (let i = 0; i < player.shikigamiState.length; i++) {
+            if ((player.shikigamiState[i] as any)?.flipped) {
+              player.shikigamiState[i] = {
+                ...player.shikigamiState[i],
+                flipped: false
+              } as any;
+            }
+          }
+        }
+        break;
+        
+      case '地震鲶':
+        // 释放隐藏在阴阳师下的牌
+        this.addLog(`   🔄 地震鲶离场，隐藏手牌弃置`);
+        for (const player of this.state.players) {
+          // 移除地震鲶buff
+          const buffIdx = player.tempBuffs.findIndex((b: any) => b.source === '地震鲶');
+          if (buffIdx !== -1) {
+            player.tempBuffs.splice(buffIdx, 1);
+          }
+          
+          // 将隐藏牌弃置（如果有实现hiddenCards字段）
+          if ((player as any).hiddenCards && (player as any).hiddenCards.length > 0) {
+            for (const card of (player as any).hiddenCards) {
+              player.discard.push(card);
+              this.addLog(`      ${player.name} 的隐藏牌 ${card.name} 被弃置`);
+            }
+            (player as any).hiddenCards = [];
+          }
+        }
+        break;
+    }
   }
 
   /**

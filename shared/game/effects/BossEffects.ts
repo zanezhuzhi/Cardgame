@@ -82,7 +82,8 @@ function createPenaltyCard(): CardInstance {
     name: '恶评',
     hp: 0,
     maxHp: 0,
-    charm: -1
+    charm: -1,
+    image: ''
   };
 }
 

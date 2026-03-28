@@ -259,6 +259,7 @@ export interface GameState {
       | 'diceGhostTarget' | 'selectCardsMulti' | 'selectCardPutTop' | 'wheelMonkDiscard'
       | 'wangliangChoice' | 'meiYaoSelect' | 'akajitaSelect' | 'fanHunXiangChoice'
       | 'tufoSelect' | 'youguXiangSelect' | 'naginataSoulDiscard' | 'zhenMuShouTarget'
+      | 'yinmoluoSelect'
       // 地藏像相关
       | 'dizangConfirm' | 'dizangSelectShikigami' | 'dizangReplaceShikigami';
     playerId: string;
@@ -273,6 +274,19 @@ export interface GameState {
   
   // 轮入道队列执行
   wheelMonkQueue?: WheelMonkQueue;
+  
+  // 阴摩罗回合结束归还队列
+  pendingEndOfTurnEffects?: EndOfTurnEffect[];
+}
+
+/** 回合结束效果（阴摩罗归还等） */
+export interface EndOfTurnEffect {
+  /** 效果类型 */
+  type: 'yinmoluoReturn';
+  /** 归属玩家ID */
+  playerId: string;
+  /** 待归还的卡牌 */
+  cards: CardInstance[];
 }
 
 /** 轮入道效果执行队列 */

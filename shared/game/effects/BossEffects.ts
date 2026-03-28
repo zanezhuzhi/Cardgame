@@ -17,6 +17,8 @@ interface BossEffectContext {
   bossCard: CardInstance;
   onSelectCards?: (cards: CardInstance[], count: number) => Promise<string[]>;
   onChoice?: (options: string[]) => Promise<number>;
+  /** 检查玩家是否用青女房防御来袭效果，返回true表示免疫 */
+  onCheckBossRaidDefense?: (player: PlayerState, bossName: string) => Promise<boolean>;
 }
 
 // 来袭效果处理器
@@ -73,6 +75,41 @@ function drawCards(player: PlayerState, count: number): number {
   return drawn;
 }
 
+// 辅助函数：检查玩家是否手牌有青女房
+function hasQingnvfang(player: PlayerState): boolean {
+  return player.hand.some(c => c.cardId === 'yokai_037' || c.name === '青女房');
+}
+
+// 辅助函数：获取免疫来袭的玩家列表
+async function getImmunePlayers(
+  ctx: BossEffectContext,
+  bossName: string
+): Promise<Set<string>> {
+  const immunePlayerIds = new Set<string>();
+  
+  if (!ctx.onCheckBossRaidDefense) {
+    // 无回调时默认自动免疫（向后兼容测试）
+    for (const player of ctx.gameState.players) {
+      if (hasQingnvfang(player)) {
+        immunePlayerIds.add(player.id);
+      }
+    }
+    return immunePlayerIds;
+  }
+  
+  // 有回调时询问每个有青女房的玩家
+  for (const player of ctx.gameState.players) {
+    if (hasQingnvfang(player)) {
+      const isImmune = await ctx.onCheckBossRaidDefense(player, bossName);
+      if (isImmune) {
+        immunePlayerIds.add(player.id);
+      }
+    }
+  }
+  
+  return immunePlayerIds;
+}
+
 // 辅助函数：创建恶评卡
 function createPenaltyCard(): CardInstance {
   return {
@@ -106,8 +143,14 @@ registerSoul('麒麟', async (ctx) => {
 // 石距 - 来袭：每位玩家弃掉所有阴阳术，未弃牌者获得恶评
 registerArrival('石距', async (ctx) => {
   const { gameState } = ctx;
+  const immunePlayers = await getImmunePlayers(ctx, '石距');
   
   for (const player of gameState.players) {
+    // 检查青女房免疫
+    if (immunePlayers.has(player.id)) {
+      continue;
+    }
+    
     const spells = player.hand.filter(c => c.cardType === 'spell');
     
     if (spells.length > 0) {
@@ -139,8 +182,14 @@ registerSoul('石距', async (ctx) => {
 // 鬼灵歌伎🔷 - 来袭：展示牌库顶5张，弃置生命>6的牌
 registerArrival('鬼灵歌伎', async (ctx) => {
   const { gameState } = ctx;
+  const immunePlayers = await getImmunePlayers(ctx, '鬼灵歌伎');
   
   for (const player of gameState.players) {
+    // 检查青女房免疫
+    if (immunePlayers.has(player.id)) {
+      continue;
+    }
+    
     const revealed: CardInstance[] = [];
     const toDiscard: CardInstance[] = [];
     
@@ -187,8 +236,14 @@ registerSoul('鬼灵歌伎', async (ctx) => {
 // 土蜘蛛 - 来袭：每位玩家展示3张阴阳术，缺1张弃1张手牌
 registerArrival('土蜘蛛', async (ctx) => {
   const { gameState } = ctx;
+  const immunePlayers = await getImmunePlayers(ctx, '土蜘蛛');
   
   for (const player of gameState.players) {
+    // 检查青女房免疫
+    if (immunePlayers.has(player.id)) {
+      continue;
+    }
+    
     const spells = player.hand.filter(c => c.cardType === 'spell');
     const spellCount = spells.length;
     const missing = Math.max(0, 3 - spellCount);
@@ -217,8 +272,14 @@ registerSoul('土蜘蛛', async (ctx) => {
 // 胧车 - 来袭：每位玩家超度1张御魂，无法执行者获得恶评
 registerArrival('胧车', async (ctx) => {
   const { gameState, onSelectCards } = ctx;
+  const immunePlayers = await getImmunePlayers(ctx, '胧车');
   
   for (const player of gameState.players) {
+    // 检查青女房免疫
+    if (immunePlayers.has(player.id)) {
+      continue;
+    }
+    
     const yokais = player.hand.filter(c => c.cardType === 'yokai');
     
     if (yokais.length > 0) {
@@ -255,8 +316,14 @@ registerSoul('胧车', async (ctx) => {
 // 蜃气楼 - 来袭：每位玩家弃置手牌中生命>6的牌
 registerArrival('蜃气楼', async (ctx) => {
   const { gameState } = ctx;
+  const immunePlayers = await getImmunePlayers(ctx, '蜃气楼');
   
   for (const player of gameState.players) {
+    // 检查青女房免疫
+    if (immunePlayers.has(player.id)) {
+      continue;
+    }
+    
     const toDiscard = player.hand.filter(c => (c.hp || 0) > 6);
     
     for (const card of toDiscard) {
@@ -282,8 +349,14 @@ registerSoul('蜃气楼', async (ctx) => {
 // 荒骷髅🔷 - 来袭：牌库全弃，超度生命>7的御魂，获得恶评，重洗
 registerArrival('荒骷髅', async (ctx) => {
   const { gameState, onSelectCards } = ctx;
+  const immunePlayers = await getImmunePlayers(ctx, '荒骷髅');
   
   for (const player of gameState.players) {
+    // 检查青女房免疫
+    if (immunePlayers.has(player.id)) {
+      continue;
+    }
+    
     // 将整个牌库弃置
     while (player.deck.length > 0) {
       player.discard.push(player.deck.pop()!);
@@ -347,9 +420,15 @@ registerSoul('荒骷髅', async (ctx) => {
 // 地震鲶 - 来袭：清理阶段后随机放置1张手牌到阴阳师下
 registerArrival('地震鲶', async (ctx) => {
   const { gameState } = ctx;
+  const immunePlayers = await getImmunePlayers(ctx, '地震鲶');
   
-  // 标记地震鲶效果生效
+  // 标记地震鲶效果生效（仅对未免疫的玩家）
   for (const player of gameState.players) {
+    // 检查青女房免疫
+    if (immunePlayers.has(player.id)) {
+      continue;
+    }
+    
     player.tempBuffs.push({
       type: 'EARTHQUAKE_CATFISH' as any,
       value: 0,
@@ -405,8 +484,14 @@ registerSoul('地震鲶', async (ctx) => {
 // 八岐大蛇 - 来袭：弃掉生命最高的手牌，式神失去能力
 registerArrival('八岐大蛇', async (ctx) => {
   const { gameState } = ctx;
+  const immunePlayers = await getImmunePlayers(ctx, '八岐大蛇');
   
   for (const player of gameState.players) {
+    // 检查青女房免疫
+    if (immunePlayers.has(player.id)) {
+      continue;
+    }
+    
     if (player.hand.length > 0) {
       // 找出生命最高的牌
       let maxHp = -1;
@@ -446,11 +531,17 @@ registerSoul('八岐大蛇', async (ctx) => {
 // 贪嗔痴🔷 - 来袭：随机弃1张，生命最高的玩家再弃1张
 registerArrival('贪嗔痴', async (ctx) => {
   const { gameState } = ctx;
+  const immunePlayers = await getImmunePlayers(ctx, '贪嗔痴');
   
   let maxHp = -1;
   let maxPlayers: PlayerState[] = [];
   
   for (const player of gameState.players) {
+    // 检查青女房免疫
+    if (immunePlayers.has(player.id)) {
+      continue;
+    }
+    
     // 随机弃1张
     if (player.hand.length > 0) {
       const randomIdx = Math.floor(Math.random() * player.hand.length);
@@ -468,8 +559,11 @@ registerArrival('贪嗔痴', async (ctx) => {
     }
   }
   
-  // 生命最高的玩家再弃1张
+  // 生命最高的玩家再弃1张（也需要检查免疫）
   for (const player of maxPlayers) {
+    if (immunePlayers.has(player.id)) {
+      continue;
+    }
     if (player.hand.length > 0) {
       player.discard.push(player.hand.shift()!);
     }

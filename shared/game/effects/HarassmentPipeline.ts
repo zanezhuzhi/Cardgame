@@ -258,7 +258,7 @@ function findHandCard(
   return player.hand.find(c => c.cardId === cardId);
 }
 
-// ── P10: 青女房（展示免疫） ──
+// ── P10: 青女房（展示免疫，可选） ──
 registerResistHandler({
   id: '青女房',
   priority: 10,
@@ -270,9 +270,29 @@ registerResistHandler({
     const card = findHandCard(target, 'yokai_037')!;
 
     // 青女房：展示即可，不消耗
-    // 询问目标是否选择使用（默认使用）
-    // 注意：这里需要目标玩家的交互回调，暂用自动使用
-    // 未来可扩展为 ctx.askTarget(target, ...)
+    // 询问目标玩家是否展示青女房来免疫妨害
+    // onChoice 由服务端注入：对目标玩家发起选择交互
+    // 若无回调（测试/离线）默认选择展示（索引 0）
+    let choice = 0; // 默认展示
+    try {
+      choice = await ctx.onChoice(
+        ['展示「青女房」（免疫妨害）', '不展示'],
+        `${target.name} 受到妨害，是否展示「青女房」来免疫？`,
+      );
+    } catch {
+      // 回调异常时使用默认策略（展示）
+      choice = 0;
+    }
+
+    if (choice !== 0) {
+      // 玩家选择不展示 → 不免疫，继续后续抵抗链
+      return {
+        immune: false,
+        preEffectLogs: [`🃏 ${target.name} 选择不展示「青女房」`],
+      };
+    }
+
+    // 展示青女房 → 免疫（牌保留在手牌中）
     ctx.addLog(`🛡️ ${target.name} 展示「${card.name}」，免疫妨害`);
 
     return {

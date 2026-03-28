@@ -1480,21 +1480,81 @@ function aiDecide_幽谷响(cards: CardInstance[], maxCount: number): string[] {
   return selected;
 }
 
+/**
+ * 伤魂鸟 AI 决策函数
+ * @param hand 当前手牌列表
+ * @param targetHp 目标妖怪 HP（可选，用于计算伤害缺口）
+ * @param currentDamage 当前伤害（可选）
+ * @returns 应超度的卡牌 instanceId 列表
+ * @description
+ * L1 规则策略：
+ * - 优先超度：恶评卡 > HP≤3的妖怪 > 阴阳术 > 其他
+ * - 根据伤害缺口决定超度数量（若目标明确）
+ * - 若无明确目标，默认超度低价值牌
+ */
+export function aiDecide_伤魂鸟(
+  hand: CardInstance[],
+  targetHp?: number,
+  currentDamage?: number
+): string[] {
+  if (hand.length === 0) return [];
+  
+  // 计算伤害缺口
+  const damageGap = (targetHp ?? 0) - (currentDamage ?? 0);
+  const neededExileCount = damageGap > 0 ? Math.ceil(damageGap / 2) : 0;
+  
+  // 按超度优先级排序（低价值优先超度）
+  const prioritized = [...hand].sort((a, b) => {
+    // 恶评卡优先超度（cardType === 'penalty'）
+    const isPenaltyA = a.cardType === 'penalty' ? 1 : 0;
+    const isPenaltyB = b.cardType === 'penalty' ? 1 : 0;
+    if (isPenaltyA !== isPenaltyB) return isPenaltyB - isPenaltyA;
+    
+    // HP≤3 的妖怪次之
+    const hpA = a.hp ?? 0;
+    const hpB = b.hp ?? 0;
+    if (hpA <= 3 && hpB > 3) return -1;
+    if (hpB <= 3 && hpA > 3) return 1;
+    
+    // 同 HP 区间按 HP 升序（更低 HP 优先超度）
+    if (hpA !== hpB) return hpA - hpB;
+    
+    // 同 HP 按声誉升序（更低声誉优先超度）
+    const charmA = a.charm ?? 0;
+    const charmB = b.charm ?? 0;
+    return charmA - charmB;
+  });
+  
+  // 如果有伤害缺口，超度足够数量的牌
+  if (neededExileCount > 0) {
+    const exileCount = Math.min(neededExileCount, hand.length);
+    return prioritized.slice(0, exileCount).map(c => c.instanceId);
+  }
+  
+  // 无伤害需求时，只超度恶评卡
+  const penaltyCards = prioritized.filter(c => c.cardType === 'penalty');
+  return penaltyCards.map(c => c.instanceId);
+}
+
 // 伤魂鸟 - 超度X张手牌，伤害+2X
 registerEffect('伤魂鸟', async (ctx) => {
   const { player, onSelectCards } = ctx;
   
+  // 边界：打出后手牌为空
   if (player.hand.length === 0) {
-    return { success: true, message: '伤魂鸟：没有手牌可超度' };
+    return { success: true, message: '伤魂鸟：没有手牌可超度，伤害+0' };
   }
   
   let selectedIds: string[];
   if (onSelectCards) {
+    // 玩家选择：传入手牌，允许选 0~全部
     selectedIds = await onSelectCards(player.hand, player.hand.length);
   } else {
-    selectedIds = [];
+    // AI 接管：使用 L1 策略
+    selectedIds = aiDecide_伤魂鸟(player.hand);
   }
   
+  // 执行超度
   for (const id of selectedIds) {
     const idx = player.hand.findIndex(c => c.instanceId === id);
     if (idx !== -1) {
@@ -1502,13 +1562,19 @@ registerEffect('伤魂鸟', async (ctx) => {
     }
   }
   
+  // 计算伤害
   const damage = selectedIds.length * 2;
   player.damage += damage;
+  
+  if (selectedIds.length === 0) {
+    return { success: true, message: '伤魂鸟：未超度任何牌，伤害+0' };
+  }
   
   return { success: true, message: `伤魂鸟：超度${selectedIds.length}张，伤害+${damage}`, damage };
 });
 
 // 阴摩罗 - 选择弃牌区2张生命<6的牌使用，回合结束返回牌库底
+// 注意：服务端实现中使用 pendingEndOfTurnEffects 队列在回合结束时归还
 registerEffect('阴摩罗', async (ctx) => {
   const { player, gameState, onSelectCards, onChoice, onSelectTarget } = ctx;
   const validCards = player.discard.filter(c => (c.hp || 0) < 6);
@@ -1523,7 +1589,8 @@ registerEffect('阴摩罗', async (ctx) => {
   if (onSelectCards) {
     selectedIds = await onSelectCards(validCards, count);
   } else {
-    selectedIds = validCards.slice(0, count).map(c => c.instanceId);
+    // AI/默认策略：按效果价值选择（伤害>抓牌>鬼火）
+    selectedIds = aiDecide_阴摩罗(validCards, count);
   }
   
   const usedCards: CardInstance[] = [];
@@ -1546,15 +1613,66 @@ registerEffect('阴摩罗', async (ctx) => {
     }
   }
   
+  // 标记待归还的牌（服务端会在回合结束时处理）
+  // 共享层测试中直接放入牌库底（简化处理）
   for (const card of usedCards) {
-    player.deck.unshift(card);
+    player.deck.push(card); // 放入牌库底部（push 而不是 unshift）
   }
   
   return {
     success: true,
-    message: `阴摩罗：使用${usedCards.length}张弃牌区的牌${effectMsgs.length > 0 ? '（' + effectMsgs.join('；') + '）' : ''}，已返回牌库底`
+    message: `阴摩罗：使用${usedCards.map(c => c.name).join('、')}的效果`,
+    usedCards // 返回使用的牌，供服务端注册回合结束归还
   };
 });
+
+/**
+ * 阴摩罗 AI 选牌策略
+ * 按效果价值排序选择：伤害类 > 抓牌类 > 鬼火类
+ */
+export function aiDecide_阴摩罗(validCards: CardInstance[], maxCount: number): string[] {
+  // 效果价值评分表（基于妖怪名称）
+  const effectValue: Record<string, number> = {
+    // 伤害类（高价值）
+    '心眼': 6,      // 伤害+3
+    '针女': 5,      // 伤害+2
+    '涅槃之火': 5,  // 伤害+2
+    '天邪鬼赤': 4,  // 伤害+1 + 换牌
+    '天邪鬼青': 3,  // 伤害+1 或 抓牌+1
+    '唐纸伞妖': 3,  // 伤害+1 + 可超度
+    '赤舌': 2,      // 伤害+1 + 妨害
+    
+    // 抓牌类（中价值）
+    '树妖': 4,      // 抓牌+2 弃1
+    '天邪鬼黄': 4,  // 抓牌+2 置顶1
+    '蚌精': 4,      // 超度1 抓牌+2
+    '灯笼鬼': 3,    // 抓牌+1
+    '蝠翼': 3,      // 抓牌+1
+    
+    // 鬼火类（较低价值，因为回合结束归还无法获得声誉）
+    '鸣屋': 2,      // 鬼火+1
+    '兵主部': 2,    // 鬼火+1 + 条件伤害
+    
+    // 特殊效果（需考虑场景）
+    '骰子鬼': 5,    // 超度+退治
+    '轮入道': 4,    // 弃1使用2次效果
+    '魅妖': 3,      // 看对手牌
+    '天邪鬼绿': 3,  // 退治HP≤4妖怪
+    
+    // 默认
+    'default': 1
+  };
+  
+  // 按价值排序
+  const sorted = [...validCards].sort((a, b) => {
+    const valueA = effectValue[a.name] ?? effectValue['default'];
+    const valueB = effectValue[b.name] ?? effectValue['default'];
+    return valueB - valueA;
+  });
+  
+  // 选择前 maxCount 张
+  return sorted.slice(0, maxCount).map(c => c.instanceId);
+}
 
 // ============================================
 // 生命8 妖怪效果

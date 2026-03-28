@@ -701,7 +701,7 @@ describe('HarassmentPipeline', () => {
   });
 
   describe('青女房抵抗（展示免疫）', () => {
-    it('🟢 手牌有青女房 → 完全免疫', async () => {
+    it('🟢 手牌有青女房，选择展示 → 完全免疫', async () => {
       const target = createTestPlayer({
         id: 't1',
         name: '持有青女房',
@@ -713,7 +713,8 @@ describe('HarassmentPipeline', () => {
         applied = true;
       });
 
-      const ctx = createTestContext();
+      // onChoice 返回 0 = 选择展示青女房
+      const ctx = createTestContext({ onChoice: async () => 0 });
       const result = await resolveHarassment(action, [target], ctx);
 
       expect(result.affectedCount).toBe(0);
@@ -722,6 +723,55 @@ describe('HarassmentPipeline', () => {
       expect(applied).toBe(false);
       // 青女房仍在手牌中（展示不消耗）
       expect(target.hand.some(c => c.cardId === 'yokai_037')).toBe(true);
+    });
+
+    it('🟢 手牌有青女房，选择不展示 → 正常受到妨害', async () => {
+      const qingnvfangCard = createTestCard({ cardId: 'yokai_037', name: '青女房' });
+      const otherCard = createTestCard({ name: '天邪鬼青' });
+      const target = createTestPlayer({
+        id: 't1',
+        name: '持有青女房',
+        hand: [otherCard, qingnvfangCard],
+      });
+
+      let applied = false;
+      const action = createHarassmentAction('p1', '百目鬼', async (t) => {
+        // 模拟妨害：强制弃置1张手牌
+        if (t.hand.length > 0) {
+          t.discard.push(t.hand.shift()!);
+        }
+        applied = true;
+      });
+
+      // onChoice 返回 1 = 选择不展示
+      const ctx = createTestContext({ onChoice: async () => 1 });
+      const result = await resolveHarassment(action, [target], ctx);
+
+      expect(result.affectedCount).toBe(1);
+      expect(result.targets[0]!.immune).toBe(false);
+      expect(applied).toBe(true);
+      // 青女房仍在手牌中
+      expect(target.hand.some(c => c.cardId === 'yokai_037')).toBe(true);
+    });
+
+    it('🔴 手牌无青女房 → 正常受到妨害', async () => {
+      const target = createTestPlayer({
+        id: 't1',
+        name: '无青女房',
+        hand: [createTestCard({ name: '天邪鬼青' })],
+      });
+
+      let applied = false;
+      const action = createHarassmentAction('p1', '百目鬼', async () => {
+        applied = true;
+      });
+
+      const ctx = createTestContext();
+      const result = await resolveHarassment(action, [target], ctx);
+
+      expect(result.affectedCount).toBe(1);
+      expect(result.targets[0]!.immune).toBe(false);
+      expect(applied).toBe(true);
     });
   });
 

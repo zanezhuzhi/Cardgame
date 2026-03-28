@@ -1295,6 +1295,33 @@ export class MultiplayerGame {
       this.addLog(`🔄 【触】${player.name} 的麒麟归入牌库底`);
     }
   }
+  
+  /**
+   * 处理回合结束效果（阴摩罗归还等）
+   * 在清算阶段后、抓牌前执行
+   */
+  private processEndOfTurnEffects(player: PlayerState): void {
+    if (!this.state.pendingEndOfTurnEffects || this.state.pendingEndOfTurnEffects.length === 0) {
+      return;
+    }
+    
+    // 筛选当前玩家的回合结束效果
+    const playerEffects = this.state.pendingEndOfTurnEffects.filter(e => e.playerId === player.id);
+    
+    for (const effect of playerEffects) {
+      if (effect.type === 'yinmoluoReturn') {
+        // 阴摩罗效果：将使用过的牌归还牌库底
+        const cardNames = effect.cards.map(c => c.name).join('、');
+        for (const card of effect.cards) {
+          player.deck.push(card); // push 放到数组末尾 = 牌库底
+        }
+        this.addLog(`🔄 阴摩罗：${cardNames} 归还牌库底`);
+      }
+    }
+    
+    // 移除已处理的效果
+    this.state.pendingEndOfTurnEffects = this.state.pendingEndOfTurnEffects.filter(e => e.playerId !== player.id);
+  }
 
   /**
    * 鬼火阶段
@@ -1441,6 +1468,9 @@ export class MultiplayerGame {
     
     // 5.5. 麒麟【触】效果：回合结束时从弃牌堆归牌库底
     this.checkKirinEndOfTurn(player);
+    
+    // 5.6. 处理阴摩罗回合结束归还效果
+    this.processEndOfTurnEffects(player);
     
     // 6. 重置本回合打牌计数
     player.cardsPlayed = 0;
@@ -2845,6 +2875,16 @@ export class MultiplayerGame {
       onChoice: async (options: string[]): Promise<number> => {
         // 默认选第一个选项
         return 0;
+      },
+      // 青女房防御来袭检查回调
+      onCheckBossRaidDefense: async (player: PlayerState, bossName: string): Promise<boolean> => {
+        // 检查手牌中是否有青女房
+        const qingnvfang = player.hand.find(c => c.cardId === 'yokai_037' || c.name === '青女房');
+        if (!qingnvfang) return false;
+        
+        // TODO: 未来可添加玩家交互选择，目前默认自动展示免疫
+        this.addLog(`   🛡️ ${player.name} 展示青女房，免疫来袭`);
+        return true;
       }
     };
     
@@ -4309,6 +4349,52 @@ export class MultiplayerGame {
           break;
           
         // ============ 生命6 ============
+        case '伤魂鸟': {
+          // 超度X张手牌，伤害+2X
+          if (player.hand.length === 0) {
+            // 无手牌时直接结束
+            this.addLog(`   ✨ 御魂：无手牌可超度，伤害+0`);
+            break;
+          }
+          
+          if (player.isAI) {
+            // AI自动决策
+            const { aiDecide_伤魂鸟 } = require('@shared/game/effects/YokaiEffects');
+            // 获取当前最低血量退治目标作为参考
+            const targets = [this.state.field.currentBoss, ...this.state.field.monsters].filter(Boolean) as CardInstance[];
+            const lowestHpTarget = targets.length > 0 ? Math.min(...targets.map(t => t.currentHp || t.hp)) : undefined;
+            
+            const selectedIds = aiDecide_伤魂鸟(player.hand, lowestHpTarget, player.damage);
+            const count = selectedIds.length;
+            
+            // 执行超度
+            for (const id of selectedIds) {
+              const idx = player.hand.findIndex(c => c.instanceId === id);
+              if (idx !== -1) {
+                const card = player.hand.splice(idx, 1)[0];
+                player.exiled.push(card);
+              }
+            }
+            
+            // 增加伤害
+            player.damage += count * 2;
+            const cardNames = player.exiled.slice(-count).map(c => c.name).join('、') || '无';
+            this.addLog(`   ✨ 御魂：超度 ${count} 张 [${cardNames}]，伤害+${count * 2}`);
+          } else {
+            // 真人玩家：设置pendingChoice让客户端选择
+            this.state.pendingChoice = {
+              type: 'shangHunNiaoExile',
+              playerId: player.id,
+              prompt: `选择要超度的手牌（每张+2伤害）`,
+              candidates: player.hand.map(c => c.instanceId),
+              minCount: 0,
+              maxCount: player.hand.length
+            };
+            this.addLog(`   ⏳ 等待选择超度手牌（0~${player.hand.length}张）...`);
+          }
+          break;
+        }
+          
         case '飞缘魔': {
           // 使用当前鬼王的御魂效果
           const boss = this.state.field.currentBoss;
@@ -4491,9 +4577,10 @@ export class MultiplayerGame {
           
         // ============ 生命8 ============
         case '青女房':
-          // 伤害+5
-          player.damage += 5;
-          this.addLog(`   ✨ 御魂：伤害+5`);
+          // 抓牌+2，鬼火+1
+          this.drawCards(player, 2);
+          player.ghostFire = Math.min(player.ghostFire + 1, player.maxGhostFire);
+          this.addLog(`   ✨ 御魂：抓牌+2，鬼火+1`);
           break;
           
         case '三味':
@@ -6051,6 +6138,34 @@ export class MultiplayerGame {
         break;
       }
         
+      // ============ 阴摩罗（选择弃牌区2张HP<6的牌使用效果）============
+      case '阴摩罗': {
+        // 筛选弃牌区 HP < 6 的牌
+        const yinmoluoCandidates = player.discard.filter(c => (c.hp ?? 0) < 6);
+        
+        if (yinmoluoCandidates.length === 0) {
+          this.addLog(`   ✨ 阴摩罗：弃牌区没有HP<6的牌，效果跳过`);
+        } else {
+          const selectCount = Math.min(2, yinmoluoCandidates.length);
+          
+          // 设置pendingChoice等待玩家选择
+          this.state.pendingChoice = {
+            type: 'yinmoluoSelect',
+            playerId: player.id,
+            candidates: yinmoluoCandidates.map(c => ({
+              instanceId: c.instanceId,
+              name: c.name,
+              hp: c.hp ?? 0,
+              cardType: c.cardType
+            })),
+            selectCount,
+            prompt: `选择${selectCount}张弃牌区的牌使用其效果（HP<6）`
+          };
+          this.addLog(`   ⏳ 阴摩罗：等待选择弃牌区的牌...`);
+        }
+        break;
+      }
+        
       // ============ 其他无交互御魂 ============
       default:
         this.executeYokaiEffectSimple(player, { name: effectKey } as any);
@@ -6391,6 +6506,148 @@ export class MultiplayerGame {
     // 超度后抓牌+2
     this.drawCards(player, 2);
     this.addLog(`   ✨ 蚌精：抓牌+2`);
+
+    // 清除等待状态
+    this.state.pendingChoice = undefined;
+    
+    // 检查是否需要继续轮入道队列
+    this.checkAndContinueWheelMonkQueue();
+
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+
+  /**
+   * 处理伤魂鸟超度手牌选择响应
+   * @param playerId 玩家ID
+   * @param selectedIds 选择的手牌instanceId数组（可以为空）
+   */
+  public handleShangHunNiaoResponse(playerId: string, selectedIds: string[]): { success: boolean; error?: string } {
+    // 验证是否有等待的伤魂鸟超度选择
+    if (!this.state.pendingChoice || this.state.pendingChoice.type !== 'shangHunNiaoExile') {
+      return { success: false, error: '没有待处理的伤魂鸟超度选择' };
+    }
+    // 验证是否是正确的玩家
+    if (this.state.pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+
+    const pendingChoice = this.state.pendingChoice as import('@shared/types').ShangHunNiaoExileChoice;
+    
+    // 验证选择数量
+    if (selectedIds.length < pendingChoice.minCount || selectedIds.length > pendingChoice.maxCount) {
+      return { success: false, error: `选择数量必须在 ${pendingChoice.minCount}-${pendingChoice.maxCount} 之间` };
+    }
+
+    // 验证选择的牌是否有效
+    const invalidIds = selectedIds.filter(id => !pendingChoice.candidates.includes(id));
+    if (invalidIds.length > 0) {
+      return { success: false, error: '包含无效的卡牌选择' };
+    }
+
+    // 执行超度
+    const exiledCards: import('@shared/types').CardInstance[] = [];
+    for (const id of selectedIds) {
+      const idx = player.hand.findIndex(c => c.instanceId === id);
+      if (idx !== -1) {
+        const card = player.hand.splice(idx, 1)[0];
+        player.exiled.push(card);
+        exiledCards.push(card);
+      }
+    }
+
+    // 计算伤害加成
+    const damageBonus = exiledCards.length * 2;
+    player.damage += damageBonus;
+
+    // 记录日志
+    const cardNames = exiledCards.map(c => c.name).join('、') || '无';
+    if (exiledCards.length > 0) {
+      this.addLog(`   ☁️ 超度 ${exiledCards.length} 张 [${cardNames}]`);
+      this.addLog(`   ✨ 伤魂鸟：伤害+${damageBonus}`);
+    } else {
+      this.addLog(`   ✨ 伤魂鸟：选择不超度，伤害+0`);
+    }
+
+    // 清除等待状态
+    this.state.pendingChoice = undefined;
+    
+    // 检查是否需要继续轮入道队列
+    this.checkAndContinueWheelMonkQueue();
+
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+
+  /**
+   * 处理阴摩罗选择弃牌区牌的响应
+   * 从弃牌区选择2张HP<6的牌使用效果，回合结束归还牌库底
+   * @param playerId 玩家ID
+   * @param selectedIds 选择的弃牌区卡牌instanceId数组
+   */
+  public handleYinmoluoSelectResponse(playerId: string, selectedIds: string[]): { success: boolean; error?: string } {
+    // 验证是否有等待的阴摩罗选择
+    if (!this.state.pendingChoice || this.state.pendingChoice.type !== 'yinmoluoSelect') {
+      return { success: false, error: '没有待处理的阴摩罗选择' };
+    }
+    // 验证是否是正确的玩家
+    if (this.state.pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+
+    const pendingChoice = this.state.pendingChoice as any;
+    const selectCount = pendingChoice.selectCount || 2;
+    
+    // 验证选择数量
+    if (selectedIds.length !== selectCount) {
+      return { success: false, error: `必须选择${selectCount}张牌` };
+    }
+
+    // 验证选择的牌是否在候选列表中
+    const candidateIds = pendingChoice.candidates.map((c: any) => c.instanceId);
+    const invalidIds = selectedIds.filter((id: string) => !candidateIds.includes(id));
+    if (invalidIds.length > 0) {
+      return { success: false, error: '包含无效的卡牌选择' };
+    }
+
+    // 从弃牌区移出所选牌并执行效果
+    const usedCards: CardInstance[] = [];
+    for (const id of selectedIds) {
+      const idx = player.discard.findIndex(c => c.instanceId === id);
+      if (idx !== -1) {
+        const card = player.discard.splice(idx, 1)[0];
+        usedCards.push(card);
+      }
+    }
+
+    // 记录使用的牌
+    const cardNames = usedCards.map(c => c.name).join('、');
+    this.addLog(`   🌙 阴摩罗：选择使用 [${cardNames}]`);
+
+    // 依次执行效果
+    for (const card of usedCards) {
+      if (card.cardType === 'yokai' || card.cardType === 'spell') {
+        this.addLog(`   → 执行 ${card.name} 效果`);
+        this.executeYokaiEffectSimple(player, card);
+      }
+    }
+
+    // 注册回合结束归还效果
+    if (!this.state.pendingEndOfTurnEffects) {
+      this.state.pendingEndOfTurnEffects = [];
+    }
+    this.state.pendingEndOfTurnEffects.push({
+      type: 'yinmoluoReturn',
+      playerId: player.id,
+      cards: usedCards
+    });
+    this.addLog(`   📝 ${cardNames} 将在回合结束时归还牌库底`);
 
     // 清除等待状态
     this.state.pendingChoice = undefined;

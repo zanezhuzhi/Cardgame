@@ -228,3 +228,21 @@ cd server && npm test
 
 ---
 
+## 9) 御魂验收记录
+
+> GM 手动测试步骤与验收结果
+
+### 伤魂鸟 (yokai_035)
+
+| 项目 | 内容 |
+|------|------|
+| **效果** | 超度X张手牌，伤害+2X |
+| **生命** | 6 |
+| **GM 测试步骤** | 1. `/api/gm/setyokai/:roomId/0/伤魂鸟` 设置场上妖怪 <br> 2. `/api/gm/addcard/:roomId/:playerId/伤魂鸟/1` 添加到手牌 <br> 3. 打出伤魂鸟，验证弹出手牌选择UI <br> 4. 选择0~N张牌超度，验证伤害=选择数×2 |
+| **边界测试** | - 手牌为空时直接显示"伤害+0" <br> - AI自动选择低价值牌超度（恶评优先） |
+| **pendingChoice** | `shangHunNiaoExile` |
+| **响应事件** | `game:shangHunNiaoResponse { selectedIds: string[] }` |
+| **轮入道兼容** | ✅ 两次独立选择 + 累计伤害 |
+| **验收状态** | ⏳ 待测试 |
+
+

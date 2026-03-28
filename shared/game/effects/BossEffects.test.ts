@@ -429,3 +429,141 @@ describe('贪嗔痴', () => {
     });
   });
 });
+
+// ============================================
+// 青女房来袭防御测试
+// ============================================
+describe('青女房来袭防御', () => {
+  let player1: PlayerState;
+  let player2: PlayerState;
+  let gameState: GameState;
+
+  beforeEach(() => {
+    player1 = createTestPlayer({ id: 'p1', name: '玩家1' });
+    player2 = createTestPlayer({ id: 'p2', name: '玩家2' });
+    player1.hand = [createTestCard('yokai', '天邪鬼青')];
+    player2.hand = [createTestCard('yokai', '天邪鬼青')];
+    gameState = {
+      phase: 'action',
+      currentPlayerIndex: 0,
+      players: [player1, player2],
+      field: {
+        yokaiSlots: [null, null, null, null, null, null],
+        bossSlot: null,
+        yokaiDeck: [],
+        bossDeck: []
+      },
+      turnNumber: 1,
+      log: []
+    };
+  });
+
+  describe('石距来袭', () => {
+    it('🟢 手牌有青女房，选择展示 → 免疫弃牌效果', async () => {
+      // 给玩家1添加青女房和阴阳术
+      const qingnvfang = { ...createTestCard('yokai', '青女房'), cardId: 'yokai_037' };
+      const spell = createTestCard('spell', '阴阳术');
+      player1.hand = [qingnvfang, spell];
+
+      // 记录弃牌前手牌数量
+      const handSizeBefore = player1.hand.length;
+
+      // 使用 onCheckBossRaidDefense 模拟选择展示
+      // 注意：回调参数是 player 对象，不是 playerId
+      await executeBossArrival('石距', {
+        gameState,
+        bossCard: createTestCard('boss', '石距'),
+        onCheckBossRaidDefense: async (player) => {
+          return player.id === 'p1'; // 玩家1选择展示
+        }
+      });
+
+      // 玩家1选择展示，应该免疫（手牌不变）
+      expect(player1.hand.length).toBe(handSizeBefore);
+      expect(player1.discard.length).toBe(0);
+    });
+
+    it('🟢 手牌有青女房，选择不展示 → 正常受到来袭效果', async () => {
+      // 给玩家1添加青女房和阴阳术
+      const qingnvfang = { ...createTestCard('yokai', '青女房'), cardId: 'yokai_037' };
+      const spell = createTestCard('spell', '阴阳术');
+      player1.hand = [qingnvfang, spell];
+
+      await executeBossArrival('石距', {
+        gameState,
+        bossCard: createTestCard('boss', '石距'),
+        onCheckBossRaidDefense: async () => false // 返回 false = 选择不展示
+      });
+
+      // 玩家1选择不展示，阴阳术被弃掉
+      expect(player1.discard.length).toBe(1);
+      expect(player1.discard[0]!.cardType).toBe('spell');
+    });
+
+    it('🔴 手牌无青女房 → 正常受到来袭效果', async () => {
+      // 玩家只有阴阳术，没有青女房
+      player1.hand = [createTestCard('spell', '阴阳术')];
+
+      await executeBossArrival('石距', {
+        gameState,
+        bossCard: createTestCard('boss', '石距'),
+        onCheckBossRaidDefense: async () => false
+      });
+
+      // 阴阳术被弃掉
+      expect(player1.discard.length).toBe(1);
+    });
+  });
+
+  describe('土蜘蛛来袭', () => {
+    it('🟢 手牌有青女房，选择展示 → 免疫弃牌惩罚', async () => {
+      const qingnvfang = { ...createTestCard('yokai', '青女房'), cardId: 'yokai_037' };
+      player1.hand = [qingnvfang]; // 只有1张妖怪，不足3张阴阳术
+      const handSizeBefore = player1.hand.length;
+
+      await executeBossArrival('土蜘蛛', {
+        gameState,
+        bossCard: createTestCard('boss', '土蜘蛛'),
+        onCheckBossRaidDefense: async (player) => player.id === 'p1'
+      });
+
+      // 玩家1免疫，手牌数不变
+      expect(player1.hand.length).toBe(handSizeBefore);
+    });
+  });
+
+  describe('八岐大蛇来袭', () => {
+    it('🟢 手牌有青女房，选择展示 → 免疫弃牌和式神翻面', async () => {
+      const qingnvfang = { ...createTestCard('yokai', '青女房'), cardId: 'yokai_037' };
+      player1.hand = [qingnvfang];
+      player1.shikigamiState = [{ flipped: false }] as any;
+      const handSizeBefore = player1.hand.length;
+
+      await executeBossArrival('八岐大蛇', {
+        gameState,
+        bossCard: createTestCard('boss', '八岐大蛇'),
+        onCheckBossRaidDefense: async (player) => player.id === 'p1'
+      });
+
+      // 玩家1免疫，手牌不变
+      expect(player1.hand.length).toBe(handSizeBefore);
+      expect(player1.discard.length).toBe(0);
+    });
+
+    it('🟢 选择不展示 → 受到弃牌效果', async () => {
+      const qingnvfang = { ...createTestCard('yokai', '青女房'), cardId: 'yokai_037' };
+      player1.hand = [qingnvfang];
+      player1.shikigamiState = [{ flipped: false }] as any;
+
+      await executeBossArrival('八岐大蛇', {
+        gameState,
+        bossCard: createTestCard('boss', '八岐大蛇'),
+        onCheckBossRaidDefense: async () => false
+      });
+
+      // 玩家1正常受到效果，青女房被弃（生命最高的牌）
+      expect(player1.discard.length).toBe(1);
+      expect(player1.discard[0]!.cardId).toBe('yokai_037');
+    });
+  });
+});

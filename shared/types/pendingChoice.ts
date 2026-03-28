@@ -258,6 +258,42 @@ export interface HarassmentResistChoice extends BasePendingChoice {
   }>;
 }
 
+/** 鬼王来袭防御选择（玩家选择是否展示青女房免疫来袭） */
+export interface BossRaidDefenseChoice extends BasePendingChoice {
+  type: 'bossRaidDefense';
+  /** 鬼王名称 */
+  bossName: string;
+  /** 青女房卡牌实例ID */
+  cardInstanceId: string;
+}
+
+// ============ 伤魂鸟效果 ============
+
+/** 伤魂鸟超度选择（选择X张手牌超度，伤害+2X） */
+export interface ShangHunNiaoExileChoice extends BasePendingChoice {
+  type: 'shangHunNiaoExile';
+  /** 可超度的手牌 instanceId 列表 */
+  candidates: string[];
+  /** 最少选择数量（通常为0，可不超度） */
+  minCount: number;
+  /** 最多选择数量（通常为手牌数） */
+  maxCount: number;
+}
+
+/** 阴摩罗选择（从弃牌区选择2张HP<6的牌使用其效果） */
+export interface YinmoluoSelectChoice extends BasePendingChoice {
+  type: 'yinmoluoSelect';
+  /** 可选卡牌（HP < 6 的弃牌区卡牌） */
+  candidates: Array<{
+    instanceId: string;
+    name: string;
+    hp: number;
+    cardType: string;
+  }>;
+  /** 需要选择的数量（最多2张） */
+  selectCount: number;
+}
+
 // ============ 联合类型 ============
 
 /**
@@ -279,6 +315,7 @@ export type PendingChoice =
   | NaginataSoulDiscardChoice
   | ZhenMuShouTargetChoice
   | YouguXiangSelectChoice
+  | YinmoluoSelectChoice
   // 地藏像相关
   | DizangConfirmChoice
   | DizangSelectShikigamiChoice
@@ -290,7 +327,10 @@ export type PendingChoice =
   | ShikigamiNumberInput
   | ShikigamiConfirmChoice
   | ShikigamiOptionChoice
-  | HarassmentResistChoice;
+  | HarassmentResistChoice
+  | BossRaidDefenseChoice
+  // 伤魂鸟
+  | ShangHunNiaoExileChoice;
 
 /**
  * PendingChoice 所有可能的类型字面量

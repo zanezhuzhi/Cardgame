@@ -4583,10 +4583,46 @@ export class MultiplayerGame {
           this.addLog(`   ✨ 御魂：抓牌+2，鬼火+1`);
           break;
           
-        case '三味':
-          // 本回合鬼火获取额外+1
-          this.addLog(`   ✨ 御魂：三味共鸣`);
+        case '三味': {
+          // 统计本回合已使用的「鬼火」牌和阴阳术数量
+          const played = player.played || [];
+          let ghostFireCount = 0;
+          
+          for (const card of played) {
+            // 阴阳术 (spell)
+            if (card.cardType === 'spell') {
+              ghostFireCount++;
+            }
+            // 「鬼火」牌 (subtype包含"鬼火"的御魂)
+            else if (card.cardType === 'yokai') {
+              const tags = (card as any).tags || [];
+              const subtype = (card as any).subtype || '';
+              if (tags.includes('鬼火') || subtype.includes('鬼火')) {
+                ghostFireCount++;
+              }
+            }
+          }
+          
+          // 即时伤害加成
+          const immediateDamage = ghostFireCount * 2;
+          player.damage += immediateDamage;
+          
+          // 添加buff用于之后使用阴阳术的伤害加成
+          player.tempBuffs = player.tempBuffs || [];
+          player.tempBuffs.push({
+            type: 'SPELL_DAMAGE_BONUS',
+            value: 2,
+            duration: 1,
+            source: '三味'
+          } as any);
+          
+          if (ghostFireCount > 0) {
+            this.addLog(`   ✨ 御魂：已用${ghostFireCount}张鬼火牌/阴阳术，伤害+${immediateDamage}，之后每使用阴阳术再+2`);
+          } else {
+            this.addLog(`   ✨ 御魂：本回合每使用阴阳术伤害+2`);
+          }
           break;
+        }
           
         // ============ 鬼王御魂 ============
         case '麒麟':

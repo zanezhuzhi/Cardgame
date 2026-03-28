@@ -993,6 +993,9 @@
           </span>
           <p>{{tooltip.skill.effect}}</p>
         </div>
+        <div class="tooltip-dynamic" v-if="tooltip.dynamicEffect">
+          <p>{{tooltip.dynamicEffect}}</p>
+        </div>
       </div>
     </Teleport>
     
@@ -1824,6 +1827,7 @@ const tooltip = reactive<{
   effect: string
   passive: {name: string, effect: string} | null
   skill: {name: string, cost: number, effect: string} | null
+  dynamicEffect: string | null  // 三味等卡牌的动态效果预览
 }>({
   show: false,
   card: null,
@@ -1834,7 +1838,8 @@ const tooltip = reactive<{
   stats: null,
   effect: '',
   passive: null,
-  skill: null
+  skill: null,
+  dynamicEffect: null
 })
 
 // 操作提示弹窗
@@ -2874,6 +2879,7 @@ function showTooltip(event: MouseEvent, card: CardInstance) {
     tooltip.effect = card.effect || `造成 ${card.damage || 1} 点伤害`
     tooltip.passive = null
     tooltip.skill = null
+    tooltip.dynamicEffect = null
   } else if (cardType === 'yokai' || cardType === 'token') {
     tooltip.typeLabel = cardType === 'yokai' ? '御魂' : '令牌'
     tooltip.typeClass = cardType === 'yokai' ? 'type-yokai' : 'type-token'
@@ -2887,6 +2893,34 @@ function showTooltip(event: MouseEvent, card: CardInstance) {
     tooltip.effect = card.effect || (cardType === 'token' ? '可用于超度' : '无特殊效果')
     tooltip.passive = null
     tooltip.skill = null
+    
+    // 三味动态效果预览：统计本回合已使用的阴阳术和鬼火牌
+    if (card.name === '三味') {
+      const myPlayer = state.value?.players.find(p => p.id === myPlayerId.value)
+      if (myPlayer) {
+        const played = myPlayer.played || []
+        let count = 0
+        for (const c of played) {
+          if (c.cardType === 'spell') {
+            count++
+          } else if (c.cardType === 'yokai') {
+            const tags = (c as any).tags || []
+            const subtype = (c as any).subtype || ''
+            if (tags.includes('鬼火') || subtype.includes('鬼火')) {
+              count++
+            }
+          }
+        }
+        const damage = count * 2
+        if (count > 0) {
+          tooltip.dynamicEffect = `🔥 当前已用 ${count} 张阴阳术/鬼火牌，预计伤害 +${damage}`
+        } else {
+          tooltip.dynamicEffect = `💡 打出前先使用阴阳术或鬼火牌可增加伤害`
+        }
+      }
+    } else {
+      tooltip.dynamicEffect = null
+    }
   } else if (cardType === 'penalty') {
     tooltip.typeLabel = '恶评'
     tooltip.typeClass = 'type-penalty'
@@ -2896,6 +2930,7 @@ function showTooltip(event: MouseEvent, card: CardInstance) {
     tooltip.effect = card.effect || '负面声誉'
     tooltip.passive = null
     tooltip.skill = null
+    tooltip.dynamicEffect = null
   } else {
     tooltip.typeLabel = cardType || '卡牌'
     tooltip.typeClass = ''
@@ -2903,6 +2938,7 @@ function showTooltip(event: MouseEvent, card: CardInstance) {
     tooltip.effect = card.effect || ''
     tooltip.passive = null
     tooltip.skill = null
+    tooltip.dynamicEffect = null
   }
   
   tooltip.show = true
@@ -6670,5 +6706,21 @@ async function confirmReplaceShikigami() {
   font-size:13px;
   color:#ccc;
   line-height:1.4;
+}
+
+/* 三味等卡牌的动态效果预览 */
+.tooltip-dynamic{
+  margin-top:10px;
+  padding:8px 10px;
+  background:linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15));
+  border-left:3px solid #ff9800;
+  border-radius:4px;
+}
+.tooltip-dynamic p{
+  margin:0;
+  font-size:13px;
+  color:#ffcc80;
+  line-height:1.4;
+  font-weight:500;
 }
 </style>

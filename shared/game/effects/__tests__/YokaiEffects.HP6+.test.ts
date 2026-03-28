@@ -12,7 +12,8 @@ import {
   aiDecide_天邪鬼黄,
   aiDecide_魅妖,
   aiDecide_伤魂鸟,
-  aiDecide_阴摩罗
+  aiDecide_阴摩罗,
+  triggerOnDiscard
 } from '../YokaiEffects';
 import { createTestPlayer, createTestGameState, createTestCard, createYokaiCard, createSpellCard, createOpponent } from './testUtils';
 import type { CardInstance, PlayerState, GameState } from '../../../types';
@@ -351,6 +352,66 @@ describe('三味', () => {
     // 但buff仍然添加
     const buff = player.tempBuffs.find(b => (b as any).source === '三味');
     expect(buff).toBeDefined();
+  });
+  
+  // ============ 【触】弃置效果测试 ============
+  describe('【触】弃置效果', () => {
+    it('🟢 主动弃置三味时抓牌+3', () => {
+      const sanmi = createTestCard('yokai', '三味');
+      player.hand = [sanmi];
+      player.deck = [
+        createTestCard('yokai', '心眼'),
+        createTestCard('yokai', '赤舌'),
+        createTestCard('yokai', '灯笼鬼'),
+        createTestCard('yokai', '树妖'),
+      ];
+      const initialHandCount = player.hand.length;
+      const initialDeckCount = player.deck.length;
+      
+      // 执行主动弃置
+      const triggered = triggerOnDiscard(player, sanmi);
+      
+      expect(triggered).toBe(true);
+      expect(player.hand.length).toBe(initialHandCount + 3); // 抓3张
+      expect(player.deck.length).toBe(initialDeckCount - 3);
+    });
+    
+    it('🔴 边界条件：牌库不足3张时抓取剩余全部', () => {
+      const sanmi = createTestCard('yokai', '三味');
+      player.hand = [sanmi];
+      player.deck = [
+        createTestCard('yokai', '心眼'),
+        createTestCard('yokai', '赤舌'),
+      ]; // 只有2张
+      
+      triggerOnDiscard(player, sanmi);
+      
+      expect(player.hand.length).toBe(1 + 2); // 只能抓2张
+      expect(player.deck.length).toBe(0);
+    });
+    
+    it('🔴 边界条件：牌库为空时不报错', () => {
+      const sanmi = createTestCard('yokai', '三味');
+      player.hand = [sanmi];
+      player.deck = [];
+      
+      const triggered = triggerOnDiscard(player, sanmi);
+      
+      expect(triggered).toBe(true);
+      expect(player.hand.length).toBe(1); // 手牌不变
+    });
+    
+    it('🔴 非三味卡牌不触发效果', () => {
+      const otherCard = createTestCard('yokai', '心眼');
+      player.hand = [otherCard];
+      player.deck = [createTestCard('yokai', '赤舌')];
+      const initialHandCount = player.hand.length;
+      
+      const triggered = triggerOnDiscard(player, otherCard);
+      
+      expect(triggered).toBe(false);
+      expect(player.hand.length).toBe(initialHandCount); // 手牌不变
+    });
   });
 });
 
@@ -738,6 +799,35 @@ describe('轮入道（递归执行）', () => {
     // 三味添加了2次SPELL_DAMAGE_BONUS buff
     const bonusBuffs = player.tempBuffs.filter(b => (b as any).source === '三味');
     expect(bonusBuffs.length).toBe(2);
+  });
+  
+  it('🟢 轮入道+三味：本回合有阴阳术时伤害正确累加', async () => {
+    const sanmi = createTestCard('yokai', '三味');
+    sanmi.hp = 4;
+    
+    // 模拟本回合已打出2张阴阳术
+    (player as any).played = [
+      { ...createTestCard('spell', '基础术式'), cardType: 'spell' },
+      { ...createTestCard('spell', '中级符咒'), cardType: 'spell' },
+    ];
+    player.hand = [sanmi];
+    player.deck = Array(12).fill(null).map(() => createTestCard('spell'));
+    player.damage = 0;
+    
+    const result = await executeYokaiEffect('轮入道', {
+      player, gameState,
+      card: createTestCard('yokai', '轮入道'),
+      onSelectCards: async (cards) => [cards[0]!.instanceId]
+    });
+
+    expect(result.success).toBe(true);
+    // 三味效果执行2次，每次统计2张阴阳术 → 伤害+4 × 2 = +8
+    expect(player.damage).toBe(8);
+    // 同时累加2个SPELL_DAMAGE_BONUS buff
+    const bonusBuffs = player.tempBuffs.filter(b => (b as any).source === '三味');
+    expect(bonusBuffs.length).toBe(2);
+    // 每个buff值为2
+    expect(bonusBuffs.every(b => b.value === 2)).toBe(true);
   });
 });
 

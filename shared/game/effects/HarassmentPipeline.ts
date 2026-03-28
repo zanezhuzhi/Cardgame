@@ -282,7 +282,7 @@ registerResistHandler({
   },
 });
 
-// ── P20: 铮（弃置+抓牌+2，免疫） ──
+// ── P20: 铮（可选弃置+抓牌+2，免疫） ──
 registerResistHandler({
   id: '铮',
   priority: 20,
@@ -292,7 +292,29 @@ registerResistHandler({
   async resolve(target, ctx) {
     const card = findHandCard(target, 'yokai_021')!;
 
-    // 铮：弃置此牌 → 抓牌+2 → 免疫
+    // 询问目标玩家是否弃置「铮」来抵消妨害
+    // onChoice 由服务端注入：对目标玩家发起选择交互
+    // 若无回调（测试/离线）默认选择弃置（索引 0）
+    let choice = 0; // 默认弃置
+    try {
+      choice = await ctx.onChoice(
+        ['弃置「铮」（抓牌+2，免疫妨害）', '不弃置'],
+        `${target.name} 受到妨害，是否弃置「铮」来抵消？`,
+      );
+    } catch {
+      // 回调异常时使用默认策略（弃置）
+      choice = 0;
+    }
+
+    if (choice !== 0) {
+      // 玩家选择不弃置 → 不免疫，继续后续抵抗链
+      return {
+        immune: false,
+        preEffectLogs: [`🃏 ${target.name} 选择不弃置「铮」`],
+      };
+    }
+
+    // 弃置铮 → 抓牌+2 → 免疫
     const cardIdx = target.hand.findIndex(c => c.instanceId === card.instanceId);
     if (cardIdx !== -1) {
       const discarded = target.hand.splice(cardIdx, 1)[0]!;

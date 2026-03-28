@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🧪 御魂传说 - 自动化测试</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #eee;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    header {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 16px 24px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    header h1 {
+      font-size: 20px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    
+    header h1 span {
+      font-size: 24px;
+    }
+    
+    .container {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+    
+    /* 左侧按钮面板 */
+    .sidebar {
+      width: 260px;
+      background: rgba(0, 0, 0, 0.2);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      border-right: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .section-title {
+      font-size: 12px;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 10px;
+      margin-bottom: 4px;
+    }
+    
+    .section-title:first-child {
+      margin-top: 0;
+    }
+    
+    .btn {
+      padding: 12px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #fff;
+    }
+    
+    .btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+    
+    .btn:active {
+      transform: translateY(0);
+    }
+    
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    
+    .btn-yokai {
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    }
+    
+    .btn-boss {
+      background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+    }
+    
+    .btn-shikigami {
+      background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    }
+    
+    .btn-flow {
+      background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+    }
+    
+    .btn-data {
+      background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+    }
+    
+    .btn-all {
+      background: linear-gradient(135deg, #ff0844 0%, #ffb199 100%);
+      font-weight: bold;
+    }
+    
+    .btn .icon {
+      font-size: 18px;
+    }
+    
+    /* 右侧输出面板 */
+    .output-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+    }
+    
+    .output-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    
+    .output-header h2 {
+      font-size: 16px;
+      font-weight: 500;
+    }
+    
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+    }
+    
+    .status-indicator {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #666;
+    }
+    
+    .status-indicator.running {
+      background: #ffd700;
+      animation: pulse 1s infinite;
+    }
+    
+    .status-indicator.success {
+      background: #4caf50;
+    }
+    
+    .status-indicator.failed {
+      background: #f44336;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    .output {
+      flex: 1;
+      background: #0d1117;
+      border-radius: 8px;
+      padding: 16px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    
+    .output .pass {
+      color: #4caf50;
+    }
+    
+    .output .fail {
+      color: #f44336;
+    }
+    
+    .clear-btn {
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #888;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    
+    .clear-btn:hover {
+      border-color: rgba(255, 255, 255, 0.4);
+      color: #fff;
+    }
+    
+    .copy-fail-btn {
+      background: linear-gradient(135deg, #f44336 0%, #e91e63 100%);
+      border: none;
+      color: #fff;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      display: none;
+    }
+    
+    .copy-fail-btn:hover {
+      opacity: 0.9;
+    }
+    
+    .copy-fail-btn.show {
+      display: inline-block;
+    }
+    
+    /* 底部状态栏 */
+    footer {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 10px 24px;
+      font-size: 12px;
+      color: #666;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><span>🧪</span> 御魂传说 - 自动化测试工具</h1>
+  </header>
+  
+  <div class="container">
+    <div class="sidebar">
+      <div class="section-title">🎴 卡牌效果测试</div>
+      <button class="btn btn-yokai" data-test="yokai">
+        <span class="icon">👻</span> 测试全部妖怪
+      </button>
+      <button class="btn btn-boss" data-test="boss">
+        <span class="icon">👹</span> 测试全部鬼王
+      </button>
+      <button class="btn btn-shikigami" data-test="shikigami">
+        <span class="icon">🦊</span> 测试全部式神
+      </button>
+      
+      <div class="section-title">⚙️ 系统测试</div>
+      <button class="btn btn-flow" data-test="gameFlow">
+        <span class="icon">🔄</span> 回合流程测试
+      </button>
+      <button class="btn btn-data" data-test="consistency">
+        <span class="icon">📊</span> 数据一致性测试
+      </button>
+      
+      <div class="section-title">📦 批量测试</div>
+      <button class="btn btn-primary" data-test="all-shared">
+        <span class="icon">📦</span> Shared 全部测试
+      </button>
+      <button class="btn btn-primary" data-test="all-server">
+        <span class="icon">🖥️</span> Server 全部测试
+      </button>
+      <button class="btn btn-all" data-test="all">
+        <span class="icon">🚀</span> 运行全部测试
+      </button>
+    </div>
+    
+    <div class="output-panel">
+      <div class="output-header">
+        <h2>📋 测试输出</h2>
+        <div style="display: flex; gap: 12px; align-items: center;">
+          <div class="status">
+            <div class="status-indicator" id="statusIndicator"></div>
+            <span id="statusText">就绪</span>
+          </div>
+          <button class="clear-btn" id="clearBtn">清空</button>
+          <button class="copy-fail-btn" id="copyFailBtn">📋 复制失败提示</button>
+        </div>
+      </div>
+      <div class="output" id="output">点击左侧按钮开始测试...</div>
+    </div>
+  </div>
+  
+  <footer>
+    <span>📁 项目路径: Cardgame/</span>
+    <span id="timer"></span>
+  </footer>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    
+    const output = document.getElementById('output');
+    const statusIndicator = document.getElementById('statusIndicator');
+    const statusText = document.getElementById('statusText');
+    const timerEl = document.getElementById('timer');
+    const clearBtn = document.getElementById('clearBtn');
+    const copyFailBtn = document.getElementById('copyFailBtn');
+    
+    let isRunning = false;
+    let startTime = null;
+    let timerInterval = null;
+    let rawOutput = ''; // 原始输出用于判断
+    
+    // 绑定所有按钮
+    document.querySelectorAll('.btn[data-test]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (isRunning) return;
+        runTest(btn.dataset.test);
+      });
+    });
+    
+    // 清空按钮
+    clearBtn.addEventListener('click', () => {
+      output.textContent = '点击左侧按钮开始测试...';
+      rawOutput = '';
+      copyFailBtn.classList.remove('show');
+    });
+    
+    // 复制失败提示 (通过 IPC 调用主进程)
+    copyFailBtn.addEventListener('click', async () => {
+      const summary = extractFailureSummary();
+      if (!summary) {
+        alert('没有找到失败信息');
+        return;
+      }
+      try {
+        await ipcRenderer.invoke('copy-to-clipboard', summary);
+        copyFailBtn.textContent = '✅ 已复制';
+        setTimeout(() => { copyFailBtn.textContent = '📋 复制失败提示'; }, 1500);
+      } catch (e) {
+        alert('复制失败: ' + e.message);
+      }
+    });
+    
+    // 提取失败摘要
+    function extractFailureSummary() {
+      // 查找 FAIL 行和具体的失败用例
+      const lines = rawOutput.split('\n');
+      const summary = [];
+      let inFailBlock = false;
+      
+      for (const line of lines) {
+        // 检测 FAIL 文件
+        if (line.includes('FAIL') && line.includes('.test.ts')) {
+          summary.push('❌ ' + line.replace(/\x1b\[[0-9;]*m/g, '').trim());
+          inFailBlock = true;
+        }
+        // 检测失败的测试用例 (× 或 ✗)
+        else if (line.match(/[×✗]\s+/)) {
+          summary.push('  ' + line.replace(/\x1b\[[0-9;]*m/g, '').trim());
+        }
+        // 检测 AssertionError
+        else if (line.includes('AssertionError') || line.includes('Error:')) {
+          summary.push('  ' + line.replace(/\x1b\[[0-9;]*m/g, '').trim());
+        }
+        // 检测 Expected/Received
+        else if (line.match(/Expected:|Received:/)) {
+          summary.push('  ' + line.replace(/\x1b\[[0-9;]*m/g, '').trim());
+        }
+      }
+      
+      return summary.length > 0 ? summary.join('\n') : null;
+    }
+    
+    // 基于输出内容判断是否全部通过
+    function checkTestResult() {
+      // 检查是否有 "failed" 关键字（不包含 "0 failed"）
+      const hasFailure = /\d+ failed/.test(rawOutput) && !/\b0 failed\b/.test(rawOutput);
+      // 检查是否有 FAIL 标记
+      const hasFail = /FAIL\s+\S+\.test\.ts/.test(rawOutput);
+      // 检查是否有通过标记
+      const hasPass = /\d+ passed/.test(rawOutput);
+      
+      if (hasFail || hasFailure) {
+        return false;
+      }
+      if (hasPass) {
+        return true;
+      }
+      // 无法判断时返回 false
+      return false;
+    }
+    
+    // 运行测试
+    async function runTest(testType) {
+      isRunning = true;
+      rawOutput = '';
+      copyFailBtn.classList.remove('show');
+      updateButtons();
+      
+      output.textContent = '';
+      statusIndicator.className = 'status-indicator running';
+      statusText.textContent = '运行中...';
+      
+      // 开始计时
+      startTime = Date.now();
+      timerInterval = setInterval(updateTimer, 100);
+      
+      const result = await ipcRenderer.invoke('run-test', testType);
+      
+      // 停止计时
+      clearInterval(timerInterval);
+      const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+      timerEl.textContent = `耗时: ${duration}s`;
+      
+      // 基于输出内容判断结果（不依赖 exitCode）
+      const allPassed = checkTestResult();
+      
+      if (allPassed) {
+        statusIndicator.className = 'status-indicator success';
+        statusText.textContent = '✅ 通过';
+        appendOutput('\n\n🎉 全部测试通过！');
+      } else {
+        statusIndicator.className = 'status-indicator failed';
+        statusText.textContent = '❌ 失败';
+        // 汇总失败信息到末尾
+        const summary = extractFailureSummary();
+        if (summary) {
+          appendOutput('\n\n========== 失败摘要 ==========\n' + summary + '\n==============================');
+        } else {
+          appendOutput('\n\n⚠️ 测试可能失败，请检查输出');
+        }
+        copyFailBtn.classList.add('show');
+      }
+      
+      isRunning = false;
+      updateButtons();
+    }
+    
+    // 实时接收测试输出
+    ipcRenderer.on('test-output', (event, text) => {
+      rawOutput += text;
+      appendOutput(text);
+    });
+    
+    function appendOutput(text) {
+      // 简单的颜色处理
+      const formatted = text
+        .replace(/✓|PASS|passed/g, '<span class="pass">$&</span>')
+        .replace(/✗|×|FAIL|failed/g, '<span class="fail">$&</span>');
+      
+      output.innerHTML += formatted;
+      output.scrollTop = output.scrollHeight;
+    }
+    
+    function updateButtons() {
+      document.querySelectorAll('.btn[data-test]').forEach(btn => {
+        btn.disabled = isRunning;
+      });
+    }
+    
+    function updateTimer() {
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      timerEl.textContent = `⏱️ ${elapsed}s`;
+    }
+  </script>
+</body>
+</html>

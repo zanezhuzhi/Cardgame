@@ -1,5 +1,7 @@
 # 百鬼夜行 - Cardgame
 
+[![Unit Tests](https://github.com/zanezhuzhi/Cardgame/actions/workflows/test.yml/badge.svg)](https://github.com/zanezhuzhi/Cardgame/actions/workflows/test.yml)
+
 > 项目核心索引（开发上下文入口）
 
 ---
@@ -63,10 +65,17 @@ Cardgame/
 | 妖怪效果 | [yokai-framework.md](docs/design/yokai-framework.md) | YokaiEffects 注册模式、EffectContext 上下文、38个妖怪索引 |
 | 鬼王效果 | [boss-framework.md](docs/design/boss-framework.md) | Boss阶段系统、来袭/御魂效果、10个鬼王索引 |
 
+**测试体系**
+
+| 文档 | 说明 |
+|------|------|
+| [测试规范文档](docs/testing/test-specification.md) | 测试体系概览、命名规范、编写模板、CI配置 |
+| [测试增强方案](docs/testing/test-enhancement-plan.md) | 薄弱模块分析、分阶段实施计划 |
+| [testset.md](docs/design/testset.md) | 测试开关、GM测试流程、Bug记录 |
+
 **其他技术文档**
 
 - `tools/README.md`：根目录工具索引（手测清单等，与主界面解耦）
-- `docs/design/testset.md`：测试开关、测试流程、GM测试(测试中已暴露的问题)
 - `docs/MULTIPLAYER_ARCHITECTURE.md`：多人架构
 - `docs/CLIENT_VISUAL_FX_TECH_PLAN.md`：逻辑稳定后的美化阶段——Vue 与 Pixi 分层、粒子与资源策略
 - `PROGRESS.md`：当前开发进度
@@ -94,6 +103,52 @@ cd ../client && npm install
 cd ../server && npm run dev
 cd ../client && npm run dev
 ```
+
+---
+
+## 测试体系
+
+### 技术栈
+
+| 组件 | 技术 | 配置位置 |
+|------|------|----------|
+| 测试框架 | Vitest | `shared/vitest.config.ts`, `server/vitest.config.ts` |
+| 断言库 | Vitest 内置 | - |
+| 覆盖率 | c8 / istanbul | `npm run test:coverage` |
+
+### 当前覆盖情况
+
+| 模块 | 状态 | 测试文件 |
+|------|:----:|----------|
+| 妖怪效果 (YokaiEffects) | ✅ 良好 | `shared/game/effects/YokaiEffects.test.ts` |
+| 式神技能 (ShikigamiSkills) | ✅ 良好 | `shared/game/effects/ShikigamiSkills.test.ts` |
+| 数据一致性 | ✅ 良好 | `shared/data/cards.consistency.test.ts` |
+| HP系统 | ✅ 良好 | `shared/game/effects/EffectiveHP.test.ts` |
+| 牌库管理 | ✅ 良好 | `shared/game/DeckManager.test.ts` |
+| 服务端游戏逻辑 | 🟡 薄弱 | `server/src/game/__tests__/*.test.ts` |
+| Socket事件 | 🔴 缺失 | 待建设 |
+
+### 测试命令速查
+
+```bash
+# ===== shared 测试 =====
+cd shared && npm test              # 运行所有测试
+cd shared && npm test -- "狂骨"     # 按名称过滤
+cd shared && npm run test:watch    # 监听模式
+cd shared && npm run test:coverage # 覆盖率报告
+
+# ===== server 测试 =====
+cd server && npm test              # 运行服务端测试
+cd server && npm run test:watch    # 监听模式
+```
+
+### 详细文档
+
+| 文档 | 说明 |
+|------|------|
+| [测试规范](docs/testing/test-specification.md) | 命名规范、编写模板、分层策略 |
+| [增强方案](docs/testing/test-enhancement-plan.md) | 薄弱模块分析、分阶段计划 |
+| [testset](docs/design/testset.md) | GM测试流程、Bug记录 |
 
 ---
 

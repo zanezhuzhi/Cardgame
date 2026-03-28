@@ -97,6 +97,11 @@ export interface WheelMonkDiscardChoice extends BasePendingChoice {
   candidates: string[];
 }
 
+/** 薙魂弃牌选择（弃置1张手牌） */
+export interface NaginataSoulDiscardChoice extends BasePendingChoice {
+  type: 'naginataSoulDiscard';
+}
+
 // ============ 式神技能相关（新增） ============
 
 /** 式神技能目标选择（如：大天狗选联动目标、铁鼠选妨害目标） */
@@ -222,6 +227,7 @@ export type PendingChoice =
   | MeiYaoSelectChoice
   | AkajitaSelectChoice
   | WheelMonkDiscardChoice
+  | NaginataSoulDiscardChoice
   // 式神技能相关
   | ShikigamiTargetChoice
   | ShikigamiDiscardChoice

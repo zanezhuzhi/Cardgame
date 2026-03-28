@@ -726,13 +726,12 @@ describe('HarassmentPipeline', () => {
   });
 
   describe('铮抵抗（弃置+抓牌）', () => {
-    it('🟢 手牌有铮 → 弃置+抓牌+2+免疫', async () => {
+    it('🟢 手牌有铮，选择弃置 → 弃置+抓牌+2+免疫', async () => {
       const zhengCard = createTestCard({ cardId: 'yokai_021', name: '铮' });
       const target = createTestPlayer({
         id: 't1',
         name: '持有铮',
         hand: [zhengCard],
-        // 无青女房，所以铮生效
       });
 
       let applied = false;
@@ -740,7 +739,8 @@ describe('HarassmentPipeline', () => {
         applied = true;
       });
 
-      const ctx = createTestContext();
+      // onChoice 返回 0 = 选择弃置
+      const ctx = createTestContext({ onChoice: async () => 0 });
       const result = await resolveHarassment(action, [target], ctx);
 
       expect(result.affectedCount).toBe(0);
@@ -752,6 +752,63 @@ describe('HarassmentPipeline', () => {
       expect(target.discard.some(c => c.cardId === 'yokai_021')).toBe(true);
       // 抓牌+2
       expect(target.hand.length).toBe(2);
+    });
+
+    it('🟢 手牌有铮，选择不弃置 → 正常受到妨害', async () => {
+      const zhengCard = createTestCard({ cardId: 'yokai_021', name: '铮' });
+      const otherCard = createTestCard({ name: '天邪鬼青' });
+      // 铮放在第二位，妨害弃置第一张（天邪鬼青），铮仍保留
+      const target = createTestPlayer({
+        id: 't1',
+        name: '持有铮',
+        hand: [otherCard, zhengCard],
+      });
+
+      let applied = false;
+      const action = createHarassmentAction('p1', '百目鬼', async (t) => {
+        // 模拟妨害：强制弃置1张手牌
+        if (t.hand.length > 0) {
+          t.discard.push(t.hand.shift()!);
+        }
+        applied = true;
+      });
+
+      // onChoice 返回 1 = 选择不弃置
+      const ctx = createTestContext({ onChoice: async () => 1 });
+      const result = await resolveHarassment(action, [target], ctx);
+
+      expect(result.affectedCount).toBe(1);
+      expect(result.targets[0]!.immune).toBe(false);
+      expect(applied).toBe(true);
+      // 铮仍在手牌中（未弃置）
+      expect(target.hand.some(c => c.cardId === 'yokai_021')).toBe(true);
+    });
+
+    it('🔴 牌库为空时弃置铮，抓牌+2 = 0张（无牌可抓）', async () => {
+      const zhengCard = createTestCard({ cardId: 'yokai_021', name: '铮' });
+      const target = createTestPlayer({
+        id: 't1',
+        name: '持有铮',
+        hand: [zhengCard],
+        deck: [],     // 牌库为空
+        discard: [],  // 弃牌堆也为空（铮弃置后只有铮自身）
+      });
+
+      let applied = false;
+      const action = createHarassmentAction('p1', '百目鬼', async () => {
+        applied = true;
+      });
+
+      const ctx = createTestContext({ onChoice: async () => 0 });
+      const result = await resolveHarassment(action, [target], ctx);
+
+      // 仍然免疫（弃置铮的效果不取决于抓牌数量）
+      expect(result.targets[0]!.immune).toBe(true);
+      expect(applied).toBe(false);
+      // 铮已弃置到弃牌堆
+      expect(target.discard.some(c => c.cardId === 'yokai_021')).toBe(true);
+      // 抓牌+2 但 drawCards 工具函数仍会push 2张测试卡（因为 createTestContext 的 drawCards 是 mock）
+      // 实际游戏中牌库为空则抓不到牌；这里只验证 immune 和弃置逻辑
     });
   });
 

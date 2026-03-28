@@ -13,6 +13,8 @@ import {
   calculateEffectiveHP,
   getApplicableModifiers,
   createNetCutterModifier,
+  createNetCutterModifiers,
+  applyNetCutterEffect,
   isNetCutterActive,
   getNetCutterBonus,
   calculateAllEffectiveHP,
@@ -261,81 +263,174 @@ describe('动态HP计算系统', () => {
   
   describe('网切效果', () => {
     
-    it('🟢 创建网切修改器', () => {
-      const modifier = createNetCutterModifier('player1');
+    it('🟢 创建网切修改器（新版，返回两个修改器）', () => {
+      const modifiers = createNetCutterModifiers('player1');
       
-      expect(modifier.sourceCardId).toBe('yokai_019');
-      expect(modifier.sourceCardName).toBe('网切');
-      expect(modifier.type).toBe('flat');
-      expect(modifier.value).toBe(3);
-      expect(modifier.scope.target).toBe('yokai');
-      expect(modifier.scope.hpCondition?.operator).toBe('<');
-      expect(modifier.scope.hpCondition?.value).toBe(6);
-      expect(modifier.duration).toBe('turnEnd');
+      expect(modifiers).toHaveLength(2);
+      
+      // 妖怪HP-1修改器
+      const yokaiMod = modifiers[0];
+      expect(yokaiMod.sourceCardId).toBe('yokai_020');
+      expect(yokaiMod.sourceCardName).toBe('网切');
+      expect(yokaiMod.type).toBe('flat');
+      expect(yokaiMod.value).toBe(-1);
+      expect(yokaiMod.scope.target).toBe('yokai');
+      expect(yokaiMod.duration).toBe('turnEnd');
+      
+      // 鬼王HP-2修改器
+      const bossMod = modifiers[1];
+      expect(bossMod.sourceCardId).toBe('yokai_020');
+      expect(bossMod.sourceCardName).toBe('网切');
+      expect(bossMod.type).toBe('flat');
+      expect(bossMod.value).toBe(-2);
+      expect(bossMod.scope.target).toBe('boss');
+      expect(bossMod.duration).toBe('turnEnd');
     });
     
-    it('🟢 网切效果完整模拟', () => {
-      // 添加网切效果
-      addHPModifier(manager, createNetCutterModifier('player1'));
+    it('🟢 applyNetCutterEffect: 完整添加网切效果', () => {
+      applyNetCutterEffect(manager, 'player1');
       
-      // 验证效果激活
+      expect(manager.modifiers).toHaveLength(2);
       expect(isNetCutterActive(manager)).toBe(true);
-      expect(getNetCutterBonus(manager)).toBe(3);
+      expect(getNetCutterBonus(manager, 'yokai')).toBe(-1);
+      expect(getNetCutterBonus(manager, 'boss')).toBe(-2);
+    });
+    
+    it('🟢 网切: 妖怪HP-1', () => {
+      applyNetCutterEffect(manager, 'player1');
       
-      // 验证HP计算
       const hp2Yokai: CardHPInfo = { instanceId: 'inst_001', cardType: 'yokai', baseHp: 2 };
       const hp5Yokai: CardHPInfo = { instanceId: 'inst_002', cardType: 'yokai', baseHp: 5 };
-      const hp6Yokai: CardHPInfo = { instanceId: 'inst_003', cardType: 'yokai', baseHp: 6 };
-      const hp8Yokai: CardHPInfo = { instanceId: 'inst_004', cardType: 'yokai', baseHp: 8 };
+      const hp8Yokai: CardHPInfo = { instanceId: 'inst_003', cardType: 'yokai', baseHp: 8 };
       
-      expect(calculateEffectiveHP(manager, hp2Yokai)).toBe(5);  // 2 + 3
-      expect(calculateEffectiveHP(manager, hp5Yokai)).toBe(8);  // 5 + 3
-      expect(calculateEffectiveHP(manager, hp6Yokai)).toBe(6);  // 不受影响（HP=6不满足<6）
-      expect(calculateEffectiveHP(manager, hp8Yokai)).toBe(8);  // 不受影响
-      
-      // 回合结束清理
-      cleanupTurnEndModifiers(manager);
-      expect(isNetCutterActive(manager)).toBe(false);
-      expect(calculateEffectiveHP(manager, hp5Yokai)).toBe(5);  // 恢复原值
+      expect(calculateEffectiveHP(manager, hp2Yokai)).toBe(1);  // 2-1 = 1
+      expect(calculateEffectiveHP(manager, hp5Yokai)).toBe(4);  // 5-1 = 4
+      expect(calculateEffectiveHP(manager, hp8Yokai)).toBe(7);  // 8-1 = 7
     });
     
-    it('🟢 自定义网切加成值', () => {
-      const modifier = createNetCutterModifier('player1', 5);  // +5而不是+3
-      expect(modifier.value).toBe(5);
+    it('🟢 网切: 鬼王HP-2', () => {
+      applyNetCutterEffect(manager, 'player1');
+      
+      const hp8Boss: CardHPInfo = { instanceId: 'boss_001', cardType: 'boss', baseHp: 8 };
+      const hp3Boss: CardHPInfo = { instanceId: 'boss_002', cardType: 'boss', baseHp: 3 };
+      
+      expect(calculateEffectiveHP(manager, hp8Boss)).toBe(6);  // 8-2 = 6
+      expect(calculateEffectiveHP(manager, hp3Boss)).toBe(1);  // 3-2 = 1
+    });
+    
+    it('🟢 网切: HP最低值保护（妖怪HP=1不变）', () => {
+      applyNetCutterEffect(manager, 'player1');
+      
+      const hp1Yokai: CardHPInfo = { instanceId: 'inst_001', cardType: 'yokai', baseHp: 1 };
+      expect(calculateEffectiveHP(manager, hp1Yokai)).toBe(1);  // 1-1=0 → 保护为1
+    });
+    
+    it('🟢 网切: HP最低值保护（鬼王HP=2变为1）', () => {
+      applyNetCutterEffect(manager, 'player1');
+      
+      const hp2Boss: CardHPInfo = { instanceId: 'boss_001', cardType: 'boss', baseHp: 2 };
+      const hp1Boss: CardHPInfo = { instanceId: 'boss_002', cardType: 'boss', baseHp: 1 };
+      
+      expect(calculateEffectiveHP(manager, hp2Boss)).toBe(1);  // 2-2=0 → 保护为1
+      expect(calculateEffectiveHP(manager, hp1Boss)).toBe(1);  // 1-2=-1 → 保护为1
+    });
+    
+    it('🟢 网切: 不影响非妖怪/鬼王卡牌', () => {
+      applyNetCutterEffect(manager, 'player1');
+      
+      // yokai scope只对yokai生效，boss scope只对boss生效
+      // spell等类型的卡不进入HP计算系统
+      const yokai: CardHPInfo = { instanceId: 'inst_001', cardType: 'yokai', baseHp: 5 };
+      const boss: CardHPInfo = { instanceId: 'boss_001', cardType: 'boss', baseHp: 8 };
+      
+      expect(calculateEffectiveHP(manager, yokai)).toBe(4);  // 5-1
+      expect(calculateEffectiveHP(manager, boss)).toBe(6);   // 8-2
+    });
+    
+    it('🟢 网切: 覆盖不叠加（多次使用）', () => {
+      // 第一次使用
+      applyNetCutterEffect(manager, 'player1');
+      expect(manager.modifiers).toHaveLength(2);
+      
+      // 第二次使用（应覆盖而非叠加）
+      applyNetCutterEffect(manager, 'player1');
+      expect(manager.modifiers).toHaveLength(2);  // 仍然只有2个修改器
+      
+      const yokai: CardHPInfo = { instanceId: 'inst_001', cardType: 'yokai', baseHp: 5 };
+      const boss: CardHPInfo = { instanceId: 'boss_001', cardType: 'boss', baseHp: 8 };
+      
+      expect(calculateEffectiveHP(manager, yokai)).toBe(4);  // 5-1（不是5-2）
+      expect(calculateEffectiveHP(manager, boss)).toBe(6);   // 8-2（不是8-4）
+    });
+    
+    it('🟢 网切: 回合结束后状态清除', () => {
+      applyNetCutterEffect(manager, 'player1');
+      
+      const yokai: CardHPInfo = { instanceId: 'inst_001', cardType: 'yokai', baseHp: 5 };
+      const boss: CardHPInfo = { instanceId: 'boss_001', cardType: 'boss', baseHp: 8 };
+      
+      // 清除前
+      expect(calculateEffectiveHP(manager, yokai)).toBe(4);
+      expect(calculateEffectiveHP(manager, boss)).toBe(6);
+      
+      // 回合结束清理
+      const removed = cleanupTurnEndModifiers(manager);
+      expect(removed).toBe(2);  // 移除2个修改器（妖怪+鬼王）
+      expect(isNetCutterActive(manager)).toBe(false);
+      
+      // 清除后恢复原值
+      expect(calculateEffectiveHP(manager, yokai)).toBe(5);
+      expect(calculateEffectiveHP(manager, boss)).toBe(8);
+    });
+    
+    it('🟢 网切: 向后兼容旧函数 createNetCutterModifier', () => {
+      const modifier = createNetCutterModifier('player1');
+      
+      expect(modifier.sourceCardId).toBe('yokai_020');
+      expect(modifier.sourceCardName).toBe('网切');
+      expect(modifier.type).toBe('flat');
+      expect(modifier.value).toBe(-1);  // 妖怪HP-1
+      expect(modifier.scope.target).toBe('yokai');
+      expect(modifier.duration).toBe('turnEnd');
     });
     
   });
   
   describe('批量计算', () => {
     
-    it('🟢 批量计算多张卡牌HP', () => {
-      addHPModifier(manager, createNetCutterModifier('player1'));
+    it('🟢 批量计算多张卡牌HP（含网切效果）', () => {
+      applyNetCutterEffect(manager, 'player1');
       
       const cards: CardHPInfo[] = [
         { instanceId: 'inst_001', cardType: 'yokai', baseHp: 2 },
         { instanceId: 'inst_002', cardType: 'yokai', baseHp: 5 },
-        { instanceId: 'inst_003', cardType: 'yokai', baseHp: 7 },
+        { instanceId: 'inst_003', cardType: 'boss', baseHp: 8 },
       ];
       
       const result = calculateAllEffectiveHP(manager, cards);
       
-      expect(result.get('inst_001')).toBe(5);  // 2 + 3
-      expect(result.get('inst_002')).toBe(8);  // 5 + 3
-      expect(result.get('inst_003')).toBe(7);  // 不受影响
+      expect(result.get('inst_001')).toBe(1);  // 2-1 = 1
+      expect(result.get('inst_002')).toBe(4);  // 5-1 = 4
+      expect(result.get('inst_003')).toBe(6);  // 8-2 = 6（鬼王）
     });
     
   });
   
   describe('修改器摘要', () => {
     
-    it('🟢 获取活跃修改器摘要', () => {
-      addHPModifier(manager, createNetCutterModifier('player1'));
+    it('🟢 获取活跃修改器摘要（网切）', () => {
+      applyNetCutterEffect(manager, 'player1');
       
       const summary = getActiveModifiersSummary(manager);
-      expect(summary).toHaveLength(1);
+      expect(summary).toHaveLength(2);
+      // 妖怪修改器摘要
       expect(summary[0]).toContain('网切');
       expect(summary[0]).toContain('妖怪');
-      expect(summary[0]).toContain('+3');
+      expect(summary[0]).toContain('-1');
+      // 鬼王修改器摘要
+      expect(summary[1]).toContain('网切');
+      expect(summary[1]).toContain('鬼王');
+      expect(summary[1]).toContain('-2');
     });
     
   });

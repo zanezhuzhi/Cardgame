@@ -373,10 +373,10 @@ describe('EffectEngine 条件与选择效果', () => {
 
 describe('妖怪效果定义完整性', () => {
 
-  it('所有 39 张妖怪都有效果定义', () => {
+  it('所有 38 张妖怪都有效果定义', () => {
     const ids = new Set(YOKAI_EFFECT_DEFS.map((d: { cardId: string }) => d.cardId));
-    expect(ids.size).toBe(39);
-    for (let i = 1; i <= 39; i++) {
+    expect(ids.size).toBe(38);
+    for (let i = 1; i <= 38; i++) {
       const id = `yokai_${String(i).padStart(3, '0')}`;
       expect(ids.has(id), `缺少 ${id} 的效果定义`).toBe(true);
     }
@@ -388,8 +388,8 @@ describe('妖怪效果定义完整性', () => {
     expect(def!.effects[0]!.type).toBe('CHOICE');
   });
 
-  it('鸣屋 (yokai_013) 有 CONDITIONAL 效果', () => {
-    const def = getYokaiEffectDef('yokai_013');
+  it('鸣屋 (yokai_012) 有 CONDITIONAL 效果', () => {
+    const def = getYokaiEffectDef('yokai_012');
     expect(def).toBeDefined();
     expect(def!.effects[0]!.type).toBe('CONDITIONAL');
   });
@@ -409,21 +409,21 @@ describe('妖怪效果定义完整性', () => {
     const def = getYokaiEffectDef('yokai_017')!;
     await engine.execute(def.effects, ctx);
     expect(player.ghostFire).toBe(1);
-    expect(player.tempBuffs.some(b => b.type === 'SKILL_COST_REDUCTION')).toBe(true);
+    expect(player.tempBuffs.some(b => b.type === 'SKILL_COST_REDUCE')).toBe(true);
   });
 
-  it('镇墓兽 (yokai_026) 全效果：抓牌+1, 伤害+2, 鬼火+2', async () => {
+  it('镇墓兽 (yokai_025) 全效果：抓牌+1, 伤害+2, 鬼火+1', async () => {
     const engine = new EffectEngine();
     const player = makePlayer({
       ghostFire: 1,
       deck: [makeCard(), makeCard()],
     });
     const ctx = makeCtx(player);
-    const def = getYokaiEffectDef('yokai_026')!;
+    const def = getYokaiEffectDef('yokai_025')!;
     await engine.execute(def.effects, ctx);
     expect(player.hand).toHaveLength(1);
     expect(player.damage).toBe(2);
-    expect(player.ghostFire).toBe(3);
+    expect(player.ghostFire).toBe(2); // 原1 + 鬼火+1
   });
 
 });

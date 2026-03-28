@@ -105,6 +105,48 @@ class TempBuffHelper {
   static clearBuffs(player: PlayerState): void {
     player.tempBuffs = [];
   }
+
+  // ======== 网切 field 级别 buff 管理 ========
+  
+  /** 应用网切效果到 field（覆盖不叠加） */
+  static applyNetCutterToField(field: FieldState): void {
+    if (!(field as any).tempBuffs) (field as any).tempBuffs = [];
+    // 移除已有网切 buff（覆盖不叠加）
+    (field as any).tempBuffs = ((field as any).tempBuffs as any[]).filter(
+      (b: any) => b.type !== 'NET_CUTTER_HP_REDUCTION'
+    );
+    // 添加新的网切 buff
+    (field as any).tempBuffs.push({
+      type: 'NET_CUTTER_HP_REDUCTION',
+      yokaiHpModifier: -1,
+      bossHpModifier: -2,
+      minHp: 1,
+      expiresAt: 'endOfTurn',
+      source: '网切'
+    });
+  }
+
+  /** 检查 field 是否有网切效果 */
+  static hasNetCutter(field: FieldState): boolean {
+    return ((field as any).tempBuffs || []).some(
+      (b: any) => b.type === 'NET_CUTTER_HP_REDUCTION'
+    );
+  }
+
+  /** 获取网切后的妖怪有效HP（最低为1） */
+  static getNetCutterEffectiveHp(field: FieldState, baseHp: number, cardType: 'yokai' | 'boss'): number {
+    if (!TempBuffHelper.hasNetCutter(field)) return baseHp;
+    const reduction = cardType === 'boss' ? 2 : 1;
+    return Math.max(1, baseHp - reduction);
+  }
+
+  /** 清除 field 上的网切效果 */
+  static clearFieldNetCutter(field: FieldState): void {
+    if (!(field as any).tempBuffs) return;
+    (field as any).tempBuffs = ((field as any).tempBuffs as any[]).filter(
+      (b: any) => b.type !== 'NET_CUTTER_HP_REDUCTION'
+    );
+  }
 }
 
 // 读取卡牌数据 - 根据执行环境使用不同路径
@@ -1343,8 +1385,9 @@ export class MultiplayerGame {
     // 检查食梦貘「沉睡」buff - 跳过清理阶段
     if (TempBuffHelper.shouldSkipCleanup(player)) {
       this.addLog(`😴 ${player.name} 跳过清理阶段（沉睡）`);
-      // 清空buff
+      // 清空buff（含 field 级别的网切 buff）
       TempBuffHelper.clearBuffs(player);
+      TempBuffHelper.clearFieldNetCutter(this.state.field);
       // 补充妖怪
       this.fillYokaiSlots();
       this.state.lastPlayerKilledYokai = hadKillThisTurn;
@@ -1385,8 +1428,9 @@ export class MultiplayerGame {
     // 7. 式神引擎：回合结束 → 清理 TURN_END 指示物
     this.skillEngine.onTurnEnd(player as any);
     
-    // 8. 清空TempBuff
+    // 8. 清空TempBuff（含玩家级别和 field 级别的网切 buff）
     TempBuffHelper.clearBuffs(player);
+    TempBuffHelper.clearFieldNetCutter(this.state.field);
     
     // 9. 抓5张牌
     this.drawCards(player, GAME_CONSTANTS.STARTING_HAND_SIZE);
@@ -1825,14 +1869,22 @@ export class MultiplayerGame {
       return { success: false, error: '伤害不足' };
     }
     
+    // 计算网切修正后的鬼王有效HP（网切: 鬼王HP-2，最低1）
+    const bossBaseHp = this.state.field.bossCurrentHp;
+    const bossEffectiveHp = TempBuffHelper.getNetCutterEffectiveHp(this.state.field, bossBaseHp, 'boss');
+    
     // 扣除伤害并对鬼王造成伤害
     player.damage -= damage;
     this.state.field.bossCurrentHp -= damage;
     
-    this.addLog(`⚔️ ${player.name} 对鬼王造成 ${damage} 点伤害`);
+    if (bossEffectiveHp !== bossBaseHp) {
+      this.addLog(`⚔️ ${player.name} 对鬼王造成 ${damage} 点伤害（网切: HP ${bossBaseHp}→${bossEffectiveHp}）`);
+    } else {
+      this.addLog(`⚔️ ${player.name} 对鬼王造成 ${damage} 点伤害`);
+    }
     
-    // 检查鬼王是否被击败 → 直接退治（进入弃牌堆）
-    if (this.state.field.bossCurrentHp <= 0) {
+    // 检查鬼王是否被击败 → 退治判定基于有效HP
+    if (damage >= bossEffectiveHp) {
       this.markTurnHadKill();
       (this.state as any).killedBossThisTurn = true;
       
@@ -1878,17 +1930,23 @@ export class MultiplayerGame {
       return { success: false, error: '没有伤害可分配' };
     }
     
-    // 计算造成的伤害（最多等于妖怪当前HP）
-    const currentHp = yokai.hp || 0;
-    const damageDealt = Math.min(player.damage, currentHp);
+    // 计算网切修正后的有效HP（网切: 妖怪HP-1，最低1）
+    const baseHp = yokai.hp || 0;
+    const effectiveHp = TempBuffHelper.getNetCutterEffectiveHp(this.state.field, baseHp, 'yokai');
+    const damageDealt = Math.min(player.damage, effectiveHp);
     
     player.damage -= damageDealt;
-    yokai.hp = currentHp - damageDealt;
+    // 注意：扣减的是有效HP上的伤害，映射回实际HP
+    yokai.hp = baseHp - damageDealt;
     
-    this.addLog(`⚔️ ${player.name} 对 ${yokai.name} 造成 ${damageDealt} 点伤害`);
+    if (effectiveHp !== baseHp) {
+      this.addLog(`⚔️ ${player.name} 对 ${yokai.name} 造成 ${damageDealt} 点伤害（网切: HP ${baseHp}→${effectiveHp}）`);
+    } else {
+      this.addLog(`⚔️ ${player.name} 对 ${yokai.name} 造成 ${damageDealt} 点伤害`);
+    }
     
-    // 检查妖怪是否被击杀 → 直接退治（进入弃牌堆）
-    if (yokai.hp <= 0) {
+    // 检查妖怪是否被击杀 → 退治判定基于有效HP
+    if (damageDealt >= effectiveHp) {
       this.markTurnHadKill();
       // 直接退治：移入弃牌堆
       this.ensureYokaiDiscardFaceStats(yokai);
@@ -3741,9 +3799,9 @@ export class MultiplayerGame {
         }
           
         case '网切':
-          // 本回合妖怪生命-1
-          TempBuffHelper.addBuff(player, { type: 'HP_REDUCTION', value: 1 });
-          this.addLog(`   ✨ 御魂：妖怪生命-1`);
+          // 本回合所有妖怪HP-1，鬼王HP-2（全局 field 级别，覆盖不叠加）
+          TempBuffHelper.applyNetCutterToField(this.state.field);
+          this.addLog(`   ✨ 御魂：本回合妖怪HP-1，鬼王HP-2`);
           break;
           
         case '铮':
@@ -3753,15 +3811,25 @@ export class MultiplayerGame {
           this.addLog(`   ✨ 御魂：抓牌+1，伤害+2`);
           break;
           
-        case '薙魂':
-          // 抓牌+1，弃置1张
+        case '薙魂': {
+          // 抓牌+1，弃置1张手牌。本回合打出≥3张御魂时鬼火+2
           this.drawCards(player, 1);
+          this.addLog(`   ✨ 御魂：抓牌+1`);
+          
+          // 如果有手牌，让玩家选择要弃置的牌
           if (player.hand.length > 0) {
-            const discarded = player.hand.shift()!;
-            this.discard(player, discarded, 'active');
+            this.state.pendingChoice = {
+              type: 'naginataSoulDiscard',
+              playerId: player.id,
+              prompt: '选择1张手牌弃置'
+            };
+            this.addLog(`   ⏳ 等待选择1张手牌弃置...`);
+          } else {
+            // 无手牌可弃置时，直接检查御魂计数
+            this.checkNaginataSoulGhostFire(player);
           }
-          this.addLog(`   ✨ 御魂：抓牌+1，弃置1张`);
           break;
+        }
           
         case '魍魉之匣': {
           // 抓牌+1，伤害+1，【妨害】每名玩家展示牌库顶，由你决定保留或弃置
@@ -4093,16 +4161,24 @@ export class MultiplayerGame {
       return { success: false, error: '没有鬼王' };
     }
     
+    // 计算网切修正后的鬼王有效HP（网切: 鬼王HP-2，最低1）
+    const bossBaseHp = this.state.field.bossCurrentHp;
+    const bossEffectiveHp = TempBuffHelper.getNetCutterEffectiveHp(this.state.field, bossBaseHp, 'boss');
+    
     // 消耗伤害
     player.damage -= damage;
     
     // 造成伤害
     this.state.field.bossCurrentHp -= damage;
     
-    this.addLog(`⚔️ ${player.name} 对 ${this.state.field.currentBoss.name} 造成 ${damage} 点伤害`);
+    if (bossEffectiveHp !== bossBaseHp) {
+      this.addLog(`⚔️ ${player.name} 对 ${this.state.field.currentBoss.name} 造成 ${damage} 点伤害（网切: HP ${bossBaseHp}→${bossEffectiveHp}）`);
+    } else {
+      this.addLog(`⚔️ ${player.name} 对 ${this.state.field.currentBoss.name} 造成 ${damage} 点伤害`);
+    }
     
-    // 检查鬼王是否死亡
-    if (this.state.field.bossCurrentHp <= 0) {
+    // 检查鬼王是否死亡（基于有效HP判定）
+    if (damage >= bossEffectiveHp) {
       this.defeatBoss(player);
     }
     
@@ -4130,10 +4206,11 @@ export class MultiplayerGame {
     
     const yokai = this.state.field.yokaiSlots[slotIndex]!;
     
-    // 检查伤害是否足够
-    const yokaiHp = yokai.hp || 1;
-    if (damage < yokaiHp) {
-      return { success: false, error: `伤害不足以击败妖怪（需要${yokaiHp}）` };
+    // 检查伤害是否足够（考虑网切修正：妖怪HP-1，最低1）
+    const yokaiBaseHp = yokai.hp || 1;
+    const yokaiEffectiveHp = TempBuffHelper.getNetCutterEffectiveHp(this.state.field, yokaiBaseHp, 'yokai');
+    if (damage < yokaiEffectiveHp) {
+      return { success: false, error: `伤害不足以击败妖怪（需要${yokaiEffectiveHp}）` };
     }
     
     // 消耗伤害
@@ -4145,7 +4222,11 @@ export class MultiplayerGame {
     this.ensureYokaiDiscardFaceStats(yokai);
     player.discard.push(yokai);
     
-    this.addLog(`💀 ${player.name} 击败 ${yokai.name}，获得 ${yokai.charm || 0} 声誉`);
+    if (yokaiEffectiveHp !== yokaiBaseHp) {
+      this.addLog(`💀 ${player.name} 击败 ${yokai.name}，获得 ${yokai.charm || 0} 声誉（网切: HP ${yokaiBaseHp}→${yokaiEffectiveHp}）`);
+    } else {
+      this.addLog(`💀 ${player.name} 击败 ${yokai.name}，获得 ${yokai.charm || 0} 声誉`);
+    }
     
     this.notifyStateChange({
       type: 'YOKAI_DEFEATED',
@@ -4528,6 +4609,12 @@ export class MultiplayerGame {
 
     // 验证选择是否合法
     const candidates = (this.state.pendingChoice as any).candidates || [];
+    
+    // 🔑 先清除 pendingChoice，再执行轮入道效果
+    // 轮入道队列内部通过 !pendingChoice 检查来决定是否继续执行下一次
+    // 如果不先清除，wheelMonkDiscard 类型的 pendingChoice 会阻止第二次执行
+    this.state.pendingChoice = undefined;
+    
     if (!candidates.includes(selectedId)) {
       // 超时/默认：选第一张
       if (candidates.length > 0) {
@@ -4536,9 +4623,6 @@ export class MultiplayerGame {
     } else {
       this.executeWheelMonkEffect(player, selectedId);
     }
-
-    // 清除等待状态
-    this.state.pendingChoice = undefined;
 
     this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
     return { success: true };
@@ -5075,9 +5159,9 @@ export class MultiplayerGame {
       }
         
       case '网切':
-        // 本回合妖怪生命-1
-        TempBuffHelper.addBuff(player, { type: 'HP_REDUCTION', value: 1 });
-        this.addLog(`   ✨ ${effectKey}：妖怪生命-1`);
+        // 本回合所有妖怪HP-1，鬼王HP-2（全局 field 级别，覆盖不叠加）
+        TempBuffHelper.applyNetCutterToField(this.state.field);
+        this.addLog(`   ✨ ${effectKey}：本回合妖怪HP-1，鬼王HP-2`);
         break;
         
       case '针女':
@@ -5138,6 +5222,73 @@ export class MultiplayerGame {
 
     this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
     return { success: true };
+  }
+
+  /**
+   * 处理薙魂弃牌选择响应
+   * @param playerId 玩家ID
+   * @param selectedId 选择的手牌instanceId
+   */
+  public handleNaginataSoulDiscardResponse(playerId: string, selectedId: string): { success: boolean; error?: string } {
+    // 验证是否有等待的薙魂弃牌选择
+    if (!this.state.pendingChoice || this.state.pendingChoice.type !== 'naginataSoulDiscard') {
+      return { success: false, error: '没有待处理的薙魂弃牌选择' };
+    }
+    // 验证是否是正确的玩家
+    if (this.state.pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+
+    // 从手牌中找到并弃置选中的牌
+    const idx = player.hand.findIndex(c => c.instanceId === selectedId);
+    if (idx === -1) {
+      // 超时/默认：弃置第一张
+      if (player.hand.length > 0) {
+        const card = player.hand.shift()!;
+        this.discard(player, card, 'active');
+        this.addLog(`   🗑️ 弃置 ${card.name}（默认）`);
+      }
+    } else {
+      const card = player.hand.splice(idx, 1)[0]!;
+      this.discard(player, card, 'active');
+      this.addLog(`   🗑️ 弃置 ${card.name}`);
+    }
+
+    // 检查御魂计数并可能触发鬼火+2
+    this.checkNaginataSoulGhostFire(player);
+
+    // 清除等待状态
+    this.state.pendingChoice = undefined;
+    
+    // 检查是否需要继续轮入道队列
+    this.checkAndContinueWheelMonkQueue();
+
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+
+  /**
+   * 检查薙魂御魂计数并触发鬼火+2
+   * @param player 玩家
+   */
+  private checkNaginataSoulGhostFire(player: PlayerState): void {
+    // 统计本回合打出的御魂数量（包括薙魂自身）
+    const yokaiPlayed = player.played.filter(c => c.cardType === 'yokai').length;
+    
+    if (yokaiPlayed >= 3) {
+      const actualGain = Math.min(2, player.maxGhostFire - player.ghostFire);
+      if (actualGain > 0) {
+        player.ghostFire += actualGain;
+        this.addLog(`   🔥 本回合打出${yokaiPlayed}张御魂，鬼火+${actualGain} (当前: ${player.ghostFire})`);
+      } else {
+        this.addLog(`   🔥 本回合打出${yokaiPlayed}张御魂（鬼火已满）`);
+      }
+    } else {
+      this.addLog(`   📊 本回合打出${yokaiPlayed}张御魂（需≥3张触发鬼火+2）`);
+    }
   }
 
   /**
@@ -5495,8 +5646,8 @@ export class MultiplayerGame {
         this.addLog(`      → 抓牌+1`);
         break;
       case '网切':
-        TempBuffHelper.addBuff(player, { type: 'HP_REDUCTION' as any, value: 1 });
-        this.addLog(`      → 妖怪生命-1`);
+        TempBuffHelper.applyNetCutterToField(this.state.field);
+        this.addLog(`      → 本回合妖怪HP-1，鬼王HP-2`);
         break;
       case '铮':
         this.drawCards(player, 1);
@@ -5504,8 +5655,21 @@ export class MultiplayerGame {
         this.addLog(`      → 抓牌+1，伤害+2`);
         break;
       case '薙魂':
+        // 抓牌+1，弃置1张手牌。本回合打出≥3张御魂时鬼火+2
         this.drawCards(player, 1);
         this.addLog(`      → 抓牌+1`);
+        // 如果有手牌，让玩家选择要弃置的牌
+        if (player.hand.length > 0) {
+          this.state.pendingChoice = {
+            type: 'naginataSoulDiscard',
+            playerId: player.id,
+            prompt: '选择1张手牌弃置'
+          };
+          this.addLog(`      ⏳ 等待选择1张手牌弃置...`);
+        } else {
+          // 无手牌可弃置时，直接检查御魂计数
+          this.checkNaginataSoulGhostFire(player);
+        }
         break;
       case '轮入道':
         // 需要选择另一张御魂，简化跳过

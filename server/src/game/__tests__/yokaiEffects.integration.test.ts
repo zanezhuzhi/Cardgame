@@ -246,15 +246,37 @@ describe('简单御魂效果 服务端集成测试', () => {
     expect(buffs[0].value).toBe(1);
   });
 
-  it('网切：添加妖怪生命-1 buff', () => {
+  it('网切：field 级别 buff，妖怪HP-1，鬼王HP-2', () => {
     const card = createYokaiCard('网切', 3);
     player.hand = [card];
     
     (game as any).executeYokaiEffect(player, card);
     
-    const buffs = player.tempBuffs.filter(b => b.type === 'HP_REDUCTION');
-    expect(buffs).toHaveLength(1);
-    expect(buffs[0].value).toBe(1);
+    // 验证 field 级别 buff（不是 player 级别）
+    const state = getState(game);
+    const fieldBuffs = (state.field.tempBuffs || []).filter((b: any) => b.type === 'NET_CUTTER_HP_REDUCTION');
+    expect(fieldBuffs).toHaveLength(1);
+    expect(fieldBuffs[0].yokaiHpModifier).toBe(-1);
+    expect(fieldBuffs[0].bossHpModifier).toBe(-2);
+    expect(fieldBuffs[0].minHp).toBe(1);
+    
+    // player 级别不应有 HP_REDUCTION buff
+    const playerBuffs = player.tempBuffs.filter(b => b.type === 'HP_REDUCTION');
+    expect(playerBuffs).toHaveLength(0);
+  });
+
+  it('网切：多次使用不叠加（覆盖）', () => {
+    const card1 = createYokaiCard('网切', 3);
+    const card2 = createYokaiCard('网切', 3);
+    player.hand = [card1, card2];
+    
+    (game as any).executeYokaiEffect(player, card1);
+    (game as any).executeYokaiEffect(player, card2);
+    
+    const state = getState(game);
+    const fieldBuffs = (state.field.tempBuffs || []).filter((b: any) => b.type === 'NET_CUTTER_HP_REDUCTION');
+    // 应该只有1个，不叠加
+    expect(fieldBuffs).toHaveLength(1);
   });
 
   it('铮：抓牌+1，伤害+2', () => {

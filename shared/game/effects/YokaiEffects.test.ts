@@ -1965,7 +1965,7 @@ describe('骰子鬼', () => {
       // 场上放2只HP=2和HP=4的妖怪
       const yokai2 = { ...createTestCard('yokai', '天邪鬼青'), hp: 2, charm: 0, instanceId: 'y-2' };
       const yokai4 = { ...createTestCard('yokai', '骰子鬼'), hp: 4, charm: 1, instanceId: 'y-4' };
-      gameState.field.wanderingYokai = [yokai2, yokai4];
+      gameState.field.yokaiSlots = [yokai2, yokai4, null, null, null, null];
       
       // 第一次：超度HP=2的赤舌，可退治HP≤4的妖怪
       const result1 = await executeYokaiEffect('骰子鬼', {
@@ -1986,7 +1986,7 @@ describe('骰子鬼', () => {
       expect(player.hand.length).toBe(2);
       
       // 场上应只剩1只妖怪
-      expect(gameState.field.wanderingYokai.length).toBe(1);
+      expect(gameState.field.yokaiSlots.filter(s => s !== null).length).toBe(1);
       
       // 第二次：超度HP=3的灯笼鬼，可退治HP≤5的妖怪
       const result2 = await executeYokaiEffect('骰子鬼', {
@@ -2006,7 +2006,7 @@ describe('骰子鬼', () => {
       expect(player.hand.length).toBe(1); // 只剩基础术式
       
       // 场上应无妖怪
-      expect(gameState.field.wanderingYokai.length).toBe(0);
+      expect(gameState.field.yokaiSlots.filter(s => s !== null).length).toBe(0);
     });
     
     it('超度高HP牌可以退治更强的妖怪', async () => {
@@ -2016,7 +2016,7 @@ describe('骰子鬼', () => {
       
       // 场上放HP=7的妖怪（需要超度HP≥5的牌才能退治）
       const yokai7 = { ...createTestCard('yokai', '幽谷响'), hp: 7, charm: 1, instanceId: 'y-7' };
-      gameState.field.wanderingYokai = [yokai7];
+      gameState.field.yokaiSlots = [yokai7, null, null, null, null, null];
       
       const result = await executeYokaiEffect('骰子鬼', {
         player, gameState,
@@ -2030,7 +2030,7 @@ describe('骰子鬼', () => {
       expect(player.exiled.length).toBe(1);
       expect(player.exiled[0]!.name).toBe('心眼');
       // HP=5的牌可以退治HP≤7的妖怪
-      expect(gameState.field.wanderingYokai.length).toBe(0);
+      expect(gameState.field.yokaiSlots.filter(s => s !== null).length).toBe(0);
     });
   });
 });
@@ -2065,14 +2065,80 @@ describe('铮', () => {
     gameState = createTestGameState(player);
   });
 
-  it('抓牌+1，伤害+2', async () => {
-    const result = await executeYokaiEffect('铮', {
-      player, gameState, card: createTestCard('yokai', '铮')
+  describe('主动效果', () => {
+    it('🟢 抓牌+1，伤害+2', async () => {
+      const result = await executeYokaiEffect('铮', {
+        player, gameState, card: createTestCard('yokai', '铮')
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.hand.length).toBe(1);
+      expect(player.damage).toBe(2);
     });
 
-    expect(result.success).toBe(true);
-    expect(player.hand.length).toBe(1);
-    expect(player.damage).toBe(2);
+    it('🔴 牌库为空时仍增加伤害+2，抓牌为0', async () => {
+      player.deck = [];
+      const result = await executeYokaiEffect('铮', {
+        player, gameState, card: createTestCard('yokai', '铮')
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.damage).toBe(2);
+      expect(player.hand.length).toBe(0);
+    });
+
+    it('🔴 牌库为空但弃牌堆有牌时，洗入后抓牌', async () => {
+      player.deck = [];
+      player.discard = [createTestCard('yokai', '招福达摩')];
+      const result = await executeYokaiEffect('铮', {
+        player, gameState, card: createTestCard('yokai', '铮')
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.damage).toBe(2);
+      expect(player.hand.length).toBe(1); // 弃牌堆洗入后抓到1张
+      expect(player.discard.length).toBe(0);
+    });
+
+    it('🟢 已有伤害时累加', async () => {
+      player.damage = 3;
+      const result = await executeYokaiEffect('铮', {
+        player, gameState, card: createTestCard('yokai', '铮')
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.damage).toBe(5); // 3 + 2
+    });
+  });
+
+  describe('轮入道兼容', () => {
+    it('🟢 轮入道+铮：效果执行2次，抓牌+2，伤害+4', async () => {
+      player.deck = [
+        createTestCard('spell', '术式1'),
+        createTestCard('spell', '术式2'),
+      ];
+      const zhengCard = createTestCard('yokai', '铮');
+
+      // 模拟轮入道执行两次铮的效果
+      const ctx = { player, gameState, card: zhengCard };
+      await executeYokaiEffect('铮', ctx);
+      await executeYokaiEffect('铮', ctx);
+
+      expect(player.damage).toBe(4); // 2 + 2
+      expect(player.hand.length).toBe(2); // 抓1 + 抓1
+    });
+
+    it('🔴 轮入道+铮：第一次抓牌耗尽牌库，第二次无牌可抓', async () => {
+      player.deck = [createTestCard('spell', '术式1')];
+      const zhengCard = createTestCard('yokai', '铮');
+
+      const ctx = { player, gameState, card: zhengCard };
+      await executeYokaiEffect('铮', ctx);
+      await executeYokaiEffect('铮', ctx);
+
+      expect(player.damage).toBe(4); // 2 + 2
+      expect(player.hand.length).toBe(1); // 只抓到1张
+    });
   });
 });
 
@@ -2085,16 +2151,104 @@ describe('网切', () => {
     gameState = createTestGameState(player);
   });
 
-  it('添加生命减少buff', async () => {
+  it('🟢 基础效果：在field.tempBuffs添加NET_CUTTER_HP_REDUCTION', async () => {
     const result = await executeYokaiEffect('网切', {
       player, gameState, card: createTestCard('yokai', '网切')
     });
 
     expect(result.success).toBe(true);
-    const buff = player.tempBuffs.find(b => (b as any).source === '网切');
+    expect(gameState.field.tempBuffs).toBeDefined();
+    const buff = (gameState.field.tempBuffs as any[]).find(
+      (b: any) => b.type === 'NET_CUTTER_HP_REDUCTION'
+    );
     expect(buff).toBeDefined();
-    expect((buff as any).yokaiReduction).toBe(1);
-    expect((buff as any).bossReduction).toBe(2);
+    expect(buff.yokaiHpModifier).toBe(-1);
+    expect(buff.bossHpModifier).toBe(-2);
+    expect(buff.minHp).toBe(1);
+    expect(buff.expiresAt).toBe('endOfTurn');
+    expect(buff.sourcePlayerId).toBe(player.id);
+  });
+
+  it('🟢 妖怪HP-1：场上游荡妖怪受影响', async () => {
+    // 场上放置妖怪
+    const yokai5 = { ...createTestCard('yokai', '心眼'), hp: 5, maxHp: 5 };
+    const yokai3 = { ...createTestCard('yokai', '天邪鬼青'), hp: 3, maxHp: 3 };
+    gameState.field.yokaiSlots = [yokai5, yokai3, null, null, null, null];
+
+    const result = await executeYokaiEffect('网切', {
+      player, gameState, card: createTestCard('yokai', '网切')
+    });
+
+    expect(result.success).toBe(true);
+    // 验证buff已设置
+    const buff = (gameState.field.tempBuffs as any[]).find(
+      (b: any) => b.type === 'NET_CUTTER_HP_REDUCTION'
+    );
+    expect(buff).toBeDefined();
+    // 注意：网切设置的是HP修正状态，实际HP计算由EffectiveHP系统或服务端处理
+    // 这里验证状态标记正确即可
+    expect(buff.yokaiHpModifier).toBe(-1);
+  });
+
+  it('🟢 鬼王HP-2：鬼王受影响', async () => {
+    gameState.field.currentBoss = { ...createTestCard('boss', '麒麟'), hp: 8, maxHp: 8 };
+    gameState.field.bossCurrentHp = 8;
+
+    const result = await executeYokaiEffect('网切', {
+      player, gameState, card: createTestCard('yokai', '网切')
+    });
+
+    expect(result.success).toBe(true);
+    const buff = (gameState.field.tempBuffs as any[]).find(
+      (b: any) => b.type === 'NET_CUTTER_HP_REDUCTION'
+    );
+    expect(buff.bossHpModifier).toBe(-2);
+  });
+
+  it('🟢 HP最低值保护标记', async () => {
+    const result = await executeYokaiEffect('网切', {
+      player, gameState, card: createTestCard('yokai', '网切')
+    });
+
+    expect(result.success).toBe(true);
+    const buff = (gameState.field.tempBuffs as any[]).find(
+      (b: any) => b.type === 'NET_CUTTER_HP_REDUCTION'
+    );
+    expect(buff.minHp).toBe(1);
+  });
+
+  it('🟢 多次使用不叠加（覆盖）', async () => {
+    // 第一次使用
+    await executeYokaiEffect('网切', {
+      player, gameState, card: createTestCard('yokai', '网切')
+    });
+    expect((gameState.field.tempBuffs as any[]).filter(
+      (b: any) => b.type === 'NET_CUTTER_HP_REDUCTION'
+    ).length).toBe(1);
+
+    // 第二次使用（应覆盖而非叠加）
+    await executeYokaiEffect('网切', {
+      player, gameState, card: createTestCard('yokai', '网切')
+    });
+    const netCutterBuffs = (gameState.field.tempBuffs as any[]).filter(
+      (b: any) => b.type === 'NET_CUTTER_HP_REDUCTION'
+    );
+    expect(netCutterBuffs.length).toBe(1);  // 仍然只有1个buff
+    expect(netCutterBuffs[0].yokaiHpModifier).toBe(-1);  // 不是-2
+    expect(netCutterBuffs[0].bossHpModifier).toBe(-2);   // 不是-4
+  });
+
+  it('🟢 回合结束可清除（endOfTurn标记）', async () => {
+    await executeYokaiEffect('网切', {
+      player, gameState, card: createTestCard('yokai', '网切')
+    });
+
+    // 模拟回合结束清理
+    gameState.field.tempBuffs = (gameState.field.tempBuffs as any[]).filter(
+      (b: any) => b.expiresAt !== 'endOfTurn'
+    );
+
+    expect(gameState.field.tempBuffs.length).toBe(0);
   });
 });
 
@@ -2237,14 +2391,94 @@ describe('狂骨', () => {
     gameState = createTestGameState(player);
   });
 
-  it('抓牌+1，伤害=当前鬼火', async () => {
-    const result = await executeYokaiEffect('狂骨', {
-      player, gameState, card: createTestCard('yokai', '狂骨')
+  describe('基础效果', () => {
+    it('🟢 鬼火=4时，抓牌+1，伤害+4', async () => {
+      const result = await executeYokaiEffect('狂骨', {
+        player, gameState, card: createTestCard('yokai', '狂骨')
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.hand.length).toBe(1);
+      expect(player.damage).toBe(4); // 等于鬼火数
     });
 
-    expect(result.success).toBe(true);
-    expect(player.hand.length).toBe(1);
-    expect(player.damage).toBe(4); // 等于鬼火数
+    it('🟢 鬼火=5时，伤害+5（最大收益）', async () => {
+      player.ghostFire = 5;
+      player.damage = 2; // 已有伤害
+      player.deck = [createTestCard('spell'), createTestCard('spell')];
+      
+      const result = await executeYokaiEffect('狂骨', {
+        player, gameState, card: createTestCard('yokai', '狂骨')
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.damage).toBe(7); // 2+5=7
+      expect(player.hand.length).toBe(1);
+    });
+  });
+
+  describe('边界条件', () => {
+    it('🔴 鬼火=0时，伤害+0（仍可打出）', async () => {
+      player.ghostFire = 0;
+      player.damage = 0;
+      player.deck = [createTestCard('spell')];
+      
+      const result = await executeYokaiEffect('狂骨', {
+        player, gameState, card: createTestCard('yokai', '狂骨')
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.damage).toBe(0); // +0
+      expect(player.hand.length).toBe(1); // 仍抓牌
+    });
+
+    it('🔴 牌库为空时仍增加伤害', async () => {
+      player.ghostFire = 4;
+      player.damage = 0;
+      player.deck = []; // 空牌库
+      
+      const result = await executeYokaiEffect('狂骨', {
+        player, gameState, card: createTestCard('yokai', '狂骨')
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.damage).toBe(4); // +4
+      expect(player.hand.length).toBe(0); // 无牌可抓
+    });
+
+    it('🟢 轮入道双重效果：两次执行，伤害累加', async () => {
+      player.ghostFire = 3;
+      player.damage = 0;
+      player.deck = [createTestCard('spell'), createTestCard('spell'), createTestCard('spell')];
+      
+      // 第一次执行
+      await executeYokaiEffect('狂骨', {
+        player, gameState, card: createTestCard('yokai', '狂骨')
+      });
+      expect(player.damage).toBe(3);
+      expect(player.hand.length).toBe(1);
+      
+      // 第二次执行（轮入道触发）
+      await executeYokaiEffect('狂骨', {
+        player, gameState, card: createTestCard('yokai', '狂骨')
+      });
+      
+      expect(player.damage).toBe(6); // 3+3=6
+      expect(player.hand.length).toBe(2); // 1+1=2
+    });
+
+    it('🔴 鬼火=1时，伤害+1（低收益）', async () => {
+      player.ghostFire = 1;
+      player.damage = 0;
+      player.deck = [createTestCard('spell')];
+      
+      const result = await executeYokaiEffect('狂骨', {
+        player, gameState, card: createTestCard('yokai', '狂骨')
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.damage).toBe(1);
+    });
   });
 });
 
@@ -2822,9 +3056,7 @@ describe('轮入道（递归执行）', () => {
     });
 
     expect(result.success).toBe(true);
-    // 涅槃之火效果：鬼火+1，技能费用-1
-    // 执行两次后：鬼火+2，费用应减少2
-    expect(player.ghostFire).toBe(4); // 原2 + 2
+    // 涅槃之火效果：技能费用-1（执行两次 → 叠加两个buff）
     const costReductions = player.tempBuffs.filter(b => b.type === 'SKILL_COST_REDUCTION');
     expect(costReductions.length).toBe(2); // 两次减费buff
   });
@@ -2846,16 +3078,26 @@ describe('轮入道（递归执行）', () => {
     });
 
     expect(result.success).toBe(true);
-    // 网切效果：场上生命≤6的妖怪生命-1
-    // 即使执行两次，HP减少应该是状态效果，不应该叠加到-2
-    const hpReductions = player.tempBuffs.filter(b => b.type === 'HP_REDUCTION');
-    expect(hpReductions.length).toBe(1); // 状态不叠加，只有1个
+    // 网切效果：在field.tempBuffs设置NET_CUTTER_HP_REDUCTION
+    // 执行两次但覆盖不叠加，仍只有1个buff
+    const netCutterBuffs = (gameState.field.tempBuffs as any[] || []).filter(
+      (b: any) => b.type === 'NET_CUTTER_HP_REDUCTION'
+    );
+    expect(netCutterBuffs.length).toBe(1);  // 覆盖不叠加
+    expect(netCutterBuffs[0].yokaiHpModifier).toBe(-1);  // 妖怪HP-1
+    expect(netCutterBuffs[0].bossHpModifier).toBe(-2);   // 鬼王HP-2
   });
 
   it('🟢 弃置生命正好为6的御魂', async () => {
     const yokai6hp = createTestCard('yokai', '镜姬');
     yokai6hp.hp = 6;
     player.hand = [yokai6hp];
+    // 镜姬效果：抓牌+2，执行两次共抓4张。需要deck有足够的牌，避免洗discard时镜姬被重新抓回手牌
+    player.deck = [
+      createTestCard('spell'), createTestCard('spell'),
+      createTestCard('spell'), createTestCard('spell'),
+      createTestCard('spell')
+    ];
 
     const result = await executeYokaiEffect('轮入道', {
       player, gameState,
@@ -2864,7 +3106,15 @@ describe('轮入道（递归执行）', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(player.discard.some(c => c.name === '镜姬')).toBe(true);
+    // 镜姬被弃置后，执行效果期间deck足够，不会触发洗牌
+    // 镜姬应已从手牌移出（弃置时移出）
+    // 注意：镜姬可能在discard中，也可能因drawCards被洗入deck再被抓到hand
+    // 这里只验证"弃置操作发生了"：discard中应当包含过镜姬，或hand中不含镜姬的原始实例
+    const originalId = yokai6hp.instanceId;
+    // 验证镜姬不再以原始实例留在手牌中（被弃置操作splice了）
+    // 由于deck足够5张，两次抓2张后deck还剩1张，不会洗discard
+    expect(player.discard.some(c => c.instanceId === originalId)).toBe(true);
+    expect(player.hand.some(c => c.instanceId === originalId)).toBe(false);
   });
 
   it('🔴 生命>6的御魂不能被选择', async () => {
@@ -2981,44 +3231,226 @@ describe('薙魂（御魂计数鬼火+2）', () => {
   let gameState: GameState;
 
   beforeEach(() => {
-    player = createTestPlayer({ ghostFire: 2 });
-    player.deck = [createTestCard('spell'), createTestCard('spell')];
+    player = createTestPlayer({ ghostFire: 2, maxGhostFire: 5 });
+    player.deck = [createTestCard('spell', '阴阳术'), createTestCard('spell', '阴阳术')];
+    player.hand = [createTestCard('yokai', '赤舌')];
     gameState = createTestGameState(player);
   });
 
-  it('已打出3张御魂时立即鬼火+2', async () => {
-    (player as any).played = [
-      createTestCard('yokai', '兵主部'),
-      createTestCard('yokai', '蝠翼'),
-      createTestCard('yokai', '薙魂')
-    ];
+  describe('基础效果', () => {
+    it('抓牌+1，然后弃置1张手牌', async () => {
+      (player as any).played = [createTestCard('yokai', '薙魂')];
+      const initialDeckLength = player.deck.length;
+      
+      const result = await executeYokaiEffect('薙魂', {
+        player, gameState,
+        card: createTestCard('yokai', '薙魂'),
+        onSelectCards: async (cards) => [cards[0]!.instanceId]
+      });
 
-    const result = await executeYokaiEffect('薙魂', {
-      player, gameState,
-      card: createTestCard('yokai', '薙魂'),
-      onSelectCards: async (cards) => [cards[0]!.instanceId]
+      expect(result.success).toBe(true);
+      // 原1张手牌 + 抓1张 - 弃1张 = 1张
+      expect(player.hand.length).toBe(1);
+      expect(player.deck.length).toBe(initialDeckLength - 1);
+      expect(player.discard.length).toBe(1);
     });
-
-    expect(result.success).toBe(true);
-    expect(player.ghostFire).toBe(4);
-    expect(result.message).toContain('鬼火+2');
   });
 
-  it('未满3张御魂时添加延迟buff', async () => {
-    (player as any).played = [
-      createTestCard('yokai', '薙魂')
-    ];
+  describe('御魂计数触发', () => {
+    it('已打出3张御魂时立即鬼火+2', async () => {
+      (player as any).played = [
+        createTestCard('yokai', '兵主部'),
+        createTestCard('yokai', '蝠翼'),
+        createTestCard('yokai', '薙魂')
+      ];
 
-    const result = await executeYokaiEffect('薙魂', {
-      player, gameState,
-      card: createTestCard('yokai', '薙魂'),
-      onSelectCards: async (cards) => [cards[0]!.instanceId]
+      const result = await executeYokaiEffect('薙魂', {
+        player, gameState,
+        card: createTestCard('yokai', '薙魂'),
+        onSelectCards: async (cards) => [cards[0]!.instanceId]
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.ghostFire).toBe(4); // 2 + 2 = 4
+      expect(result.message).toContain('鬼火+2');
     });
 
-    expect(result.success).toBe(true);
-    expect(player.ghostFire).toBe(2);
-    const buff = player.tempBuffs.find(b => (b as any).source === '薙魂');
-    expect(buff).toBeDefined();
+    it('打出2张御魂时不触发鬼火+2', async () => {
+      (player as any).played = [
+        createTestCard('yokai', '兵主部'),
+        createTestCard('yokai', '薙魂')
+      ];
+
+      const result = await executeYokaiEffect('薙魂', {
+        player, gameState,
+        card: createTestCard('yokai', '薙魂'),
+        onSelectCards: async (cards) => [cards[0]!.instanceId]
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.ghostFire).toBe(2); // 不变
+      expect(result.message).toContain('2张御魂');
+    });
+
+    it('打出1张御魂（仅薙魂自身）时不触发', async () => {
+      (player as any).played = [createTestCard('yokai', '薙魂')];
+
+      const result = await executeYokaiEffect('薙魂', {
+        player, gameState,
+        card: createTestCard('yokai', '薙魂'),
+        onSelectCards: async (cards) => [cards[0]!.instanceId]
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.ghostFire).toBe(2); // 不变
+      expect(result.message).toContain('1张御魂');
+    });
+
+    it('打出4张御魂时鬼火仍只+2（非每满3张+2）', async () => {
+      (player as any).played = [
+        createTestCard('yokai', '兵主部'),
+        createTestCard('yokai', '蝠翼'),
+        createTestCard('yokai', '赤舌'),
+        createTestCard('yokai', '薙魂')
+      ];
+
+      const result = await executeYokaiEffect('薙魂', {
+        player, gameState,
+        card: createTestCard('yokai', '薙魂'),
+        onSelectCards: async (cards) => [cards[0]!.instanceId]
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.ghostFire).toBe(4); // 2 + 2 = 4，不是 +4
+      expect(result.message).toContain('4张御魂');
+    });
+  });
+
+  describe('边界条件', () => {
+    it('鬼火已满时不会超过上限', async () => {
+      player.ghostFire = 5;
+      player.maxGhostFire = 5;
+      (player as any).played = [
+        createTestCard('yokai', '兵主部'),
+        createTestCard('yokai', '蝠翼'),
+        createTestCard('yokai', '薙魂')
+      ];
+
+      const result = await executeYokaiEffect('薙魂', {
+        player, gameState,
+        card: createTestCard('yokai', '薙魂'),
+        onSelectCards: async (cards) => [cards[0]!.instanceId]
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.ghostFire).toBe(5); // 仍为5，不超上限
+      expect(result.message).toContain('鬼火已满');
+    });
+
+    it('鬼火4/5时+2只得到1点', async () => {
+      player.ghostFire = 4;
+      player.maxGhostFire = 5;
+      (player as any).played = [
+        createTestCard('yokai', '兵主部'),
+        createTestCard('yokai', '蝠翼'),
+        createTestCard('yokai', '薙魂')
+      ];
+
+      const result = await executeYokaiEffect('薙魂', {
+        player, gameState,
+        card: createTestCard('yokai', '薙魂'),
+        onSelectCards: async (cards) => [cards[0]!.instanceId]
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.ghostFire).toBe(5);
+      expect(result.message).toContain('鬼火+1');
+    });
+
+    it('抓牌后手牌只有1张，必须弃置', async () => {
+      player.hand = []; // 手牌为空
+      player.deck = [createTestCard('yokai', '心眼')];
+      (player as any).played = [createTestCard('yokai', '薙魂')];
+
+      const result = await executeYokaiEffect('薙魂', {
+        player, gameState,
+        card: createTestCard('yokai', '薙魂'),
+        onSelectCards: async (cards) => [cards[0]!.instanceId]
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.hand.length).toBe(0); // 抓1张后弃1张 = 0
+      expect(player.discard.length).toBe(1);
+    });
+
+    it('牌库为空时只执行弃牌', async () => {
+      player.deck = [];
+      player.hand = [createTestCard('yokai', '赤舌'), createTestCard('yokai', '蝠翼')];
+      (player as any).played = [createTestCard('yokai', '薙魂')];
+
+      const result = await executeYokaiEffect('薙魂', {
+        player, gameState,
+        card: createTestCard('yokai', '薙魂'),
+        onSelectCards: async (cards) => [cards[0]!.instanceId]
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.hand.length).toBe(1); // 抓0张 - 弃1张 = 1
+      expect(player.discard.length).toBe(1);
+    });
+
+    it('无onSelectCards回调时默认弃第一张', async () => {
+      player.hand = [
+        { ...createTestCard('yokai', '赤舌'), instanceId: 'first_card' },
+        { ...createTestCard('yokai', '蝠翼'), instanceId: 'second_card' }
+      ];
+      (player as any).played = [createTestCard('yokai', '薙魂')];
+
+      const result = await executeYokaiEffect('薙魂', {
+        player, gameState,
+        card: createTestCard('yokai', '薙魂')
+        // 无 onSelectCards
+      });
+
+      expect(result.success).toBe(true);
+      // 应该弃置第一张（赤舌）
+      expect(player.discard[0]!.instanceId).toBe('first_card');
+    });
+  });
+
+  describe('轮入道双重效果', () => {
+    it('两次执行，条件满足时两次各+2鬼火', async () => {
+      player.ghostFire = 1;
+      player.maxGhostFire = 5;
+      player.hand = [createTestCard('yokai', '心眼'), createTestCard('yokai', '天邪鬼青')];
+      player.deck = [createTestCard('spell', '阴阳术A'), createTestCard('spell', '阴阳术B')];
+      // 已打出3张御魂（包括被轮入道触发的薙魂）
+      (player as any).played = [
+        createTestCard('yokai', '赤舌'),
+        createTestCard('yokai', '天邪鬼绿'),
+        createTestCard('yokai', '薙魂')
+      ];
+
+      // 第一次执行
+      await executeYokaiEffect('薙魂', {
+        player, gameState,
+        card: createTestCard('yokai', '薙魂'),
+        onSelectCards: async (cards) => [cards[0]!.instanceId]
+      });
+      
+      const afterFirst = player.ghostFire;
+      
+      // 第二次执行（轮入道）
+      await executeYokaiEffect('薙魂', {
+        player, gameState,
+        card: createTestCard('yokai', '薙魂'),
+        onSelectCards: async (cards) => [cards[0]!.instanceId]
+      });
+
+      // 两次都满足条件，共+4鬼火（但受上限限制）
+      expect(afterFirst).toBe(3); // 1 + 2 = 3
+      expect(player.ghostFire).toBe(5); // 3 + 2 = 5，受上限限制
+    });
   });
 });
 

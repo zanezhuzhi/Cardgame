@@ -114,7 +114,7 @@ describe('效果引擎集成测试', () => {
       const player = createMockPlayer();
       const gameState = createMockGameState(player);
       
-      const effectDef = YOKAI_EFFECT_DEFS.find(d => d.cardId === 'yokai_013');
+      const effectDef = YOKAI_EFFECT_DEFS.find(d => d.cardId === 'yokai_012');
       expect(effectDef).toBeDefined();
       
       // 弃牌堆为空时
@@ -151,12 +151,12 @@ describe('效果引擎集成测试', () => {
       expect(player.hand.length).toBe(2);
     });
 
-    it('镇墓兽：抓牌+1，伤害+2，鬼火+2', async () => {
+    it('镇墓兽：抓牌+1，伤害+2，鬼火+1', async () => {
       const player = createMockPlayer();
       player.deck.push(createCardInstance('c1', '卡1', 1));
       const gameState = createMockGameState(player);
       
-      const effectDef = YOKAI_EFFECT_DEFS.find(d => d.cardId === 'yokai_026');
+      const effectDef = YOKAI_EFFECT_DEFS.find(d => d.cardId === 'yokai_025');
       expect(effectDef).toBeDefined();
       
       const ctx = createMockContext(player, gameState);
@@ -164,7 +164,7 @@ describe('效果引擎集成测试', () => {
       
       expect(player.hand.length).toBe(1);
       expect(player.damage).toBe(2);
-      expect(player.ghostFire).toBe(5); // 3+2，但上限5
+      expect(player.ghostFire).toBe(4); // 原3 + 鬼火+1
     });
 
   });

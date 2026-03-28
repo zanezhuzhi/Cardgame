@@ -674,6 +674,56 @@ registerEffect('涅槃之火', async (ctx) => {
 });
 
 /**
+ * AI决策：薙魂 - 选择弃置哪张手牌
+ * 策略：弃置价值最低的牌
+ * - 优先保留御魂和阴阳术
+ * - 优先弃置低HP的牌
+ * - 若已打出2张御魂，更优先保留御魂
+ * @param hand 玩家手牌
+ * @param yokaiPlayedCount 本回合已打出的御魂数量（不含当前的薙魂）
+ * @returns 要弃置的卡牌instanceId
+ */
+export function aiSelect_薙魂(hand: CardInstance[], yokaiPlayedCount: number = 0): string {
+  if (hand.length === 0) return '';
+  if (hand.length === 1) return hand[0]!.instanceId;
+  
+  // 计算每张牌的保留价值
+  let lowestIndex = 0;
+  let lowestValue = Infinity;
+  
+  for (let i = 0; i < hand.length; i++) {
+    const card = hand[i]!;
+    let value = card.hp ?? 0;
+    
+    // 阴阳术通常最重要
+    if (card.cardType === 'spell') {
+      value += 10;
+    }
+    
+    // 若还没凑够3张御魂，御魂价值提高
+    if (card.cardType === 'yokai') {
+      if (yokaiPlayedCount < 2) {
+        value += 5;  // 保留御魂以凑条件
+      } else {
+        value += 2;  // 已满足条件，御魂价值略高
+      }
+    }
+    
+    // 恶评卡最应该弃置
+    if (card.cardType === 'penalty') {
+      value = -10;
+    }
+    
+    if (value < lowestValue) {
+      lowestValue = value;
+      lowestIndex = i;
+    }
+  }
+  
+  return hand[lowestIndex]!.instanceId;
+}
+
+/**
  * AI决策：雪幽魂 - 选择弃置哪张恶评
  * 策略：优先弃置声誉惩罚最低的恶评（农夫-1 优先于武士-2）
  * @param penaltyCards 对手手牌中的恶评卡
@@ -873,17 +923,32 @@ export function aiSelect_轮入道(
 }
 
 // 网切 - 本回合妖怪生命-1，鬼王生命-2（最低1）
+// 设计文档: 状态存储在 gameState.field 级别（影响全局），覆盖不叠加
 registerEffect('网切', async (ctx) => {
-  const { player } = ctx;
-  player.tempBuffs.push({
-    type: 'HP_REDUCTION' as any,
-    value: 1,
-    duration: 1,
-    source: '网切',
-    yokaiReduction: 1,
-    bossReduction: 2
-  } as any);
-  return { success: true, message: '网切：本回合妖怪生命-1，鬼王生命-2' };
+  const { gameState, player } = ctx;
+  
+  // 确保 field.tempBuffs 存在
+  if (!gameState.field.tempBuffs) {
+    gameState.field.tempBuffs = [];
+  }
+  
+  // 移除已存在的网切效果（避免叠加，实现覆盖）
+  gameState.field.tempBuffs = gameState.field.tempBuffs.filter(
+    (buff: any) => buff.type !== 'NET_CUTTER_HP_REDUCTION'
+  );
+  
+  // 添加新的网切效果（field级别）
+  gameState.field.tempBuffs.push({
+    type: 'NET_CUTTER_HP_REDUCTION',
+    yokaiHpModifier: -1,
+    bossHpModifier: -2,
+    minHp: 1,
+    expiresAt: 'endOfTurn',
+    sourcePlayerId: player.id,
+    source: '网切'
+  });
+  
+  return { success: true, message: '网切：本回合所有妖怪HP-1，鬼王HP-2' };
 });
 
 // 铮 - 抓牌+1，伤害+2
@@ -894,42 +959,47 @@ registerEffect('铮', async (ctx) => {
   return { success: true, message: '铮：抓牌+1，伤害+2', draw: 1, damage: 2 };
 });
 
-// 薙魂 - 抓牌+1，弃置1张。打出3张御魂时鬼火+2
+// 薙魂 - 抓牌+1，弃置1张。本回合打出≥3张御魂（含此牌）时鬼火+2
 registerEffect('薙魂', async (ctx) => {
   const { player, onSelectCards } = ctx;
+  
+  // 步骤1：抓牌+1
   drawCards(player, 1);
   
+  // 步骤2：弃置1张手牌（必须执行）
   if (player.hand.length > 0) {
     let cardId: string;
     if (onSelectCards) {
       const ids = await onSelectCards(player.hand, 1);
       cardId = ids[0]!;
     } else {
+      // 默认弃置第一张（AI策略或无回调时）
       cardId = player.hand[0]!.instanceId;
     }
     
     const idx = player.hand.findIndex(c => c.instanceId === cardId);
     if (idx !== -1) {
-      player.discard.push(player.hand.splice(idx, 1)[0]!);
+      const discarded = player.hand.splice(idx, 1)[0]!;
+      player.discard.push(discarded);
     }
   }
   
+  // 步骤3：即时检查本回合御魂数量（包括薙魂自身）
   const played = (player as any).played as CardInstance[] | undefined;
   const yokaiPlayed = played ? played.filter((c: CardInstance) => c.cardType === 'yokai').length : 0;
   
+  // 步骤4：条件满足则鬼火+2
   if (yokaiPlayed >= 3) {
+    const actualGain = Math.min(2, player.maxGhostFire - player.ghostFire);
     player.ghostFire = Math.min(player.ghostFire + 2, player.maxGhostFire);
-    return { success: true, message: '薙魂：抓牌+1，弃置1张，已打出3张御魂→鬼火+2', draw: 1, ghostFire: 2 };
+    if (actualGain > 0) {
+      return { success: true, message: `薙魂：抓牌+1，弃1牌，已打出${yokaiPlayed}张御魂→鬼火+${actualGain}`, draw: 1, ghostFire: actualGain };
+    } else {
+      return { success: true, message: `薙魂：抓牌+1，弃1牌，已打出${yokaiPlayed}张御魂（鬼火已满）`, draw: 1 };
+    }
   }
   
-  player.tempBuffs.push({
-    type: 'NAGINATA_SOUL_PENDING' as any,
-    value: 3,
-    duration: 1,
-    source: '薙魂'
-  } as any);
-  
-  return { success: true, message: '薙魂：抓牌+1，弃置1张（3张御魂时鬼火+2）', draw: 1 };
+  return { success: true, message: `薙魂：抓牌+1，弃1牌（本回合${yokaiPlayed}张御魂）`, draw: 1 };
 });
 
 // 魍魉之匣 - 抓牌+1，伤害+1，所有玩家展示牌库顶

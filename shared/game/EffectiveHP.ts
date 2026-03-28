@@ -266,40 +266,73 @@ export function getApplicableModifiers(
 // ============ 网切效果专用函数 ============
 
 /**
- * 创建网切效果的HP修改器
- * @description 网切: 全场HP<6的妖怪HP+3（回合结束）
+ * 创建网切效果的HP修改器（返回两个修改器）
+ * @description 网切: 本回合所有妖怪HP-1，鬼王HP-2，最低1（回合结束清除）
  */
+export function createNetCutterModifiers(
+  playerId: string
+): Omit<HPModifier, 'id' | 'createdAt'>[] {
+  return [
+    {
+      sourceCardId: 'yokai_020',  // 网切
+      sourceCardName: '网切',
+      sourcePlayerId: playerId,
+      type: 'flat',
+      value: -1,
+      priority: 10,
+      scope: { target: 'yokai' },
+      duration: 'turnEnd',
+    },
+    {
+      sourceCardId: 'yokai_020',  // 网切
+      sourceCardName: '网切',
+      sourcePlayerId: playerId,
+      type: 'flat',
+      value: -2,
+      priority: 10,
+      scope: { target: 'boss' },
+      duration: 'turnEnd',
+    },
+  ];
+}
+
+/** @deprecated 使用 createNetCutterModifiers（返回数组）替代 */
 export function createNetCutterModifier(
   playerId: string,
-  hpBonus: number = 3
+  _hpBonus?: number
 ): Omit<HPModifier, 'id' | 'createdAt'> {
-  return {
-    sourceCardId: 'yokai_019',  // 网切
-    sourceCardName: '网切',
-    sourcePlayerId: playerId,
-    type: 'flat',
-    value: hpBonus,
-    priority: 10,
-    scope: {
-      target: 'yokai',
-      hpCondition: { operator: '<', value: 6 },
-    },
-    duration: 'turnEnd',
-  };
+  // 向后兼容：返回妖怪HP-1修改器
+  return createNetCutterModifiers(playerId)[0];
+}
+
+/**
+ * 为 HPModifierManager 添加网切效果（覆盖不叠加）
+ * @description 先移除已有的网切修改器，再添加新的
+ */
+export function applyNetCutterEffect(manager: HPModifierManager, playerId: string): void {
+  // 移除已存在的网切修改器（确保不叠加）
+  removeModifiersBySource(manager, 'yokai_020');
+  // 添加新的网切修改器（妖怪-1 + 鬼王-2）
+  for (const mod of createNetCutterModifiers(playerId)) {
+    addHPModifier(manager, mod);
+  }
 }
 
 /**
  * 检查网切效果是否已激活
  */
 export function isNetCutterActive(manager: HPModifierManager): boolean {
-  return manager.modifiers.some(m => m.sourceCardId === 'yokai_019');
+  return manager.modifiers.some(m => m.sourceCardId === 'yokai_020');
 }
 
 /**
- * 获取网切效果的加成值
+ * 获取网切效果的HP修正值
+ * @param type 'yokai' 返回妖怪修正值(-1)，'boss' 返回鬼王修正值(-2)
  */
-export function getNetCutterBonus(manager: HPModifierManager): number {
-  const netCutterMod = manager.modifiers.find(m => m.sourceCardId === 'yokai_019');
+export function getNetCutterBonus(manager: HPModifierManager, type: 'yokai' | 'boss' = 'yokai'): number {
+  const netCutterMod = manager.modifiers.find(
+    m => m.sourceCardId === 'yokai_020' && m.scope.target === type
+  );
   return netCutterMod?.value ?? 0;
 }
 

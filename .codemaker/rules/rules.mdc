@@ -22,22 +22,32 @@ alwaysApply: true
 ```
 Cardgame/
 ├── client/              # Vue 3 前端
+│   ├── public/images/   # 静态资源（卡牌、式神、背景图等）
 │   └── src/
-│       ├── game/        # 单人游戏逻辑
+│       ├── game/        # 游戏适配器 (LocalAdapter, RemoteAdapter)
 │       ├── network/     # Socket.io 客户端
-│       ├── components/  # Vue 组件
+│       ├── dev/         # 开发面板 (DevTestPanel)
+│       ├── views/       # 页面视图 (Lobby)
 │       └── App.vue      # 主应用
 ├── server/              # Express + Socket.io 后端
 │   └── src/
 │       ├── game/        # MultiplayerGame 核心
 │       ├── room/        # 房间管理
-│       └── socket/      # Socket 事件处理
+│       ├── socket/      # Socket 事件处理
+│       ├── ai/          # AI 策略
+│       └── match/       # 匹配系统
 ├── shared/              # 前后端共享代码
-│   ├── types/           # 类型定义 (GameState, PlayerState, CardInstance)
+│   ├── types/           # 类型定义 (game, cards, network, pendingChoice, shikigami)
 │   ├── game/effects/    # 效果引擎 (EffectEngine, YokaiEffects, ShikigamiSkills)
+│   ├── game/            # 核心模块 (DeckManager, GameManager, TempBuff, TurnHistory)
 │   └── data/            # 游戏数据 (cards.json)
 ├── 策划文档/             # 设计文档、卡牌数据、开发规范
-└── docs/                # 技术文档
+│   ├── 卡牌数据/卡牌具体文档/  # 单张卡牌文档 (yokai_XXX_名称.md)
+│   └── 美术团队/         # 美术规范与设计稿
+├── docs/                # 技术文档 (框架设计、测试规范)
+├── tools/               # 开发工具 (test-gui, run-tests.bat)
+├── agents/              # MCP server + prompts
+└── scripts/             # 脚本工具
 ```
 
 ---
@@ -103,29 +113,57 @@ import type {
 interface PlayerState {
   id: string;
   name: string;
-  ghostFire: number;      // 当前鬼火
-  maxGhostFire: number;   // 鬼火上限
-  hand: CardInstance[];   // 手牌
-  deck: CardInstance[];   // 牌库
-  discard: CardInstance[];// 弃牌堆
-  exiled: CardInstance[]; // 超度区
-  shikigami: ShikigamiCard[];      // 式神
-  shikigamiState: ShikigamiState[];// 式神状态
-  damage: number;         // 累计伤害
-  reputation: number;     // 声誉
-  tempBuffs: TempBuff[];  // 临时效果
+  
+  // 角色
+  onmyoji: OnmyojiCard | null;
+  shikigami: ShikigamiCard[];
+  maxShikigami: number;       // 式神上限（默认3）
+  
+  // 资源
+  ghostFire: number;          // 当前鬼火
+  maxGhostFire: number;       // 鬼火上限（固定5）
+  damage: number;             // 当前累积伤害（回合内）
+  
+  // 牌区
+  hand: CardInstance[];       // 手牌
+  deck: CardInstance[];       // 牌库
+  discard: CardInstance[];    // 弃牌堆
+  played: CardInstance[];     // 本回合已打出的牌（旁置）
+  exiled: CardInstance[];     // 超度区（移出游戏）
+  
+  // 统计
+  totalCharm: number;         // 声誉总计（胜利点数）
+  cardsPlayed: number;        // 本回合已打出卡牌数
+  
+  // 状态
+  isConnected: boolean;
+  isReady: boolean;
+  isAI?: boolean;             // 是否为 AI
+  aiStrategy?: 'L1' | 'L2' | 'L3' | 'L4';
+  
+  // 式神状态
+  shikigamiState: ShikigamiState[];
+  tempBuffs: TempBuff[];      // 回合临时增益
+  revealedDeckCards?: RevealedCard[];  // 牌库展示状态
+  prohibitedTargets?: string[];        // 禁止退治目标（镇墓兽）
 }
 
 interface CardInstance {
-  instanceId: string;     // 唯一实例ID
-  cardId: string;         // 卡牌ID (如 'yokai_002')
-  cardType: CardType;     // 卡牌类型
-  name: string;           // 卡牌名称
-  hp: number;             // 当前HP
-  maxHp: number;          // 最大HP
-  damage?: number;        // 伤害值
-  charm?: number;         // 声誉值
-  effect?: string;        // 效果描述
+  instanceId: string;         // 唯一实例ID
+  cardId: string;             // 原型卡牌ID (如 'yokai_002')
+  cardType: CardType;         // 卡牌类型
+  name: string;               // 卡牌名称
+  hp: number;                 // 最大生命值
+  maxHp: number;              // 最大生命值（兼容）
+  currentHp?: number;         // 当前生命值（场上妖怪）
+  damage?: number;            // 伤害值（阴阳术）
+  charm?: number;             // 声誉值
+  effect?: string;            // 效果描述
+  keywords?: string[];        // 关键词标签
+  gender?: CardGender;        // 性别 (0=无, 1=男, 2=女, 3=双)
+  image: string;              // 图片路径
+  isExhausted?: boolean;      // 是否已行动
+  markers?: Record<string, number>; // 指示物
 }
 ```
 
@@ -354,18 +392,31 @@ onMounted(() => {
 
 ## 8. 网络通信规范
 
-### 8.1 Socket 事件命名
-```typescript
-// 客户端 -> 服务端
-socket.emit('game:action', { type: 'playCard', cardInstanceId: '...' });
-socket.emit('game:salvageResponse', { playerId, salvage: true });
+### 8.1 Socket 事件分类
 
-// 服务端 -> 客户端
-socket.emit('game:stateUpdate', gameState);
-socket.emit('game:error', { message: '...' });
+| 类别 | 客户端 → 服务端 | 服务端 → 客户端 |
+|------|----------------|-----------------|
+| **房间** | `room:create`, `room:join`, `room:leave`, `room:ready`, `room:kick` | `room:created`, `room:joined`, `room:left`, `room:error` |
+| **游戏** | `game:start`, `game:action` | `game:started`, `game:stateSync`, `game:actionResult` |
+| **交互响应** | `game:salvageResponse`, `game:yokaiTargetResponse`, `game:yokaiChoiceResponse`, `game:selectCardsMultiResponse`, ... | （同步在 stateSync 中） |
+| **匹配** | `match:start`, `match:cancel`, `match:confirm` | `match:queued`, `match:found`, `match:cancelled` |
+| **聊天/GM** | `chat:send`, `gm:command` | `chat:message`, `gm:result` |
+
+### 8.2 交互响应事件（pendingChoice）
+```typescript
+// 每种 pendingChoice 类型都有对应的响应事件
+socket.on('game:salvageResponse', { playerId, salvage: boolean });
+socket.on('game:yokaiTargetResponse', { targetId: string });
+socket.on('game:yokaiChoiceResponse', { choiceIndex: number });
+socket.on('game:selectCardsMultiResponse', { selectedIds: string[] });
+socket.on('game:treeDemonDiscardResponse', { selectedId: string });
+socket.on('game:wheelMonkDiscardResponse', { selectedId: string });
+socket.on('game:meiYaoSelectResponse', { selectedCardId: string });
+socket.on('game:akajitaSelectResponse', { selectedId: string });
+// ... 更多见 SocketServer.ts
 ```
 
-### 8.2 GM 调试 API
+### 8.3 GM 调试 API
 ```bash
 # 获取房间列表
 GET /api/rooms
@@ -418,5 +469,38 @@ GET /api/gm/setyokai/:roomId/:slotIndex/:yokaiName
 3. **禁止直接修改 state**: 服务端使用 `notifyStateChange()` 广播状态
 4. **禁止同步阻塞**: 网络操作必须使用异步
 5. **禁止中文变量名** (效果映射和测试除外)
+6. **禁止遗漏服务端同步**: 在 `YokaiEffects.ts` 添加效果时，必须同步检查 `MultiplayerGame.ts` 的 `executeYokaiEffectByName` 方法
+7. **禁止遗漏轮入道兼容**: 新增御魂效果必须考虑被轮入道触发的场景（详见卡牌开发.md §7.3）
+8. **禁止遗漏 pendingChoice 响应处理**: 新增交互类型时必须前后端同步
+
+---
+
+## 11. Token 消耗优化规则
+
+### 11.1 读取代码前先搜索
+
+- **优先使用 `grep_search`**：定位关键词/函数/类所在位置，而非直接读取整个文件
+- **使用 `view_source_code_definitions_top_level`**：快速了解模块结构（类名、函数名），再决定读取哪个文件
+
+### 11.2 分段读取大文件
+
+- 使用 `read_file` 时指定 `offset` 和 `limit` 参数
+- 单次读取建议不超过 **200 行**
+- 先用搜索确定行号范围，再精确读取
+
+### 11.3 避免重复读取
+
+- 用户在消息中提供了文件内容时，**不要再次读取该文件**
+- 刚刚编辑过的文件，在收到用户反馈前**不要重复读取**
+
+### 11.4 批量操作
+
+- 多个**独立的只读操作**可以合并到一次调用
+- 编辑操作**不要批量**，逐个执行以便用户审核
+
+### 11.5 信息密度优先
+
+- 优先返回结构化信息（表格、列表）而非大段文字
+- 代码片段只展示关键部分，用 `// ...` 省略无关代码
 
 </rule>

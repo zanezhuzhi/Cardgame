@@ -1041,41 +1041,133 @@ registerEffect('狂骨', async (ctx) => {
   return { success: true, message: `狂骨：抓牌+1，伤害+${damage}`, draw: 1, damage };
 });
 
-// 返魂香 - [妨害] 抓牌+1，伤害+1，对手弃牌或获得恶评
+// 返魂香 - [妨害] 抓牌+1，伤害+1，每名对手选择：弃置1张手牌或获得1张恶评
 registerEffect('返魂香', async (ctx) => {
-  const { player, gameState } = ctx;
+  const { player, gameState, onChoice } = ctx;
   drawCards(player, 1);
   player.damage += 1;
   
-  for (const p of gameState.players) {
-    if (p.id === player.id) continue;
+  // 遍历每名对手
+  for (const opponent of gameState.players) {
+    if (opponent.id === player.id) continue;
     
-    if (p.hand.length > 0) {
-      // 弃置1张手牌
-      p.discard.push(p.hand.shift()!);
+    // 检查对手是否有手牌
+    const hasHandCards = opponent.hand.length > 0;
+    
+    if (!hasHandCards) {
+      // 无手牌，直接获得恶评
+      givePenaltyCard(opponent, gameState);
+      continue;
+    }
+    
+    // 有手牌，让对手选择
+    let choice = 0; // 默认弃牌
+    if (onChoice) {
+      // 请求对手选择
+      choice = await onChoice({
+        type: 'fanHunXiangChoice',
+        playerId: opponent.id,
+        prompt: '返魂香：选择一项',
+        options: ['弃置1张手牌', '获得1张恶评']
+      });
+    }
+    
+    if (choice === 0) {
+      // 弃置1张手牌（AI策略：弃置价值最低的牌）
+      const sortedHand = [...opponent.hand].sort((a, b) => (a.hp || 0) - (b.hp || 0));
+      const cardToDiscard = sortedHand[0]!;
+      const idx = opponent.hand.findIndex(c => c.instanceId === cardToDiscard.instanceId);
+      if (idx !== -1) {
+        opponent.discard.push(opponent.hand.splice(idx, 1)[0]!);
+      }
     } else {
       // 获得恶评
-      const penaltyCard: CardInstance = {
-        instanceId: `penalty_${Date.now()}_${Math.random()}`,
-        cardId: 'penalty_001',
-        cardType: 'penalty',
-        name: '恶评',
-        hp: 0,
-        maxHp: 0
-      };
-      p.hand.push(penaltyCard);
+      givePenaltyCard(opponent, gameState);
     }
   }
   
   return { success: true, message: '[妨害] 返魂香：抓牌+1，伤害+1', draw: 1, damage: 1 };
 });
 
-// 镇墓兽 - 鬼火+1，抓牌+1，伤害+2
+/** 给玩家发放恶评牌（进入弃牌堆） */
+function givePenaltyCard(player: PlayerState, gameState: GameState): void {
+  let penaltyCard: CardInstance;
+  
+  // 尝试从恶评牌堆获取
+  if (gameState.field.penaltyPile && gameState.field.penaltyPile.length > 0) {
+    penaltyCard = gameState.field.penaltyPile.pop()!;
+  } else {
+    // 牌堆耗尽，创建农夫（无限供应）
+    penaltyCard = {
+      instanceId: `penalty_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      cardId: 'penalty_001',
+      cardType: 'penalty',
+      name: '农夫',
+      charm: -1,
+      hp: 1,
+      maxHp: 1
+    };
+  }
+  
+  // 【获得】规则：从公共牌堆获得的牌进入弃牌堆
+  player.discard.push(penaltyCard);
+}
+
+// 镇墓兽 - 鬼火+1，抓牌+1，伤害+2，左手边玩家指定禁止退治目标
+// 完整交互效果在 MultiplayerGame.executeYokaiEffectByName 中实现
+// 此处仅处理单人模式/测试的基础效果
 registerEffect('镇墓兽', async (ctx) => {
-  const { player } = ctx;
+  const { player, gameState, onSelectTarget } = ctx;
+  
+  // 1. 鬼火+1（不超过上限）
   player.ghostFire = Math.min(player.ghostFire + 1, player.maxGhostFire);
+  
+  // 2. 抓牌+1
   drawCards(player, 1);
+  
+  // 3. 伤害+2
   player.damage += 2;
+  
+  // 4. 左手边玩家选择禁止退治目标（在单人模式下由 AI 代选）
+  // 收集所有可选目标（游荡妖怪 + 鬼王）
+  const validTargets: CardInstance[] = [];
+  
+  // 添加游荡区妖怪
+  if (gameState.field?.yokaiSlots) {
+    for (const yokai of gameState.field.yokaiSlots) {
+      if (yokai && yokai.instanceId) {
+        validTargets.push(yokai);
+      }
+    }
+  }
+  
+  // 添加鬼王
+  const boss = gameState.field?.currentBoss || gameState.field?.boss;
+  if (boss && boss.instanceId) {
+    validTargets.push(boss as CardInstance);
+  }
+  
+  // 如果有可选目标，进行选择
+  if (validTargets.length > 0 && onSelectTarget) {
+    // 单人模式：AI 选择（选择 HP 最低的目标）
+    const targetId = await onSelectTarget(validTargets);
+    if (targetId) {
+      // 记录禁止退治目标
+      if (!player.prohibitedTargets) {
+        player.prohibitedTargets = [];
+      }
+      player.prohibitedTargets.push(targetId);
+    }
+  } else if (validTargets.length > 0) {
+    // 没有选择回调时，AI 自动选择 HP 最低的目标
+    const sortedTargets = [...validTargets].sort((a, b) => (a.hp || 0) - (b.hp || 0));
+    const selectedTarget = sortedTargets[0];
+    if (!player.prohibitedTargets) {
+      player.prohibitedTargets = [];
+    }
+    player.prohibitedTargets.push(selectedTarget.instanceId);
+  }
+  
   return { success: true, message: '镇墓兽：鬼火+1，抓牌+1，伤害+2', ghostFire: 1, draw: 1, damage: 2 };
 });
 
@@ -1128,11 +1220,31 @@ registerEffect('涂佛', async (ctx) => {
 });
 
 // 地藏像 - 超度此牌，获取1个式神
+// 注意：地藏像的核心逻辑在 MultiplayerGame 中实现，因为需要：
+// 1. 二次确认（打出前）
+// 2. 式神二选一（从式神牌库抽取）
+// 3. 式神置换（满3个时）
+// 这里只做共享层的占位和基础标记
 registerEffect('地藏像', async (ctx) => {
-  const { player, card } = ctx;
+  const { player, card, addLog } = ctx;
+  
+  // 超度此牌（从已打出区移入超度区）
+  // 注意：在服务端流程中，牌会先进入 played 区，然后这里移动到 exiled
+  const playedIdx = player.played.findIndex(c => c.instanceId === card.instanceId);
+  if (playedIdx !== -1) {
+    player.played.splice(playedIdx, 1);
+  }
   player.exiled.push(card);
-  // 获取式神的逻辑需要与游戏流程配合
-  return { success: true, message: '地藏像：超度此牌，获取1个式神' };
+  
+  addLog?.(`🙏 地藏像被超度`);
+  
+  // 式神获取的完整逻辑由 MultiplayerGame.executeYokaiEffectByName 处理
+  // 返回标记，告知服务端需要继续处理式神获取流程
+  return { 
+    success: true, 
+    message: '地藏像：超度此牌，获取1个式神',
+    needShikigamiAcquire: true  // 标记需要式神获取流程
+  };
 });
 
 // ============================================
@@ -1185,15 +1297,20 @@ registerEffect('镜姬', async (ctx) => {
 
 // 木魅 - 展示牌库顶直到出现3张阴阳术
 registerEffect('木魅', async (ctx) => {
-  const { player } = ctx;
+  const { player, addLog } = ctx;
   const revealed: CardInstance[] = [];
   const spells: CardInstance[] = [];
   
+  // 从牌库顶（shift）开始展示，直到找到3张阴阳术或牌库空
   while (player.deck.length > 0 && spells.length < 3) {
-    const card = player.deck.pop()!;
+    const card = player.deck.shift()!;
     revealed.push(card);
+    
     if (card.cardType === 'spell') {
       spells.push(card);
+      addLog?.(`📖 展示: ${card.name} (阴阳术 ${spells.length}/3)`);
+    } else {
+      addLog?.(`📖 展示: ${card.name}`);
     }
   }
   
@@ -1202,14 +1319,20 @@ registerEffect('木魅', async (ctx) => {
     player.hand.push(spell);
   }
   
-  // 其余弃置
+  // 其余弃置（非阴阳术的展示牌）
+  const discarded: CardInstance[] = [];
   for (const card of revealed) {
     if (!spells.includes(card)) {
       player.discard.push(card);
+      discarded.push(card);
     }
   }
   
-  return { success: true, message: `木魅：获得${spells.length}张阴阳术` };
+  const spellNames = spells.map(c => c.name).join('、') || '无';
+  const discardNames = discarded.map(c => c.name).join('、') || '无';
+  addLog?.(`🎴 木魅 → 获得${spells.length}张阴阳术: [${spellNames}]，弃置${discarded.length}张: [${discardNames}]`);
+  
+  return { success: true, message: `木魅：获得${spells.length}张阴阳术`, draw: spells.length };
 });
 
 // ============================================

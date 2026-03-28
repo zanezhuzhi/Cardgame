@@ -204,6 +204,29 @@ export interface FieldState {
   exileZone: CardInstance[];
 }
 
+// ============ 伤害池 ============
+
+/**
+ * 伤害池
+ * @description 精细追踪当前回合各来源累积的伤害点数
+ * 用于镜姬【妖】效果：只免疫阴阳术（spell）伤害，御魂/式神伤害正常生效
+ */
+export interface DamagePool {
+  /** 阴阳术伤害（镜姬免疫） */
+  spell: number;
+  /** 御魂效果伤害（镜姬不免疫） */
+  yokai: number;
+  /** 式神技能伤害（镜姬不免疫） */
+  shikigami: number;
+  /** 其他来源伤害 */
+  other: number;
+}
+
+/** 创建空伤害池 */
+export function createEmptyDamagePool(): DamagePool {
+  return { spell: 0, yokai: 0, shikigami: 0, other: 0 };
+}
+
 /** 游戏状态 */
 export interface GameState {
   roomId: string;
@@ -223,11 +246,21 @@ export interface GameState {
   lastPlayerKilledYokai?: boolean;
   pendingYokaiRefresh?: boolean;
   turnHadKill?: boolean;
+  
+  /** 
+   * 当前回合各来源累积的伤害池
+   * 镜姬【妖】效果：只免疫 spell 部分，yokai/shikigami 伤害正常生效
+   */
+  damagePool?: DamagePool;
+  
   pendingChoice?: {
     type: 'salvageChoice' | 'cardSelect' | 'yokaiTarget' | 'yokaiChoice' 
       | 'treeDemonDiscard' | 'rinyuChoice' | 'bangJingExile' | 'diceGhostExile' 
       | 'diceGhostTarget' | 'selectCardsMulti' | 'selectCardPutTop' | 'wheelMonkDiscard'
-      | 'wangliangChoice' | 'meiYaoSelect' | 'akajitaSelect';
+      | 'wangliangChoice' | 'meiYaoSelect' | 'akajitaSelect' | 'fanHunXiangChoice'
+      | 'tufoSelect'
+      // 地藏像相关
+      | 'dizangConfirm' | 'dizangSelectShikigami' | 'dizangReplaceShikigami';
     playerId: string;
     card?: CardInstance;
     prompt?: string;

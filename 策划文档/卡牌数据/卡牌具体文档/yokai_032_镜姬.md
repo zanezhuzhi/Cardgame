@@ -236,3 +236,4 @@ function canDamageTarget(target: CardInstance, damageSource: DamageSource): bool
 | 版本 | 日期 | 修改内容 |
 |------|------|----------|
 | v1.0 | 2026-03 | 初始版本 |
+| v2.1 | 2026-03-28 | **完成实现**：服务端集成阴阳术伤害免疫判定 |

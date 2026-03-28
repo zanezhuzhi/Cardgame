@@ -86,6 +86,274 @@ describe('轮入道 服务端集成测试', () => {
     player.hand = [];
   });
 
+// ============ 涂佛集成测试 ============
+
+describe('涂佛 服务端集成测试', () => {
+  let game: MultiplayerGame;
+  let player: PlayerState;
+
+  function createSpellCard(name: string): CardInstance {
+    return {
+      instanceId: `spell_${name}_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      cardId: `spell_${name}`,
+      cardType: 'spell',
+      name,
+      hp: 0,
+      maxHp: 0,
+      damage: name === '高级符咒' ? 3 : name === '中级符咒' ? 2 : 1,
+    };
+  }
+
+  beforeEach(() => {
+    game = createGame(2);
+    player = getPlayer(game);
+    player.ghostFire = 3;
+    player.damage = 0;
+    player.hand = [];
+    player.discard = [];
+  });
+
+  it('🟢 弃牌区有3张阴阳术时，AI应全部取回（按伤害降序）', () => {
+    // 准备：设置 AI 玩家
+    player.isAI = true;
+    const tufo = createYokaiCard('涂佛', 5);
+    const spell1 = createSpellCard('基础术式');
+    const spell2 = createSpellCard('中级符咒');
+    const spell3 = createSpellCard('高级符咒');
+    // 注意：executeYokaiEffect 是在卡牌打出后调用，此时卡牌已不在手牌中
+    player.hand = [];
+    player.discard = [spell1, spell2, spell3, createYokaiCard('天邪鬼青', 3)];
+    
+    // 执行：涂佛效果
+    (game as any).executeYokaiEffect(player, tufo);
+    
+    // 验证：AI 应取回全部3张阴阳术
+    expect(player.hand).toHaveLength(3);
+    expect(player.discard).toHaveLength(1);
+    expect(player.discard[0].name).toBe('天邪鬼青');
+    
+    // 验证：AI 优先选择高伤害（高级符咒应排在前面）
+    const handNames = player.hand.map(c => c.name);
+    expect(handNames).toContain('高级符咒');
+    expect(handNames).toContain('中级符咒');
+    expect(handNames).toContain('基础术式');
+  });
+
+  it('🟢 弃牌区有5张阴阳术时，AI应取回伤害最高的3张', () => {
+    // 准备
+    player.isAI = true;
+    const tufo = createYokaiCard('涂佛', 5);
+    const spell1 = createSpellCard('基础术式');
+    spell1.instanceId = 'spell_1';
+    const spell2 = createSpellCard('基础术式');
+    spell2.instanceId = 'spell_2';
+    const spell3 = createSpellCard('中级符咒');
+    spell3.instanceId = 'spell_3';
+    const spell4 = createSpellCard('中级符咒');
+    spell4.instanceId = 'spell_4';
+    const spell5 = createSpellCard('高级符咒');
+    spell5.instanceId = 'spell_5';
+    // 注意：executeYokaiEffect 是在卡牌打出后调用，此时卡牌已不在手牌中
+    player.hand = [];
+    player.discard = [spell1, spell2, spell3, spell4, spell5];
+    
+    // 执行
+    (game as any).executeYokaiEffect(player, tufo);
+    
+    // 验证：AI 取回高级符咒 + 两张中级符咒
+    expect(player.hand).toHaveLength(3);
+    expect(player.discard).toHaveLength(2);
+    
+    // 剩下的应该是两张基础术式
+    const discardNames = player.discard.map(c => c.name);
+    expect(discardNames.filter(n => n === '基础术式')).toHaveLength(2);
+  });
+
+  it('🟢 真人玩家应触发 tufoSelect pendingChoice', () => {
+    // 准备：非AI玩家
+    player.isAI = false;
+    const tufo = createYokaiCard('涂佛', 5);
+    const spell1 = createSpellCard('基础术式');
+    const spell2 = createSpellCard('中级符咒');
+    // 注意：executeYokaiEffect 是在卡牌打出后调用，此时卡牌已不在手牌中
+    player.hand = [];
+    player.discard = [spell1, spell2];
+    
+    // 执行
+    (game as any).executeYokaiEffect(player, tufo);
+    
+    // 验证：应设置 pendingChoice
+    const state = getState(game);
+    expect(state.pendingChoice).toBeDefined();
+    expect(state.pendingChoice.type).toBe('tufoSelect');
+    expect(state.pendingChoice.playerId).toBe(player.id);
+    expect(state.pendingChoice.cards).toHaveLength(2);
+    expect(state.pendingChoice.maxCount).toBe(2);
+    expect(state.pendingChoice.minCount).toBe(0);
+  });
+
+  it('🔴 弃牌区无阴阳术时，不触发选择', () => {
+    // 准备
+    const tufo = createYokaiCard('涂佛', 5);
+    // 注意：executeYokaiEffect 是在卡牌打出后调用，此时卡牌已不在手牌中
+    player.hand = [];
+    player.discard = [createYokaiCard('赤舌', 3), createYokaiCard('天邪鬼青', 3)];
+    
+    // 执行
+    (game as any).executeYokaiEffect(player, tufo);
+    
+    // 验证：不应设置 pendingChoice
+    const state = getState(game);
+    expect(state.pendingChoice).toBeUndefined();
+    expect(player.hand).toHaveLength(0); // 效果无事发生
+    expect(player.discard).toHaveLength(2); // 弃牌区不变
+  });
+});
+
+// ============ handleTufoSelectResponse 测试 ============
+
+describe('handleTufoSelectResponse 服务端测试', () => {
+  let game: MultiplayerGame;
+  let player: PlayerState;
+
+  function createSpellCard(name: string): CardInstance {
+    return {
+      instanceId: `spell_${name}_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      cardId: `spell_${name}`,
+      cardType: 'spell',
+      name,
+      hp: 0,
+      maxHp: 0,
+      damage: name === '高级符咒' ? 3 : name === '中级符咒' ? 2 : 1,
+    };
+  }
+
+  beforeEach(() => {
+    game = createGame(2);
+    player = getPlayer(game);
+    player.hand = [];
+    player.discard = [];
+  });
+
+  it('🟢 选择2张阴阳术后，正确移入手牌', () => {
+    // 准备
+    const spell1 = createSpellCard('基础术式');
+    spell1.instanceId = 'spell_1';
+    const spell2 = createSpellCard('高级符咒');
+    spell2.instanceId = 'spell_2';
+    const spell3 = createSpellCard('中级符咒');
+    spell3.instanceId = 'spell_3';
+    player.discard = [spell1, spell2, spell3];
+    
+    const state = getState(game);
+    state.pendingChoice = {
+      type: 'tufoSelect',
+      playerId: player.id,
+      cards: [spell1, spell2, spell3],
+      maxCount: 3,
+      minCount: 0,
+      prompt: '选择阴阳术'
+    };
+    
+    // 执行：选择高级符咒和中级符咒
+    const result = game.handleTufoSelectResponse(player.id, ['spell_2', 'spell_3']);
+    
+    // 验证
+    expect(result.success).toBe(true);
+    expect(state.pendingChoice).toBeUndefined();
+    expect(player.hand).toHaveLength(2);
+    expect(player.hand.map(c => c.name).sort()).toEqual(['中级符咒', '高级符咒']);
+    expect(player.discard).toHaveLength(1);
+    expect(player.discard[0].name).toBe('基础术式');
+  });
+
+  it('🟢 选择0张（放弃）时，弃牌区不变', () => {
+    // 准备
+    const spell1 = createSpellCard('基础术式');
+    spell1.instanceId = 'spell_1';
+    player.discard = [spell1];
+    
+    const state = getState(game);
+    state.pendingChoice = {
+      type: 'tufoSelect',
+      playerId: player.id,
+      cards: [spell1],
+      maxCount: 1,
+      minCount: 0,
+      prompt: '选择阴阳术'
+    };
+    
+    // 执行：不选择任何牌
+    const result = game.handleTufoSelectResponse(player.id, []);
+    
+    // 验证
+    expect(result.success).toBe(true);
+    expect(player.hand).toHaveLength(0);
+    expect(player.discard).toHaveLength(1);
+  });
+
+  it('🔴 非法玩家ID应返回失败', () => {
+    const state = getState(game);
+    state.pendingChoice = {
+      type: 'tufoSelect',
+      playerId: player.id,
+      cards: [],
+      maxCount: 0,
+      minCount: 0,
+      prompt: ''
+    };
+    
+    const result = game.handleTufoSelectResponse('wrong-player-id', []);
+    
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('不是你的选择');
+  });
+
+  it('🔴 无 pendingChoice 时应返回失败', () => {
+    const state = getState(game);
+    state.pendingChoice = undefined;
+    
+    const result = game.handleTufoSelectResponse(player.id, []);
+    
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('没有待处理');
+  });
+
+  it('🟢 轮入道触发涂佛后，应继续队列', () => {
+    // 准备：模拟轮入道队列
+    const spell1 = createSpellCard('基础术式');
+    spell1.instanceId = 'spell_1';
+    player.discard = [spell1];
+    
+    const state = getState(game);
+    state.pendingChoice = {
+      type: 'tufoSelect',
+      playerId: player.id,
+      cards: [spell1],
+      maxCount: 1,
+      minCount: 0,
+      prompt: '选择阴阳术'
+    };
+    
+    // 设置轮入道队列
+    state.wheelMonkQueue = {
+      playerId: player.id,
+      remainingExecutions: 1,
+      cardName: '涂佛'
+    };
+    
+    // 执行
+    const result = game.handleTufoSelectResponse(player.id, ['spell_1']);
+    
+    // 验证
+    expect(result.success).toBe(true);
+    expect(player.hand).toHaveLength(1);
+    // 轮入道队列应该被处理（checkAndContinueWheelMonkQueue 被调用）
+    // 由于 remainingExecutions 还有1次，会继续执行涂佛效果
+    // 此时弃牌区已空，所以不会再设置 pendingChoice
+  });
+});
+
   it('🟢 手牌有符合条件的御魂时，应触发弃牌选择', () => {
     // 准备：给玩家添加轮入道和一张 HP≤6 的御魂
     const wheelMonk = createYokaiCard('轮入道', 5);
@@ -302,6 +570,28 @@ describe('简单御魂效果 服务端集成测试', () => {
     }).not.toThrow();
     
     expect(player.damage).toBe(0);
+  });
+
+  it('破势（首张）：伤害+5', () => {
+    const card = createYokaiCard('破势', 6);
+    player.hand = [card];
+    player.damage = 0;
+    (player as any).cardsPlayed = 0; // 首张牌
+    
+    (game as any).executeYokaiEffect(player, card);
+    
+    expect(player.damage).toBe(5);
+  });
+
+  it('破势（非首张）：伤害+3', () => {
+    const card = createYokaiCard('破势', 6);
+    player.hand = [card];
+    player.damage = 0;
+    (player as any).cardsPlayed = 2; // 已打出过牌
+    
+    (game as any).executeYokaiEffect(player, card);
+    
+    expect(player.damage).toBe(3);
   });
 });
 

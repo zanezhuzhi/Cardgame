@@ -467,6 +467,80 @@
         </div>
       </div>
 
+      <!-- 弹窗：地藏像确认（二次确认防误操作） -->
+      <div class="modal" v-if="dizangConfirmModal.show">
+        <div class="modal-box dizang-confirm-modal">
+          <p class="modal-title">🙏 打出地藏像</p>
+          <p class="modal-hint">{{ dizangConfirmModal.prompt }}</p>
+          <div class="dizang-card-preview" v-if="dizangConfirmModal.card">
+            <img v-if="getCardImage(dizangConfirmModal.card)" 
+                 :src="getCardImage(dizangConfirmModal.card)" 
+                 class="dizang-card-img" />
+            <div class="dizang-card-info">
+              <div class="dizang-card-name">{{ dizangConfirmModal.card?.name }}</div>
+              <div class="dizang-card-stats">❤️{{ dizangConfirmModal.card?.hp }} 👑{{ dizangConfirmModal.card?.charm }}</div>
+              <div class="dizang-card-effect">{{ dizangConfirmModal.card?.effect }}</div>
+            </div>
+          </div>
+          <div class="dizang-confirm-btns">
+            <button class="btn primary" @click="handleDizangConfirm(true)">✅ 确认打出</button>
+            <button class="btn secondary" @click="handleDizangConfirm(false)">❌ 取消</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 弹窗：地藏像式神选择（二选一） -->
+      <div class="modal" v-if="dizangSelectModal.show">
+        <div class="modal-box dizang-select-modal">
+          <p class="modal-title">✨ 选择式神</p>
+          <p class="modal-hint">{{ dizangSelectModal.prompt }}</p>
+          <div class="dizang-shikigami-grid">
+            <div v-for="(s, idx) in dizangSelectModal.candidates" :key="s.id"
+                 class="dizang-shikigami-card"
+                 @click="handleDizangSelectShikigami(idx)">
+              <img v-if="s.image" :src="`/images/shikigami/${s.image}`" class="shikigami-img" />
+              <div class="shikigami-info">
+                <div class="shikigami-name">{{ s.name }}</div>
+                <div class="shikigami-skill" v-if="s.skills?.[0]">技能: {{ s.skills[0].name }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 弹窗：地藏像式神置换（式神已满时） -->
+      <div class="modal" v-if="dizangReplaceModal.show">
+        <div class="modal-box dizang-replace-modal">
+          <p class="modal-title">🔄 式神置换</p>
+          <p class="modal-hint">{{ dizangReplaceModal.prompt }}</p>
+          <div class="dizang-new-shikigami" v-if="dizangReplaceModal.newShikigami">
+            <p class="new-shikigami-label">新式神：</p>
+            <div class="dizang-shikigami-card highlight">
+              <img v-if="dizangReplaceModal.newShikigami.image" 
+                   :src="`/images/shikigami/${dizangReplaceModal.newShikigami.image}`" 
+                   class="shikigami-img" />
+              <div class="shikigami-info">
+                <div class="shikigami-name">{{ dizangReplaceModal.newShikigami.name }}</div>
+              </div>
+            </div>
+          </div>
+          <p class="current-shikigami-label">选择要替换的式神：</p>
+          <div class="dizang-shikigami-grid">
+            <div v-for="(s, idx) in dizangReplaceModal.currentShikigami" :key="s.id"
+                 class="dizang-shikigami-card"
+                 @click="handleDizangReplaceShikigami(idx)">
+              <img v-if="s.image" :src="`/images/shikigami/${s.image}`" class="shikigami-img" />
+              <div class="shikigami-info">
+                <div class="shikigami-name">{{ s.name }}</div>
+              </div>
+            </div>
+          </div>
+          <div class="dizang-replace-btns">
+            <button class="btn secondary" @click="handleDizangReplaceShikigami(null)">❌ 放弃获取</button>
+          </div>
+        </div>
+      </div>
+
       <!-- 弹窗：妖怪目标选择（天邪鬼绿等御魂效果） -->
       <div class="modal" v-if="yokaiTargetModal.show">
         <div class="modal-box yokai-target-modal">
@@ -1171,6 +1245,40 @@ watch(() => socketClient.gameState.value, (newState) => {
       salvageChoiceModal.card = newState.pendingChoice.card || null
       salvageChoiceModal.prompt = newState.pendingChoice.prompt || '是否超度这张卡牌？'
     }
+
+    // ===== 地藏像交互监听 =====
+    
+    // 监听 pendingChoice：地藏像确认弹窗
+    if (newState.pendingChoice?.type === 'dizangConfirm' && newState.pendingChoice.playerId === myPlayerId.value) {
+      dizangConfirmModal.show = true
+      dizangConfirmModal.card = newState.pendingChoice.card || null
+      dizangConfirmModal.prompt = newState.pendingChoice.prompt || '确定打出地藏像？此牌将被超度'
+    } else if (dizangConfirmModal.show && newState.pendingChoice?.type !== 'dizangConfirm') {
+      dizangConfirmModal.show = false
+      dizangConfirmModal.card = null
+    }
+
+    // 监听 pendingChoice：地藏像式神选择弹窗
+    if (newState.pendingChoice?.type === 'dizangSelectShikigami' && newState.pendingChoice.playerId === myPlayerId.value) {
+      dizangSelectModal.show = true
+      dizangSelectModal.candidates = (newState.pendingChoice as any).candidates || []
+      dizangSelectModal.prompt = newState.pendingChoice.prompt || '从2张式神中选择1张'
+    } else if (dizangSelectModal.show && newState.pendingChoice?.type !== 'dizangSelectShikigami') {
+      dizangSelectModal.show = false
+      dizangSelectModal.candidates = []
+    }
+
+    // 监听 pendingChoice：地藏像式神置换弹窗
+    if (newState.pendingChoice?.type === 'dizangReplaceShikigami' && newState.pendingChoice.playerId === myPlayerId.value) {
+      dizangReplaceModal.show = true
+      dizangReplaceModal.newShikigami = (newState.pendingChoice as any).newShikigami || null
+      dizangReplaceModal.currentShikigami = (newState.pendingChoice as any).currentShikigami || []
+      dizangReplaceModal.prompt = newState.pendingChoice.prompt || '选择要替换的式神，或放弃获取'
+    } else if (dizangReplaceModal.show && newState.pendingChoice?.type !== 'dizangReplaceShikigami') {
+      dizangReplaceModal.show = false
+      dizangReplaceModal.newShikigami = null
+      dizangReplaceModal.currentShikigami = []
+    }
     
     // 监听 pendingChoice：妖怪目标选择弹窗（天邪鬼绿等御魂效果）
     if (newState.pendingChoice?.type === 'yokaiTarget' && newState.pendingChoice.playerId === myPlayerId.value) {
@@ -1287,6 +1395,23 @@ watch(() => socketClient.gameState.value, (newState) => {
         cardSelectModal.selected = []
         cardSelectModal.resolve = (ids: string[]) => {
           socketClient.send('game:wheelMonkDiscardResponse', { selectedId: ids[0] || '' })
+        }
+      }
+    } else if (newState.pendingChoice?.type === 'tufoSelect' && newState.pendingChoice.playerId === myPlayerId.value) {
+      // 监听 pendingChoice：涂佛选择弃牌区阴阳术
+      const pc = newState.pendingChoice as any
+      if (pc.cards && pc.cards.length > 0) {
+        cardSelectModal.isServerMultiSelect = true
+        cardSelectModal.show = true
+        cardSelectModal.title = '📜 涂佛：选择阴阳术置入手牌'
+        cardSelectModal.hint = pc.prompt || `选择最多${pc.maxCount}张阴阳术`
+        cardSelectModal.candidates = pc.cards  // 直接使用服务端传来的弃牌区阴阳术
+        cardSelectModal.minCount = pc.minCount ?? 0
+        cardSelectModal.maxCount = pc.maxCount ?? 3
+        cardSelectModal.count = pc.maxCount ?? 3
+        cardSelectModal.selected = []
+        cardSelectModal.resolve = (ids: string[]) => {
+          socketClient.send('game:tufoSelectResponse', { selectedIds: ids })
         }
       }
     } else if (newState.pendingChoice?.type === 'rinyuChoice' && newState.pendingChoice.playerId === myPlayerId.value) {
@@ -1468,6 +1593,19 @@ watch(() => socketClient.gameState.value, (newState) => {
       wangliangModal.show = false
       wangliangModal.targets = []
       wangliangModal.discardSet = new Set()
+    }
+    
+    // 返魂香妨害选择：对手被妨害时显示「弃置1张手牌」或「获得1张恶评」
+    if (newState.pendingChoice?.type === 'fanHunXiangChoice' && newState.pendingChoice.playerId === myPlayerId.value) {
+      const pc = newState.pendingChoice as any
+      choiceModal.show = true
+      choiceModal.options = pc.options || ['弃置1张手牌', '获得1张恶评']
+      choiceModal.serverYokaiChoice = false  // 不是妖怪效果选择
+      choiceModal.resolve = (choiceIndex: number) => {
+        socketClient.send('game:fanHunXiangChoiceResponse', { choice: choiceIndex })
+        choiceModal.show = false
+        choiceModal.resolve = null
+      }
     }
     
     if (!newState.pendingChoice) {
@@ -1765,6 +1903,41 @@ const salvageChoiceModal = reactive<{
 }>({
   show: false,
   card: null,
+  prompt: ''
+})
+
+// 地藏像确认弹窗
+const dizangConfirmModal = reactive<{
+  show: boolean
+  card: CardInstance | null
+  prompt: string
+}>({
+  show: false,
+  card: null,
+  prompt: ''
+})
+
+// 地藏像式神选择弹窗（二选一）
+const dizangSelectModal = reactive<{
+  show: boolean
+  candidates: any[]  // ShikigamiCard[]
+  prompt: string
+}>({
+  show: false,
+  candidates: [],
+  prompt: ''
+})
+
+// 地藏像式神置换弹窗（式神已满时）
+const dizangReplaceModal = reactive<{
+  show: boolean
+  newShikigami: any | null  // ShikigamiCard
+  currentShikigami: any[]   // ShikigamiCard[]
+  prompt: string
+}>({
+  show: false,
+  newShikigami: null,
+  currentShikigami: [],
   prompt: ''
 })
 
@@ -3016,6 +3189,30 @@ function handleSalvageChoice(doSalvage: boolean) {
   })
   salvageChoiceModal.show = false
   salvageChoiceModal.card = null
+}
+
+// ===== 地藏像交互处理 =====
+
+// 地藏像确认处理
+function handleDizangConfirm(confirm: boolean) {
+  socketClient.send('game:dizangConfirmResponse', { confirm })
+  dizangConfirmModal.show = false
+  dizangConfirmModal.card = null
+}
+
+// 地藏像式神选择处理
+function handleDizangSelectShikigami(selectedIndex: number) {
+  socketClient.send('game:dizangSelectShikigamiResponse', { selectedIndex })
+  dizangSelectModal.show = false
+  dizangSelectModal.candidates = []
+}
+
+// 地藏像式神置换处理
+function handleDizangReplaceShikigami(replaceIndex: number | null) {
+  socketClient.send('game:dizangReplaceShikigamiResponse', { replaceIndex })
+  dizangReplaceModal.show = false
+  dizangReplaceModal.newShikigami = null
+  dizangReplaceModal.currentShikigami = []
 }
 
 // 妖怪目标选择处理（天邪鬼绿等御魂效果）
@@ -5499,6 +5696,86 @@ async function confirmReplaceShikigami() {
   background:rgba(100,100,100,.6);color:#ddd;
 }
 .salvage-choice-btns .btn.secondary:hover{background:rgba(120,120,120,.7)}
+
+/* 地藏像确认弹窗 */
+.dizang-confirm-modal{min-width:300px}
+.dizang-card-preview{
+  display:flex;gap:15px;
+  background:rgba(0,0,0,.3);
+  border-radius:8px;padding:12px;
+  margin-bottom:15px;
+}
+.dizang-card-img{
+  width:calc(var(--s) * 100);height:calc(var(--s) * 140);
+  border-radius:calc(var(--s) * 6);object-fit:cover;
+  border:calc(var(--s) * 2) solid #8B5CF6;
+  box-shadow:0 4px 15px rgba(139,92,246,.3);
+}
+.dizang-card-info{flex:1;display:flex;flex-direction:column;gap:6px}
+.dizang-card-name{font-size:16px;font-weight:bold;color:#f0e6d3}
+.dizang-card-stats{font-size:13px;color:#ddd}
+.dizang-card-effect{font-size:11px;color:#bbb;line-height:1.4}
+.dizang-confirm-btns{display:flex;gap:10px;justify-content:center}
+.dizang-confirm-btns .btn{
+  flex:1;padding:10px 16px;border:none;border-radius:6px;
+  font-size:13px;cursor:pointer;transition:all .15s;
+}
+.dizang-confirm-btns .btn.primary{
+  background:linear-gradient(135deg,#8B5CF6,#A855F7);color:#fff;
+}
+.dizang-confirm-btns .btn.primary:hover{transform:scale(1.02);box-shadow:0 3px 12px rgba(139,92,246,.4)}
+.dizang-confirm-btns .btn.secondary{
+  background:rgba(100,100,100,.6);color:#ddd;
+}
+.dizang-confirm-btns .btn.secondary:hover{background:rgba(120,120,120,.7)}
+
+/* 地藏像式神选择弹窗 */
+.dizang-select-modal{min-width:400px}
+.dizang-shikigami-grid{
+  display:flex;flex-wrap:wrap;gap:20px;
+  justify-content:center;padding:15px;
+}
+.dizang-shikigami-card{
+  width:calc(var(--s) * 150);padding:calc(var(--s) * 12);
+  background:rgba(0,0,0,.4);
+  border:calc(var(--s) * 2) solid #4a4a6a;border-radius:calc(var(--s) * 10);
+  cursor:pointer;transition:all .2s;
+  text-align:center;
+}
+.dizang-shikigami-card:hover{
+  border-color:#8B5CF6;transform:scale(1.05);
+  box-shadow:0 4px 20px rgba(139,92,246,.3);
+}
+.dizang-shikigami-card.highlight{
+  border-color:#22C55E;background:rgba(34,197,94,.1);
+}
+.shikigami-img{
+  width:calc(var(--s) * 100);height:calc(var(--s) * 100);
+  border-radius:calc(var(--s) * 8);object-fit:cover;
+  margin-bottom:8px;
+}
+.shikigami-info{color:#f0e6d3}
+.shikigami-name{font-size:14px;font-weight:bold;margin-bottom:4px}
+.shikigami-skill{font-size:11px;color:#aaa}
+
+/* 地藏像式神置换弹窗 */
+.dizang-replace-modal{min-width:450px}
+.dizang-new-shikigami{
+  margin-bottom:20px;padding:15px;
+  background:rgba(34,197,94,.1);border:1px solid #22C55E;
+  border-radius:10px;
+}
+.new-shikigami-label,.current-shikigami-label{
+  font-size:13px;color:#aaa;margin-bottom:10px;
+}
+.dizang-replace-btns{
+  margin-top:15px;display:flex;justify-content:center;
+}
+.dizang-replace-btns .btn.secondary{
+  padding:10px 24px;background:rgba(100,100,100,.6);
+  color:#ddd;border:none;border-radius:6px;cursor:pointer;
+}
+.dizang-replace-btns .btn.secondary:hover{background:rgba(120,120,120,.7)}
 
 /* 妖怪目标选择弹窗（天邪鬼绿等御魂效果） */
 .yokai-target-modal{min-width:350px}

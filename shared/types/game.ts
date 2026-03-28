@@ -24,6 +24,40 @@ export type DamageSourceType =
   | 'other';      // 其他来源
 
 /**
+ * 伤害池
+ * @description 精细追踪当前回合各来源累积的伤害点数
+ * 用于镜姬【妖】效果：只免疫阴阳术（spell）伤害，御魂/式神伤害正常生效
+ */
+export interface DamagePool {
+  /** 阴阳术伤害（镜姬免疫） */
+  spell: number;
+  /** 御魂效果伤害（镜姬不免疫） */
+  yokai: number;
+  /** 式神技能伤害（镜姬不免疫） */
+  shikigami: number;
+  /** 其他来源伤害 */
+  other: number;
+}
+
+/** 创建空伤害池 */
+export function createEmptyDamagePool(): DamagePool {
+  return { spell: 0, yokai: 0, shikigami: 0, other: 0 };
+}
+
+/** 计算伤害池总伤害 */
+export function getTotalDamage(pool: DamagePool): number {
+  return pool.spell + pool.yokai + pool.shikigami + pool.other;
+}
+
+/** 计算可用于指定目标的伤害（镜姬免疫spell） */
+export function getAvailableDamageForTarget(pool: DamagePool, isImmuneToSpell: boolean): number {
+  if (isImmuneToSpell) {
+    return pool.yokai + pool.shikigami + pool.other;
+  }
+  return pool.spell + pool.yokai + pool.shikigami + pool.other;
+}
+
+/**
  * 伤害来源信息
  * @description 记录一次伤害的完整来源信息
  */
@@ -109,6 +143,9 @@ export interface PlayerState {
   
   // 牌库展示状态（记录被查看过的牌库位置）
   revealedDeckCards?: RevealedCard[];
+  
+  // 本回合禁止退治的目标 instanceId 列表（镇墓兽效果）
+  prohibitedTargets?: string[];
 }
 
 export interface ShikigamiState {
@@ -216,6 +253,13 @@ export interface GameState {
   pendingYokaiRefresh?: boolean;
   /** 当前回合是否已达成「击杀」（游荡妖怪或鬼王生命曾扣至0；用于结算上一回合击杀判定） */
   turnHadKill?: boolean;
+  
+  // ====== 伤害来源追踪 ======
+  /** 
+   * 当前回合各来源累积的伤害池
+   * 镜姬【妖】效果：只免疫 spell 部分，yokai/shikigami 伤害正常生效
+   */
+  damagePool?: DamagePool;
   
   // ====== 玩家选择等待 ======
   /** 等待玩家做出选择（御魂效果、式神技能等） */

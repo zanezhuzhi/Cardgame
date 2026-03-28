@@ -794,6 +794,30 @@ export class SocketServer {
       callback?.(result);
     });
 
+    // 镇墓兽禁止退治目标选择响应
+    socket.on('game:zhenMuShouTargetResponse' as any, (data: { targetId: string }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      console.log('[SocketServer] game:zhenMuShouTargetResponse', {
+        socketId: socket.id,
+        roomId: room.id,
+        targetId: data?.targetId,
+      });
+      
+      const result = room.game.handleZhenMuShouTargetResponse(socket.id, data.targetId);
+      
+      if (result.success) {
+        // 广播游戏状态更新
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+      
+      callback?.(result);
+    });
+
     // 多选手牌响应（天邪鬼赤等卡牌效果）
     socket.on('game:selectCardsMultiResponse' as any, (data: { selectedIds: string[] }, callback?: (result: { success: boolean; error?: string }) => void) => {
       const room = this.roomManager.getPlayerRoom(socket.id);
@@ -803,6 +827,24 @@ export class SocketServer {
       }
 
       const result = room.game.handleSelectCardsMultiResponse(socket.id, data.selectedIds);
+
+      if (result.success) {
+        // 广播游戏状态更新
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
+    // 涂佛选择阴阳术响应
+    socket.on('game:tufoSelectResponse' as any, (data: { selectedIds: string[] }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleTufoSelectResponse(socket.id, data.selectedIds);
 
       if (result.success) {
         // 广播游戏状态更新
@@ -1031,6 +1073,75 @@ export class SocketServer {
 
       if (result.success) {
         // 广播游戏状态更新
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
+    // 返魂香选择响应
+    socket.on('game:fanHunXiangChoiceResponse' as any, (data: { choice: number }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleFanHunXiangChoiceResponse(socket.id, data.choice);
+
+      if (result.success) {
+        // 广播游戏状态更新
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
+    // 地藏像确认响应
+    socket.on('game:dizangConfirmResponse' as any, (data: { confirm: boolean }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleDizangConfirmResponse(socket.id, data.confirm);
+
+      if (result.success) {
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
+    // 地藏像式神选择响应
+    socket.on('game:dizangSelectShikigamiResponse' as any, (data: { selectedIndex: number }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleDizangSelectShikigamiResponse(socket.id, data.selectedIndex);
+
+      if (result.success) {
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
+    // 地藏像式神置换响应
+    socket.on('game:dizangReplaceShikigamiResponse' as any, (data: { replaceIndex: number | null }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleDizangReplaceShikigamiResponse(socket.id, data.replaceIndex);
+
+      if (result.success) {
         this.broadcastGameState(room.id, room.game.getState());
       }
 

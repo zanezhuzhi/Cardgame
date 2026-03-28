@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { effectEngine } from './EffectEngine';
-import { YOKAI_EFFECT_DEFS } from './YokaiEffects';
+import { YOKAI_EFFECT_DEFS, executeYokaiEffect } from './YokaiEffects';
 import { SHIKIGAMI_EFFECT_DEFS } from './ShikigamiEffects';
 import type { EffectContext, CardEffect } from './types';
 import type { PlayerState, GameState, FieldState } from '../../types/game';
@@ -167,6 +167,67 @@ describe('效果引擎集成测试', () => {
       expect(player.ghostFire).toBe(4); // 原3 + 鬼火+1
     });
 
+    it('飞缘魔：使用当前鬼王御魂效果（使用 executeYokaiEffect）', async () => {
+      const player = createMockPlayer();
+      player.deck.push(
+        createCardInstance('c1', '卡1', 1),
+        createCardInstance('c2', '卡2', 1),
+        createCardInstance('c3', '卡3', 1),
+      );
+      const gameState = createMockGameState(player);
+      
+      // 设置当前鬼王为八岐大蛇（御魂效果：鬼火+2，伤害+7）
+      gameState.field.currentBoss = {
+        instanceId: 'boss_inst_1',
+        cardId: 'boss_008',
+        cardType: 'boss',
+        name: '八岐大蛇',
+        hp: 14,
+        maxHp: 14,
+        currentHp: 14,
+        charm: 5,
+        image: '',
+        phase: 3,
+      } as BossCard;
+      
+      const initialGhostFire = player.ghostFire;
+      
+      // 使用 executeYokaiEffect 执行飞缘魔效果（动态调用鬼王御魂）
+      const result = await executeYokaiEffect('飞缘魔', {
+        player,
+        gameState,
+        onChoice: async () => 0,
+        onSelectTarget: async (cards) => cards[0]?.instanceId ?? '',
+        onSelectCards: async (cards, count) => cards.slice(0, count).map(c => c.instanceId),
+      });
+      
+      // 八岐大蛇御魂效果：鬼火+2，伤害+7
+      expect(result.success).toBe(true);
+      expect(player.ghostFire).toBe(Math.min(initialGhostFire + 2, 5));
+      expect(player.damage).toBe(7);
+    });
+
+    it('飞缘魔：无鬼王时返回提示（使用 executeYokaiEffect）', async () => {
+      const player = createMockPlayer();
+      const gameState = createMockGameState(player);
+      gameState.field.currentBoss = null;
+      
+      // 使用 executeYokaiEffect 执行飞缘魔效果
+      const result = await executeYokaiEffect('飞缘魔', {
+        player,
+        gameState,
+        onChoice: async () => 0,
+        onSelectTarget: async (cards) => cards[0]?.instanceId ?? '',
+        onSelectCards: async (cards, count) => cards.slice(0, count).map(c => c.instanceId),
+      });
+      
+      // 场上无鬼王时，效果成功但消息提示无鬼王，且无任何实际效果
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('没有鬼王');
+      expect(player.damage).toBe(0);   // 无伤害变化
+      expect(player.ghostFire).toBe(3); // 无鬼火变化
+    });
+
   });
 
   describe('🦊 式神技能效果', () => {
@@ -303,6 +364,123 @@ describe('效果引擎集成测试', () => {
       // 弃牌堆只剩妖怪
       expect(player.discard.length).toBe(1);
       expect(player.discard[0]!.cardType).toBe('yokai');
+    });
+
+  });
+
+  // ============================================
+  // 地藏像集成测试
+  // ============================================
+  describe('🏯 地藏像效果集成', () => {
+    
+    it('地藏像：YOKAI_EFFECT_DEFS 中存在定义', () => {
+      // 验证地藏像在效果定义数组中
+      const effectDef = YOKAI_EFFECT_DEFS.find(def => def.cardName === '地藏像');
+      expect(effectDef).toBeDefined();
+      expect(effectDef!.cardId).toBe('yokai_029');
+    });
+
+    it('地藏像：式神牌库初始化后可供选择', async () => {
+      const player = createMockPlayer();
+      player.shikigami = [];
+      const gameState = createMockGameState(player);
+      
+      // 初始化式神牌库
+      gameState.field.shikigamiDeck = [
+        {
+          instanceId: 'shiki_1',
+          cardId: 'shikigami_001',
+          cardType: 'shikigami',
+          name: '山兔',
+          hp: 0,
+          maxHp: 0
+        },
+        {
+          instanceId: 'shiki_2',
+          cardId: 'shikigami_002',
+          cardType: 'shikigami',
+          name: '座敷童子',
+          hp: 0,
+          maxHp: 0
+        }
+      ] as CardInstance[];
+      
+      // 验证式神牌库存在
+      expect(gameState.field.shikigamiDeck).toBeDefined();
+      expect(gameState.field.shikigamiDeck!.length).toBe(2);
+    });
+
+    it('地藏像：玩家exiled区初始化正确', () => {
+      const player1 = createMockPlayer();
+      player1.exiled = [];
+      
+      const player2 = createMockPlayer();
+      player2.id = 'player_2';
+      player2.exiled = [];
+      
+      // 验证各玩家exiled区独立
+      expect(player1.exiled.length).toBe(0);
+      expect(player2.exiled.length).toBe(0);
+      
+      // 手动添加到player1的exiled
+      const dizangCard = createCardInstance('yokai_029', '地藏像', 5);
+      player1.exiled.push(dizangCard);
+      
+      // 验证只有player1有卡
+      expect(player1.exiled.length).toBe(1);
+      expect(player2.exiled.length).toBe(0);
+    });
+
+    it('地藏像：与其他妖怪独立存储在played区', () => {
+      const player = createMockPlayer();
+      
+      // 放置多张卡
+      const dizangCard = createCardInstance('yokai_029', '地藏像', 5);
+      const otherCard = createCardInstance('yokai_001', '赤舌', 2);
+      player.played = [dizangCard, otherCard];
+      
+      // 过滤出地藏像
+      const dizangOnly = player.played.filter(c => c.cardId === 'yokai_029');
+      expect(dizangOnly.length).toBe(1);
+      expect(dizangOnly[0]!.name).toBe('地藏像');
+    });
+
+    it('地藏像：超度机制模拟（从played移至exiled）', () => {
+      const player = createMockPlayer();
+      player.exiled = [];
+      
+      const dizangCard = createCardInstance('yokai_029', '地藏像', 5);
+      player.played = [dizangCard];
+      
+      // 模拟超度：从played移除，添加到exiled
+      player.played = player.played.filter(c => c.instanceId !== dizangCard.instanceId);
+      player.exiled.push(dizangCard);
+      
+      // 验证超度结果
+      expect(player.played.length).toBe(0);
+      expect(player.exiled.length).toBe(1);
+      expect(player.exiled[0]!.name).toBe('地藏像');
+    });
+
+    it('地藏像：多次超度累计（轮入道场景）', () => {
+      const player = createMockPlayer();
+      player.exiled = [];
+      
+      // 第一次超度
+      const card1 = createCardInstance('yokai_029', '地藏像', 5);
+      card1.instanceId = 'dizang_first';
+      player.exiled.push(card1);
+      
+      expect(player.exiled.length).toBe(1);
+      
+      // 第二次超度（模拟轮入道触发）
+      const card2 = createCardInstance('yokai_029', '地藏像', 5);
+      card2.instanceId = 'dizang_second';
+      player.exiled.push(card2);
+      
+      // 两张地藏像都在超度区
+      expect(player.exiled.length).toBe(2);
+      expect(player.exiled.map(c => c.name)).toEqual(['地藏像', '地藏像']);
     });
 
   });

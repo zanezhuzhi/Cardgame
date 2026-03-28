@@ -3506,3 +3506,189 @@ describe('飞缘魔（鬼王御魂效果）', () => {
     expect(result.message).toContain('八岐大蛇');
   });
 });
+
+// ============================================
+// 木魅 测试
+// ============================================
+describe('木魅', () => {
+  let player: PlayerState;
+  let gameState: GameState;
+
+  beforeEach(() => {
+    player = createTestPlayer();
+    gameState = createTestGameState(player);
+  });
+
+  describe('🟢 正常流程', () => {
+    it('搜索到3张阴阳术，全部入手', async () => {
+      // 牌库顶到底：阴阳术1、非阴阳术1、阴阳术2、非阴阳术2、阴阳术3、...
+      const spell1 = createTestCard('spell', '基础术式');
+      const yokai1 = createTestCard('yokai', '心眼');
+      const spell2 = createTestCard('spell', '中级符咒');
+      const yokai2 = createTestCard('yokai', '镜姬');
+      const spell3 = createTestCard('spell', '高级符咒');
+      const yokai3 = createTestCard('yokai', '农夫');
+      
+      // deck[0]是牌库顶（shift取走）
+      player.deck = [spell1, yokai1, spell2, yokai2, spell3, yokai3];
+      player.hand = [];
+      player.discard = [];
+
+      const result = await executeYokaiEffect('木魅', {
+        player, gameState,
+        card: createTestCard('yokai', '木魅')
+      });
+
+      expect(result.success).toBe(true);
+      // 阴阳术入手3张
+      expect(player.hand.length).toBe(3);
+      expect(player.hand.map(c => c.name)).toEqual(['基础术式', '中级符咒', '高级符咒']);
+      // 非阴阳术弃置2张
+      expect(player.discard.length).toBe(2);
+      expect(player.discard.map(c => c.name)).toEqual(['心眼', '镜姬']);
+      // 剩余牌库（未展示的部分）
+      expect(player.deck.length).toBe(1);
+      expect(player.deck[0].name).toBe('农夫');
+    });
+
+    it('第一张就是阴阳术，连续3张阴阳术入手', async () => {
+      const spell1 = createTestCard('spell', '基础术式');
+      const spell2 = createTestCard('spell', '中级符咒');
+      const spell3 = createTestCard('spell', '高级符咒');
+      const yokai1 = createTestCard('yokai', '心眼');
+      
+      player.deck = [spell1, spell2, spell3, yokai1];
+      player.hand = [];
+      player.discard = [];
+
+      const result = await executeYokaiEffect('木魅', {
+        player, gameState,
+        card: createTestCard('yokai', '木魅')
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.hand.length).toBe(3);
+      expect(player.discard.length).toBe(0); // 无弃置
+      expect(player.deck.length).toBe(1);
+    });
+  });
+
+  describe('🔴 边界条件', () => {
+    it('牌库为空，无效果', async () => {
+      player.deck = [];
+      player.hand = [];
+      player.discard = [];
+
+      const result = await executeYokaiEffect('木魅', {
+        player, gameState,
+        card: createTestCard('yokai', '木魅')
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.hand.length).toBe(0);
+      expect(player.discard.length).toBe(0);
+    });
+
+    it('牌库阴阳术不足3张（只有1张）', async () => {
+      const spell1 = createTestCard('spell', '基础术式');
+      const yokai1 = createTestCard('yokai', '心眼');
+      const yokai2 = createTestCard('yokai', '镜姬');
+      
+      player.deck = [yokai1, spell1, yokai2]; // 只有1张阴阳术
+      player.hand = [];
+      player.discard = [];
+
+      const result = await executeYokaiEffect('木魅', {
+        player, gameState,
+        card: createTestCard('yokai', '木魅')
+      });
+
+      expect(result.success).toBe(true);
+      // 搜索完整个牌库才找到1张
+      expect(player.hand.length).toBe(1);
+      expect(player.hand[0].name).toBe('基础术式');
+      // 其余2张弃置
+      expect(player.discard.length).toBe(2);
+      // 牌库空了
+      expect(player.deck.length).toBe(0);
+    });
+
+    it('牌库无阴阳术，全部弃置', async () => {
+      const yokai1 = createTestCard('yokai', '心眼');
+      const yokai2 = createTestCard('yokai', '镜姬');
+      const yokai3 = createTestCard('yokai', '农夫');
+      
+      player.deck = [yokai1, yokai2, yokai3];
+      player.hand = [];
+      player.discard = [];
+
+      const result = await executeYokaiEffect('木魅', {
+        player, gameState,
+        card: createTestCard('yokai', '木魅')
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.hand.length).toBe(0); // 没有阴阳术入手
+      expect(player.discard.length).toBe(3); // 全部弃置
+      expect(player.deck.length).toBe(0);
+    });
+
+    it('牌库全是阴阳术（超过3张），只取前3张', async () => {
+      const spell1 = createTestCard('spell', '基础术式1');
+      const spell2 = createTestCard('spell', '基础术式2');
+      const spell3 = createTestCard('spell', '基础术式3');
+      const spell4 = createTestCard('spell', '基础术式4');
+      
+      player.deck = [spell1, spell2, spell3, spell4];
+      player.hand = [];
+      player.discard = [];
+
+      const result = await executeYokaiEffect('木魅', {
+        player, gameState,
+        card: createTestCard('yokai', '木魅')
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.hand.length).toBe(3);
+      expect(player.discard.length).toBe(0); // 无弃置（展示的全是阴阳术）
+      expect(player.deck.length).toBe(1); // 第4张没被展示
+    });
+  });
+
+  describe('🔄 轮入道触发木魅', () => {
+    it('轮入道执行两次木魅效果，最多获得6张阴阳术', async () => {
+      // 准备充足的阴阳术
+      const spells = [
+        createTestCard('spell', '术式1'),
+        createTestCard('spell', '术式2'),
+        createTestCard('spell', '术式3'),
+        createTestCard('spell', '术式4'),
+        createTestCard('spell', '术式5'),
+        createTestCard('spell', '术式6'),
+        createTestCard('spell', '术式7'),
+      ];
+      
+      player.deck = spells;
+      player.hand = [];
+      player.discard = [];
+
+      // 第一次执行
+      await executeYokaiEffect('木魅', {
+        player, gameState,
+        card: createTestCard('yokai', '木魅')
+      });
+
+      expect(player.hand.length).toBe(3);
+      expect(player.deck.length).toBe(4);
+
+      // 第二次执行（模拟轮入道）
+      await executeYokaiEffect('木魅', {
+        player, gameState,
+        card: createTestCard('yokai', '木魅')
+      });
+
+      expect(player.hand.length).toBe(6);
+      expect(player.deck.length).toBe(1);
+    });
+  });
+});

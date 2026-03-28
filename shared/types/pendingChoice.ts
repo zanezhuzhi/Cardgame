@@ -12,7 +12,7 @@
  * - 前端根据 type 渲染对应的交互组件
  */
 
-import type { CardInstance } from './cards';
+import type { CardInstance, ShikigamiCard } from './cards';
 
 // ============ 基础 ============
 
@@ -100,6 +100,40 @@ export interface WheelMonkDiscardChoice extends BasePendingChoice {
 /** 薙魂弃牌选择（弃置1张手牌） */
 export interface NaginataSoulDiscardChoice extends BasePendingChoice {
   type: 'naginataSoulDiscard';
+}
+
+/** 镇墓兽禁止退治目标选择（左手边玩家选择一个目标，本回合不能被退治） */
+export interface ZhenMuShouTargetChoice extends BasePendingChoice {
+  type: 'zhenMuShouTarget';
+  /** 可选目标的 instanceId 列表（游荡妖怪 + 鬼王） */
+  candidates: string[];
+  /** 当前回合玩家的 ID（被限制的玩家） */
+  restrictedPlayerId: string;
+}
+
+// ============ 地藏像相关 ============
+
+/** 地藏像打出确认（二次确认：防止误操作） */
+export interface DizangConfirmChoice extends BasePendingChoice {
+  type: 'dizangConfirm';
+  /** 地藏像卡牌实例 */
+  card: CardInstance;
+}
+
+/** 地藏像式神选择（从2张式神中选择1张） */
+export interface DizangSelectShikigamiChoice extends BasePendingChoice {
+  type: 'dizangSelectShikigami';
+  /** 可选的式神列表（从牌库顶抽取的2张） */
+  candidates: ShikigamiCard[];
+}
+
+/** 地藏像式神置换选择（式神已满时：选择替换哪个或放弃） */
+export interface DizangReplaceShikigamiChoice extends BasePendingChoice {
+  type: 'dizangReplaceShikigami';
+  /** 新选中的式神 */
+  newShikigami: ShikigamiCard;
+  /** 当前拥有的式神列表 */
+  currentShikigami: ShikigamiCard[];
 }
 
 // ============ 式神技能相关（新增） ============
@@ -228,6 +262,11 @@ export type PendingChoice =
   | AkajitaSelectChoice
   | WheelMonkDiscardChoice
   | NaginataSoulDiscardChoice
+  | ZhenMuShouTargetChoice
+  // 地藏像相关
+  | DizangConfirmChoice
+  | DizangSelectShikigamiChoice
+  | DizangReplaceShikigamiChoice
   // 式神技能相关
   | ShikigamiTargetChoice
   | ShikigamiDiscardChoice

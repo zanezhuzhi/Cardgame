@@ -87,10 +87,16 @@ export async function executeYokaiEffect(
   return handler(ctx);
 }
 
+/** 与《卡牌开发》/ server drawCards 一致：手牌 ≥10 时跳过当次抓牌 */
+const DRAW_HAND_LIMIT = 10;
+
 // 辅助函数：抓牌（牌库空时洗入弃牌堆，与 MultiplayerGame/SinglePlayerGame 一致）
 function drawCards(player: PlayerState, count: number): number {
   let drawn = 0;
   for (let i = 0; i < count; i++) {
+    if (player.hand.length >= DRAW_HAND_LIMIT) {
+      break;
+    }
     if (player.deck.length === 0) {
       if (player.discard.length === 0) break;
       player.deck = [...player.discard].sort(() => Math.random() - 0.5);
@@ -871,7 +877,8 @@ export function aiDecide_轮入道(card: CardInstance, context?: { ghostFire?: n
     '灯笼鬼': 8,      // 鬼火+2，抓牌+2，无额外消耗
     '蝠翼': 7,        // 抓牌+2，伤害+2，无额外消耗
     '镜姬': 7,        // 抓+4，伤+2，火+2，无额外消耗
-    '狂骨': 6 + Math.min(ghostFire, 5),  // 抓牌+2，伤害+2X，鬼火越多越强
+    // 抓牌+1、伤害+X（X=当前鬼火）；轮入道执行两次时收益约翻倍，故用基础分+鬼火加成
+    '狂骨': 6 + Math.min(ghostFire, 5),
     '日女巳时': 6,    // 选择两次，灵活组合，无额外消耗
     '鸣屋': 6,        // 伤害+4或+8，无额外消耗
     '针女': 6,        // 伤害+2，后续技能伤害+4，无额外消耗
@@ -1025,11 +1032,11 @@ registerEffect('魍魉之匣', async (ctx) => {
 // 生命5 妖怪效果
 // ============================================
 
-// 狂骨 - 抓牌+1，伤害+X（X=当前鬼火）
+// 狂骨 - 抓牌+1，伤害+X（X=打出瞬间当前鬼火；先于抓牌锁定，与策划文档一致）
 registerEffect('狂骨', async (ctx) => {
   const { player } = ctx;
-  drawCards(player, 1);
   const damage = player.ghostFire;
+  drawCards(player, 1);
   player.damage += damage;
   return { success: true, message: `狂骨：抓牌+1，伤害+${damage}`, draw: 1, damage };
 });

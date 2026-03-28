@@ -2479,6 +2479,23 @@ describe('狂骨', () => {
       expect(result.success).toBe(true);
       expect(player.damage).toBe(1);
     });
+
+    it('🔴 手牌已满10张时跳过抓牌，仍按打出瞬间鬼火加伤', async () => {
+      player.ghostFire = 4;
+      player.damage = 0;
+      player.deck = [createTestCard('spell'), createTestCard('spell')];
+      while (player.hand.length < 10) {
+        player.hand.push(createTestCard('spell'));
+      }
+
+      const result = await executeYokaiEffect('狂骨', {
+        player, gameState, card: createTestCard('yokai', '狂骨')
+      });
+
+      expect(result.success).toBe(true);
+      expect(player.hand.length).toBe(10);
+      expect(player.damage).toBe(4);
+    });
   });
 });
 

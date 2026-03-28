@@ -6,6 +6,20 @@
 
 ---
 
+## 当前进度（快照 · 2026-03-28）
+
+| 领域 | 状态 | 说明 |
+|------|:----:|------|
+| 共享逻辑与数据 | 稳定 | `shared/data/cards.json`（400 张）+ `EffectEngine` / 式神·妖怪·鬼王效果框架；**Vitest 1038** 条（`cd shared && npm test`） |
+| 服务端多人 | 迭代中 | `SocketServer`、`MultiplayerGame`、房间、聊天/GM、回合超时与托管；**Vitest 86** 条（`cd server && npm test`），含 `gameFlow.integration`、`yokaiEffects.integration` 等 |
+| 客户端 | 迭代中 | Vue3 大厅与对局、`SocketClient`、开发面板 `?devPanel=1`；**已打出区 / 已击杀标记 / 动效音效**等仍以策划与 `PROGRESS.md`、`策划文档/备忘录.md` 为待办跟踪 |
+| CI | 已接 | GitHub Actions [test.yml](.github/workflows/test.yml)（文首徽章） |
+| 本地验收工具 | 可用 | `tools/test-gui`（Electron 一键跑测）、`tools/run-tests.bat`（Shared + Server 批跑）；索引见 [tools/README.md](tools/README.md) |
+
+**文档分工**：本 README 做**对外总览与命令入口**；模块勾选与历史记录见 `PROGRESS.md`；**规则权威**在 `策划文档/`。若进度表与代码或测试不一致，**以仓库实现与自动化测试为准**。
+
+---
+
 ## 项目结构（核心）
 
 ```text
@@ -29,14 +43,21 @@ Cardgame/
 │   └── game/effects/              # EffectEngine + 各类效果
 ├── docs/                          # 技术文档
 │   ├── design/testset.md          # 测试条件与GM测试入口
+│   ├── testing/                   # 测试规范与增强计划
 │   ├── MULTIPLAYER_ARCHITECTURE.md
 │   ├── MULTIPLAYER_SCENARIOS.md
 │   └── CLIENT_VISUAL_FX_TECH_PLAN.md  # 客户端视觉/动效与 Pixi 分层方案
-├── tools/                         # 开发工具说明（脚本/手测清单，不接入主界面）
-│   ├── README.md
+├── .github/workflows/             # CI（unit test 等）
+├── tools/                         # 开发工具（与主界面解耦）
+│   ├── README.md                  # 工具索引
+│   ├── run-tests.bat              # 命令行批跑 Shared + Server 测试
+│   ├── test-gui/                  # Electron 可视化测试面板
 │   └── multiplayer-timer-gm.md    # 多人计时与托管 GM 手测
 ├── 策划文档/                       # 规则权威来源
 │   ├── 游戏规则说明书.md
+│   ├── AI匹配机制设计.md          # 快速匹配、AI 补位、大厅改造与策略分级
+│   ├── 卡牌数据/
+│   │   └── 卡牌开发.md            # 卡牌核心逻辑：实现准则与流程（开发必读）
 │   ├── 交互设计.md
 │   ├── 美术规范.md
 │   ├── 备忘录.md
@@ -49,8 +70,10 @@ Cardgame/
 ## 文档索引
 
 ### 规则（先看）
+- **[卡牌开发.md](策划文档/卡牌数据/卡牌开发.md)**：卡牌核心逻辑开发准则（实现顺序、与数据/测试/文档的约束，**写效果与改牌前必读**）
 - `策划文档/游戏规则说明书.md`：完整规则与胜负判定
 - `策划文档/交互设计.md`：UI/UX 与交互约束
+- **[AI匹配机制设计.md](策划文档/AI匹配机制设计.md)**：快速匹配、空位由 AI 填充、大厅改造与 AI 策略分级（**做大厅/匹配/补位前必读**）
 - `策划文档/界面ass/信息交互.md`：日志、聊天、GM输入设计
 - `策划文档/美术规范.md`：美术尺寸、命名与风格
 - `策划文档/备忘录.md`：开发中零散需求与待办（随时追加，正式规格请写入对应专题文档）
@@ -77,8 +100,9 @@ Cardgame/
 
 - `tools/README.md`：根目录工具索引（手测清单等，与主界面解耦）
 - `docs/MULTIPLAYER_ARCHITECTURE.md`：多人架构
+- [AI匹配机制设计.md](策划文档/AI匹配机制设计.md)：匹配与 AI 补位的产品与交互规格（工程实现对照 `docs/MULTIPLAYER_ARCHITECTURE.md`）
 - `docs/CLIENT_VISUAL_FX_TECH_PLAN.md`：逻辑稳定后的美化阶段——Vue 与 Pixi 分层、粒子与资源策略
-- `PROGRESS.md`：当前开发进度
+- `PROGRESS.md`：模块级进度与历史（若与 README 快照冲突，以代码/测试为准）
 
 ### 关键代码
 - `client/src/App.vue`
@@ -116,17 +140,17 @@ cd ../client && npm run dev
 | 断言库 | Vitest 内置 | - |
 | 覆盖率 | c8 / istanbul | `npm run test:coverage` |
 
-### 当前覆盖情况
+### 当前覆盖情况（约 2026-03）
 
-| 模块 | 状态 | 测试文件 |
-|------|:----:|----------|
-| 妖怪效果 (YokaiEffects) | ✅ 良好 | `shared/game/effects/YokaiEffects.test.ts` |
-| 式神技能 (ShikigamiSkills) | ✅ 良好 | `shared/game/effects/ShikigamiSkills.test.ts` |
-| 数据一致性 | ✅ 良好 | `shared/data/cards.consistency.test.ts` |
-| HP系统 | ✅ 良好 | `shared/game/effects/EffectiveHP.test.ts` |
-| 牌库管理 | ✅ 良好 | `shared/game/DeckManager.test.ts` |
-| 服务端游戏逻辑 | 🟡 薄弱 | `server/src/game/__tests__/*.test.ts` |
-| Socket事件 | 🔴 缺失 | 待建设 |
+| 模块 | 状态 | 测试文件 / 说明 |
+|------|:----:|-----------------|
+| 妖怪效果 (YokaiEffects) | 良好 | `shared/game/effects/YokaiEffects.test.ts` 等 |
+| 式神技能 (ShikigamiSkills) | 良好 | `shared/game/effects/ShikigamiSkills.test.ts` 等 |
+| 数据一致性 | 良好 | `shared/data/cards.consistency.test.ts` 等 |
+| HP / 伤害管线 | 良好 | `shared/game/effects/EffectiveHP.test.ts`、`HarassmentPipeline` 相关等 |
+| 牌库与游戏状态 | 良好 | `DeckManager`、`GameManager`、`EffectEngine` 等（shared 合计 **1038** 条） |
+| 服务端 `MultiplayerGame` | 推进中 | `MultiplayerGame.test.ts`、`SpellAcquire.test.ts`、`__tests__/gameFlow.integration.test.ts`、`yokaiEffects.integration.test.ts`、`turnTimeoutHosting.test.ts` 等（server 合计 **86** 条） |
+| Socket 层单测 | 少 | 行为多由集成测与手测覆盖；专项用例仍待补充（见 [测试增强方案](docs/testing/test-enhancement-plan.md)） |
 
 ### 测试命令速查
 
@@ -172,6 +196,30 @@ cd server && npm run test:watch    # 监听模式
 | **4** | **自动化测试** | 运行 `npm test` 直至全部通过 |
 | **5** | **创建 GM 指令** | 添加调试指令协助手工测试 |
 | **6** | **提交并重启** | 重启服务端/客户端，人工跟进测试 |
+
+### 流程补充建议（与 Superpowers 对齐）
+
+与上表是同一套纪律；若使用 Cursor **Superpowers** 插件，可用 **`writing-plans`**（大卡开工前列步骤）、**`verification-before-completion`**（宣称完成前先跑测）、**`systematic-debugging`**（先复现再改）等强化执行，**并非替代**策划与测试文档。
+
+**按任务体量**
+
+- **跨模块、多文件、新机制**（如匹配、效果管线、`pendingChoice` 长链）：开工前写清可验收范围与步骤（一页计划即可），大改动合入前做评审并交代上下文与测试清单。
+- **小改动**（文案、明确单行修复等）：可直接实现，不必强行套全套会议式流程。
+
+**验证习惯**
+
+- 完工前至少执行：**`cd shared && npm test`** 与 **`cd server && npm test`**（协议/房间/大厅相关再补一条最小手测闭环）。
+- 复杂 Bug：先在 **test-gui**、**GM**、**`?devPanel=1`** 等环境下稳定复现，再改代码，避免盲改 `MultiplayerGame` 或长分支交互。
+
+**规格与工程文档分工**
+
+- **策划文档**说明「做什么」（例如匹配见 [AI匹配机制设计.md](策划文档/AI匹配机制设计.md)）；**`docs/`** 说明「工程上怎么挂」（例如 `docs/MULTIPLAYER_ARCHITECTURE.md`）。避免只改前端或只改协议的一半。
+
+**提交 / PR 说明（推荐固定写清三项）**
+
+1. **关联文档**：策划或 `docs/` 路径（若适用）  
+2. **自动化**：已执行的命令与结果（shared / server）  
+3. **手测与记录**：是否手测；修牌/效果类问题是否更新 [testset.md](docs/design/testset.md)
 
 ---
 

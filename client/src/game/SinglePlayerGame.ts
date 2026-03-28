@@ -36,7 +36,8 @@ const GAME_CONSTANTS = {
   STARTING_HAND_SIZE: 5,
   STARTING_DECK_SIZE: 9,   // 6基础术式 + 3招福达摩
   YOKAI_SLOTS: 6,
-  MAX_SHIKIGAMI: 3
+  MAX_SHIKIGAMI: 3,
+  MAX_HAND_SIZE: 10,       // 《卡牌开发》手牌上限；抓牌前检查
 };
 
 // ============ 工具函数 ============
@@ -1513,6 +1514,10 @@ export class SinglePlayerGame {
     const player = this.getPlayer();
     
     for (let i = 0; i < count; i++) {
+      if (player.hand.length >= GAME_CONSTANTS.MAX_HAND_SIZE) {
+        this.addLog(`⚠️ 手牌已满（${GAME_CONSTANTS.MAX_HAND_SIZE}张），跳过抓牌`);
+        break;
+      }
       if (player.deck.length === 0) {
         if (player.discard.length === 0) break;
         player.deck = shuffle(player.discard);

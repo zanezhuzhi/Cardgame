@@ -3895,12 +3895,14 @@ export class MultiplayerGame {
         }
           
         // ============ 生命5 ============
-        case '狂骨':
-          // 抓牌+1，伤害+鬼火数
+        case '狂骨': {
+          // 抓牌+1，伤害+X（X=打出瞬间鬼火；先于抓牌锁定）
+          const kuangguDmg = player.ghostFire;
           this.drawCards(player, 1);
-          player.damage += player.ghostFire;
-          this.addLog(`   ✨ 御魂：抓牌+1，伤害+${player.ghostFire}`);
+          player.damage += kuangguDmg;
+          this.addLog(`   ✨ 御魂：抓牌+1，伤害+${kuangguDmg}`);
           break;
+        }
           
         case '返魂香':
           // [妨害] 抓牌+1，伤害+1
@@ -5122,9 +5124,9 @@ export class MultiplayerGame {
         break;
         
       case '狂骨': {
-        // 抓牌+1，伤害+当前鬼火
-        this.drawCards(player, 1);
+        // 抓牌+1，伤害+X（X=打出瞬间鬼火；先于抓牌锁定）
         const dmg = player.ghostFire;
+        this.drawCards(player, 1);
         player.damage += dmg;
         this.addLog(`   ✨ ${effectKey}：抓牌+1，伤害+${dmg}`);
         break;

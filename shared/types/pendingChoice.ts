@@ -111,6 +111,21 @@ export interface ZhenMuShouTargetChoice extends BasePendingChoice {
   restrictedPlayerId: string;
 }
 
+/** 幽谷响选择（从所有对手牌库顶展示的卡牌中选择最多3张非鬼王卡执行效果） */
+export interface YouguXiangSelectChoice extends BasePendingChoice {
+  type: 'youguXiangSelect';
+  /** 展示的所有卡牌（带 ownerId 标记来源玩家） */
+  revealedCards: Array<{
+    card: CardInstance;
+    ownerId: string;
+    ownerName: string;
+  }>;
+  /** 可选择的卡牌 instanceId 列表（已过滤掉鬼王） */
+  selectableCandidates: string[];
+  /** 最多可选数量（默认3） */
+  maxSelect: number;
+}
+
 // ============ 地藏像相关 ============
 
 /** 地藏像打出确认（二次确认：防止误操作） */
@@ -263,6 +278,7 @@ export type PendingChoice =
   | WheelMonkDiscardChoice
   | NaginataSoulDiscardChoice
   | ZhenMuShouTargetChoice
+  | YouguXiangSelectChoice
   // 地藏像相关
   | DizangConfirmChoice
   | DizangSelectShikigamiChoice

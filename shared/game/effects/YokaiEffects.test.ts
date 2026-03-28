@@ -3692,3 +3692,270 @@ describe('木魅', () => {
     });
   });
 });
+
+// ============================================
+// 幽谷响 测试
+// ============================================
+describe('幽谷响', () => {
+  let player: PlayerState;
+  let opponent1: PlayerState;
+  let opponent2: PlayerState;
+  let gameState: GameState;
+
+  beforeEach(() => {
+    player = createTestPlayer({ name: '玩家A' });
+    player.id = 'player1';
+    player.deck = [createTestCard('spell', '基础术式')];
+    
+    opponent1 = createTestPlayer({ name: '对手B' });
+    opponent1.id = 'opponent1';
+    opponent1.deck = [];
+    opponent1.discard = [];
+    
+    opponent2 = createTestPlayer({ name: '对手C' });
+    opponent2.id = 'opponent2';
+    opponent2.deck = [];
+    opponent2.discard = [];
+    
+    gameState = createTestGameState(player);
+    gameState.players = [player, opponent1, opponent2];
+  });
+
+  describe('🟢 正常流程', () => {
+    it('展示多个对手牌库顶牌并选择使用效果', async () => {
+      // 对手1牌库顶：心眼（伤害+3）
+      const xinyan = { ...createTestCard('yokai', '心眼'), hp: 5, damage: 3 };
+      opponent1.deck = [xinyan];
+      
+      // 对手2牌库顶：灯笼鬼（抓牌+1）
+      const denglong = { ...createTestCard('yokai', '灯笼鬼'), hp: 3 };
+      opponent2.deck = [denglong];
+      
+      const result = await executeYokaiEffect('幽谷响', {
+        player, gameState,
+        card: createTestCard('yokai', '幽谷响'),
+        onSelectCards: async (cards) => cards.map(c => c.instanceId) // 全选
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('心眼');
+      expect(result.message).toContain('灯笼鬼');
+      // 两张牌都应归还各自拥有者弃牌区
+      expect(opponent1.deck.length).toBe(0);
+      expect(opponent1.discard.length).toBe(1);
+      expect(opponent1.discard[0]!.name).toBe('心眼');
+      expect(opponent2.deck.length).toBe(0);
+      expect(opponent2.discard.length).toBe(1);
+      expect(opponent2.discard[0]!.name).toBe('灯笼鬼');
+    });
+
+    it('使用展示牌效果时，效果归属幽谷响使用者', async () => {
+      // 对手牌库顶是兵主部（伤害+2）
+      const heizu = { ...createTestCard('yokai', '兵主部'), hp: 3, damage: 2 };
+      opponent1.deck = [heizu];
+      player.damage = 0;
+
+      await executeYokaiEffect('幽谷响', {
+        player, gameState,
+        card: createTestCard('yokai', '幽谷响'),
+        onSelectCards: async (cards) => [cards[0]!.instanceId]
+      });
+
+      // 伤害应加到幽谷响使用者身上
+      expect(player.damage).toBe(2);
+    });
+
+    it('最多选择3张牌使用效果', async () => {
+      // 准备4名对手
+      const opponent3 = createTestPlayer({ name: '对手D' });
+      opponent3.id = 'opponent3';
+      const opponent4 = createTestPlayer({ name: '对手E' });
+      opponent4.id = 'opponent4';
+      gameState.players = [player, opponent1, opponent2, opponent3, opponent4];
+      
+      // 每个对手牌库顶放一张妖怪
+      opponent1.deck = [{ ...createTestCard('yokai', '赤舌'), hp: 2 }];
+      opponent2.deck = [{ ...createTestCard('yokai', '灯笼鬼'), hp: 3 }];
+      opponent3.deck = [{ ...createTestCard('yokai', '蝠翼'), hp: 2 }];
+      opponent3.discard = [];
+      opponent4.deck = [{ ...createTestCard('yokai', '心眼'), hp: 5, damage: 3 }];
+      opponent4.discard = [];
+      
+      let selectedCount = 0;
+      const result = await executeYokaiEffect('幽谷响', {
+        player, gameState,
+        card: createTestCard('yokai', '幽谷响'),
+        onSelectCards: async (cards, maxCount) => {
+          // 验证最多只能选3张
+          expect(maxCount).toBe(3);
+          selectedCount = Math.min(3, cards.length);
+          return cards.slice(0, 3).map(c => c.instanceId);
+        }
+      });
+
+      expect(result.success).toBe(true);
+      expect(selectedCount).toBe(3);
+      // 所有4张牌都应归还各自弃牌区
+      expect(opponent1.discard.length).toBe(1);
+      expect(opponent2.discard.length).toBe(1);
+      expect(opponent3.discard.length).toBe(1);
+      expect(opponent4.discard.length).toBe(1);
+    });
+  });
+
+  describe('🔴 边界条件', () => {
+    it('鬼王卡被排除在可选池外', async () => {
+      // 对手1牌库顶是鬼王
+      const boss = { ...createTestCard('boss', '大天狗'), cardType: 'boss' as const, hp: 15 };
+      opponent1.deck = [boss];
+      
+      // 对手2牌库顶是普通妖怪
+      const yokai = { ...createTestCard('yokai', '灯笼鬼'), hp: 3 };
+      opponent2.deck = [yokai];
+
+      let selectableCandidates: any[] = [];
+      const result = await executeYokaiEffect('幽谷响', {
+        player, gameState,
+        card: createTestCard('yokai', '幽谷响'),
+        onSelectCards: async (cards) => {
+          selectableCandidates = cards;
+          return cards.map(c => c.instanceId);
+        }
+      });
+
+      expect(result.success).toBe(true);
+      // 只有1张可选（灯笼鬼），鬼王被排除
+      expect(selectableCandidates.length).toBe(1);
+      expect(selectableCandidates[0].name).toBe('灯笼鬼');
+      // 鬼王也应归还弃牌区
+      expect(opponent1.discard.length).toBe(1);
+      expect(opponent1.discard[0]!.name).toBe('大天狗');
+      expect(result.message).toContain('大天狗为鬼王不可选');
+    });
+
+    it('对手牌库为空时跳过该对手', async () => {
+      // 对手1牌库为空
+      opponent1.deck = [];
+      
+      // 对手2有牌
+      const yokai = { ...createTestCard('yokai', '灯笼鬼'), hp: 3 };
+      opponent2.deck = [yokai];
+
+      const result = await executeYokaiEffect('幽谷响', {
+        player, gameState,
+        card: createTestCard('yokai', '幽谷响'),
+        onSelectCards: async (cards) => cards.map(c => c.instanceId)
+      });
+
+      expect(result.success).toBe(true);
+      // 只有对手2的牌被处理
+      expect(opponent2.discard.length).toBe(1);
+      expect(opponent1.discard.length).toBe(0);
+    });
+
+    it('所有对手牌库为空时直接返回', async () => {
+      opponent1.deck = [];
+      opponent2.deck = [];
+
+      const result = await executeYokaiEffect('幽谷响', {
+        player, gameState,
+        card: createTestCard('yokai', '幽谷响')
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('所有对手牌库为空');
+    });
+
+    it('选择0张（不使用任何效果）', async () => {
+      const yokai = { ...createTestCard('yokai', '灯笼鬼'), hp: 3 };
+      opponent1.deck = [yokai];
+      player.damage = 0;
+
+      const result = await executeYokaiEffect('幽谷响', {
+        player, gameState,
+        card: createTestCard('yokai', '幽谷响'),
+        onSelectCards: async () => [] // 不选任何牌
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('未使用任何效果');
+      // 牌仍归还弃牌区
+      expect(opponent1.discard.length).toBe(1);
+      // 没有效果执行
+      expect(player.damage).toBe(0);
+    });
+
+    it('无对手时直接返回', async () => {
+      gameState.players = [player]; // 只有自己
+
+      const result = await executeYokaiEffect('幽谷响', {
+        player, gameState,
+        card: createTestCard('yokai', '幽谷响')
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('无对手');
+    });
+
+    it('所有展示牌都是鬼王时，无牌可选', async () => {
+      const boss1 = { ...createTestCard('boss', '八岐大蛇'), cardType: 'boss' as const };
+      const boss2 = { ...createTestCard('boss', '玉藻前'), cardType: 'boss' as const };
+      opponent1.deck = [boss1];
+      opponent2.deck = [boss2];
+
+      const result = await executeYokaiEffect('幽谷响', {
+        player, gameState,
+        card: createTestCard('yokai', '幽谷响')
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('未使用任何效果');
+      // 鬼王仍归还各自弃牌区
+      expect(opponent1.discard.length).toBe(1);
+      expect(opponent2.discard.length).toBe(1);
+    });
+  });
+
+  describe('🤖 AI 策略', () => {
+    it('AI 按效果价值选择（优先伤害>抓牌>鬼火）', async () => {
+      // 准备不同类型的牌
+      const xinyan = { ...createTestCard('yokai', '心眼'), hp: 5, damage: 3 }; // 伤害+3，评分6
+      const denglong = { ...createTestCard('yokai', '灯笼鬼'), hp: 3 }; // 抓牌+1，评分3
+      const fuyi = { ...createTestCard('yokai', '蝠翼'), hp: 2 }; // 鬼火+1，评分1
+      
+      opponent1.deck = [fuyi];
+      opponent2.deck = [xinyan];
+      
+      const opponent3 = createTestPlayer({ name: '对手D' });
+      opponent3.id = 'opponent3';
+      opponent3.deck = [denglong];
+      opponent3.discard = [];
+      gameState.players = [player, opponent1, opponent2, opponent3];
+
+      player.damage = 0;
+
+      // 不提供 onSelectCards，触发 AI 策略
+      const result = await executeYokaiEffect('幽谷响', {
+        player, gameState,
+        card: createTestCard('yokai', '幽谷响')
+      });
+
+      expect(result.success).toBe(true);
+      // AI 应该选择心眼（评分最高）
+      expect(result.message).toContain('心眼');
+    });
+
+    it('AI 不选择评分≤0的牌（如恶评）', async () => {
+      const penalty = { ...createTestCard('penalty', '农夫'), cardType: 'penalty' as const };
+      opponent1.deck = [penalty];
+
+      const result = await executeYokaiEffect('幽谷响', {
+        player, gameState,
+        card: createTestCard('yokai', '幽谷响')
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('未使用任何效果');
+    });
+  });
+});

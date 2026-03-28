@@ -1339,27 +1339,146 @@ registerEffect('木魅', async (ctx) => {
 // 生命7 妖怪效果
 // ============================================
 
-// 幽谷响 - [妨害] 使用对手牌库顶至多3张非鬼王效果
+// 幽谷响 - [妨害] 每名对手展示牌库顶牌，选至多3张非鬼王使用其效果
 registerEffect('幽谷响', async (ctx) => {
-  const { player, gameState } = ctx;
-  let usedCount = 0;
+  const { player, gameState, onSelectCards } = ctx;
+  const opponents = gameState.players.filter(p => p.id !== player.id);
   
-  for (const p of gameState.players) {
-    if (p.id === player.id) continue;
-    if (usedCount >= 3) break;
-    
-    if (p.deck.length > 0) {
-      const topCard = p.deck[p.deck.length - 1]!;
-      if (topCard.cardType !== 'boss') {
-        // 使用效果（简化处理）
-        p.discard.push(p.deck.pop()!);
-        usedCount++;
-      }
+  if (opponents.length === 0) {
+    return { success: true, message: '[妨害] 幽谷响：无对手，跳过' };
+  }
+  
+  // 1. 收集所有对手的牌库顶牌
+  const revealedCards: { card: CardInstance; owner: PlayerState }[] = [];
+  for (const opp of opponents) {
+    if (opp.deck.length > 0) {
+      // 牌库顶是数组最后一个元素
+      const topCard = opp.deck[opp.deck.length - 1]!;
+      revealedCards.push({ card: topCard, owner: opp });
     }
   }
   
-  return { success: true, message: `[妨害] 幽谷响：使用${usedCount}张对手牌的效果` };
+  if (revealedCards.length === 0) {
+    return { success: true, message: '[妨害] 幽谷响：所有对手牌库为空' };
+  }
+  
+  // 2. 筛选非鬼王的可选牌
+  const selectableCards = revealedCards.filter(r => r.card.cardType !== 'boss');
+  const bossCards = revealedCards.filter(r => r.card.cardType === 'boss');
+  
+  // 3. 选择使用哪些牌（0~3张）
+  let selectedIds: string[] = [];
+  const maxSelect = Math.min(3, selectableCards.length);
+  
+  if (selectableCards.length > 0) {
+    if (onSelectCards) {
+      // 玩家选择
+      selectedIds = await onSelectCards(
+        selectableCards.map(r => r.card),
+        maxSelect
+      );
+    } else {
+      // AI 策略：按效果价值评分选择
+      selectedIds = aiDecide_幽谷响(selectableCards.map(r => r.card), maxSelect);
+    }
+  }
+  
+  // 4. 执行所选牌的效果
+  const usedNames: string[] = [];
+  for (const cardId of selectedIds) {
+    const revealed = selectableCards.find(r => r.card.instanceId === cardId);
+    if (!revealed) continue;
+    
+    const selectedCard = revealed.card;
+    
+    // 执行该牌的御魂效果（归属于幽谷响使用者）
+    if (selectedCard.cardType === 'yokai' && selectedCard.name) {
+      await executeYokaiEffect(selectedCard.name, {
+        ...ctx,
+        card: selectedCard
+      });
+      usedNames.push(selectedCard.name);
+    }
+  }
+  
+  // 5. 所有展示的牌归还各自拥有者的弃牌区
+  for (const { card, owner } of revealedCards) {
+    const idx = owner.deck.findIndex(c => c.instanceId === card.instanceId);
+    if (idx !== -1) {
+      owner.discard.push(owner.deck.splice(idx, 1)[0]!);
+    }
+  }
+  
+  // 生成日志消息
+  const allNames = revealedCards.map(r => r.card.name).join('、');
+  const bossInfo = bossCards.length > 0 
+    ? `（${bossCards.map(r => r.card.name).join('、')}为鬼王不可选）` 
+    : '';
+  const usedInfo = usedNames.length > 0 
+    ? `使用了 [${usedNames.join('、')}] 的效果` 
+    : '未使用任何效果';
+  
+  return { 
+    success: true, 
+    message: `[妨害] 幽谷响：展示了 [${allNames}]${bossInfo}，${usedInfo}` 
+  };
 });
+
+// 幽谷响 AI 决策：按效果价值评分选择前 N 张
+function aiDecide_幽谷响(cards: CardInstance[], maxCount: number): string[] {
+  // 评分函数
+  const scoreCard = (card: CardInstance): number => {
+    let score = 0;
+    // 伤害类：伤害值 × 2
+    if (card.damage && card.damage > 0) {
+      score += card.damage * 2;
+    }
+    // 根据卡牌名称判断效果类型（简化处理）
+    const name = card.name || '';
+    // 抓牌类
+    if (name.includes('灯笼鬼') || name.includes('天邪鬼青')) {
+      score += 3; // 抓牌+1 × 1.5 ≈ 3
+    }
+    if (name.includes('树妖')) {
+      score += 4; // 抓牌+2 × 1.5 ≈ 4（需弃牌，略降）
+    }
+    // 鬼火类
+    if (name.includes('蝠翼') || name.includes('鸣屋')) {
+      score += 1; // 鬼火+1
+    }
+    // 声誉类（对己方收益低）
+    if (name.includes('达摩') || name.includes('蚌精')) {
+      score += 0.5;
+    }
+    // 妨害类对自己无益或有害
+    if (name.includes('雪幽魂') || name.includes('魍魉')) {
+      score = 0;
+    }
+    // 恶评卡有害
+    if (card.cardType === 'penalty') {
+      score = -10;
+    }
+    // 令牌通常无效果
+    if (card.cardType === 'token') {
+      score = -5;
+    }
+    return score;
+  };
+  
+  // 按评分排序
+  const scored = cards.map(c => ({ card: c, score: scoreCard(c) }));
+  scored.sort((a, b) => b.score - a.score);
+  
+  // 选择评分>0的前 maxCount 张
+  const selected: string[] = [];
+  for (const { card, score } of scored) {
+    if (score > 0 && selected.length < maxCount) {
+      selected.push(card.instanceId);
+    }
+  }
+  
+  return selected;
+}
 
 // 伤魂鸟 - 超度X张手牌，伤害+2X
 registerEffect('伤魂鸟', async (ctx) => {

@@ -4383,11 +4383,93 @@ export class MultiplayerGame {
         }
           
         // ============ 生命7 ============
-        case '幽谷响':
-          // [妨害] 伤害+3
-          player.damage += 3;
-          this.addLog(`   ✨ 御魂：伤害+3`);
+        case '幽谷响': {
+          // [妨害] 展示所有对手牌库顶牌，选择最多3张非鬼王执行效果
+          const opponents = this.state.players.filter(p => p.id !== player.id);
+          
+          // 收集所有对手牌库顶牌
+          const revealedCards: Array<{ card: CardInstance; ownerId: string; ownerName: string }> = [];
+          for (const opp of opponents) {
+            if (opp.deck.length > 0) {
+              const topCard = opp.deck[0];
+              revealedCards.push({
+                card: topCard,
+                ownerId: opp.id,
+                ownerName: opp.name
+              });
+              this.addLog(`   👁️ 幽谷响：展示 ${opp.name} 牌库顶牌 ${topCard.name}`, { visibility: 'public' });
+            } else {
+              this.addLog(`   ⚠️ ${opp.name} 牌库为空`);
+            }
+          }
+          
+          // 筛选非鬼王卡牌
+          const selectableCards = revealedCards.filter(r => r.card.cardType !== 'boss');
+          
+          if (selectableCards.length === 0) {
+            // 无可选卡牌，将所有展示牌移入弃牌区
+            for (const r of revealedCards) {
+              const owner = this.getPlayer(r.ownerId);
+              if (owner && owner.deck.length > 0) {
+                const card = owner.deck.shift()!;
+                owner.discard.push(card);
+                this.addLog(`   ↩️ ${card.name} 归还 ${r.ownerName} 弃牌区`);
+              }
+            }
+            this.addLog(`   ✨ 幽谷响：无可选卡牌执行效果`);
+          } else if (player.isAI) {
+            // AI自动选择：按评分排序选择最多3张
+            const scored = selectableCards.map(r => {
+              const c = r.card;
+              let score = 0;
+              // 伤害优先
+              if (c.damage) score += c.damage * 2;
+              // 关键词评分
+              const kw = c.keywords || [];
+              if (kw.includes('抓牌')) score += 1.5;
+              if (kw.includes('鬼火')) score += 1;
+              if (kw.includes('声誉')) score += 0.5;
+              // 令牌/恶评负分
+              if (c.cardType === 'token' || c.cardType === 'penalty') score = -10;
+              return { ...r, score };
+            }).sort((a, b) => b.score - a.score);
+            
+            const aiSelected = scored.slice(0, Math.min(3, scored.length)).filter(r => r.score > 0);
+            
+            if (aiSelected.length > 0) {
+              // 执行选中卡牌的效果
+              for (const sel of aiSelected) {
+                this.addLog(`   ⚡ 幽谷响：执行 ${sel.card.name} 的效果`);
+                this.executeSimpleCardEffect(player, sel.card);
+              }
+              this.addLog(`   ✨ 幽谷响：AI执行了 ${aiSelected.map(s => s.card.name).join('、')} 的效果`);
+            } else {
+              this.addLog(`   ↩️ 幽谷响：AI选择不执行效果`);
+            }
+            
+            // 将所有展示的牌移入对应玩家的弃牌区
+            for (const r of revealedCards) {
+              const owner = this.getPlayer(r.ownerId);
+              if (owner && owner.deck.length > 0) {
+                const card = owner.deck.shift()!;
+                owner.discard.push(card);
+                this.addLog(`   ↩️ ${card.name} 归还 ${r.ownerName} 弃牌区`);
+              }
+            }
+          } else {
+            // 真人玩家：设置pendingChoice等待选择
+            this.state.pendingChoice = {
+              type: 'youguXiangSelect',
+              playerId: player.id,
+              revealedCards: revealedCards,
+              selectableCandidates: selectableCards.map(r => r.card.instanceId),
+              maxSelect: 3,
+              prompt: `选择最多3张御魂执行其效果（${selectableCards.length}张可选）`
+            };
+            this.addLog(`   ⏳ 幽谷响：等待选择要执行效果的御魂...`);
+          }
           break;
+        }
           
         case '伤魂鸟':
           // 伤害+4（简化超度）
@@ -5087,6 +5169,83 @@ export class MultiplayerGame {
       this.addLog(`   ✨ 御魂：从弃牌区取回${selectedNames.join('、')}`);
     } else {
       this.addLog(`   ↩️ ${player.name} 选择不取回阴阳术`, { visibility: 'private', playerId });
+    }
+
+    // 清除等待状态
+    this.state.pendingChoice = undefined;
+    
+    // 检查是否需要继续轮入道队列
+    this.checkAndContinueWheelMonkQueue();
+
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    return { success: true };
+  }
+
+  /**
+   * 处理幽谷响选择响应
+   * @param playerId 玩家ID
+   * @param selectedIds 选择的御魂instanceId数组（最多3张非鬼王）
+   */
+  public handleYouguXiangSelectResponse(playerId: string, selectedIds: string[]): { success: boolean; error?: string } {
+    // 验证是否有等待的幽谷响选择
+    if (!this.state.pendingChoice || this.state.pendingChoice.type !== 'youguXiangSelect') {
+      return { success: false, error: '没有待处理的幽谷响选择' };
+    }
+    // 验证是否是正确的玩家
+    if (this.state.pendingChoice.playerId !== playerId) {
+      return { success: false, error: '不是你的选择' };
+    }
+
+    const player = this.getPlayer(playerId);
+    if (!player) return { success: false, error: '玩家不存在' };
+
+    const pendingChoice = this.state.pendingChoice;
+    const revealedCards = pendingChoice.revealedCards;
+    const selectableCandidates = pendingChoice.selectableCandidates;
+    const ids = selectedIds || [];
+
+    // 验证选择数量
+    if (ids.length > pendingChoice.maxSelect) {
+      return { success: false, error: `最多只能选择${pendingChoice.maxSelect}张` };
+    }
+
+    // 验证选择有效性（必须是可选候选）
+    for (const id of ids) {
+      if (!selectableCandidates.includes(id)) {
+        return { success: false, error: '选择了无效的卡牌' };
+      }
+    }
+
+    // 执行选中卡牌的效果
+    if (ids.length > 0) {
+      const selectedCardNames: string[] = [];
+      
+      for (const cardId of ids) {
+        // 找到对应的卡牌信息
+        const revealInfo = revealedCards.find(r => r.card.instanceId === cardId);
+        if (!revealInfo) continue;
+        
+        const card = revealInfo.card;
+        selectedCardNames.push(card.name);
+        
+        // 执行卡牌效果（使用当前玩家的上下文，但不消耗鬼火、不打出卡牌）
+        this.addLog(`   ⚡ 幽谷响：执行 ${card.name} 的效果`);
+        this.executeSimpleCardEffect(player, card);
+      }
+      
+      this.addLog(`   ✨ 幽谷响：执行了 ${selectedCardNames.join('、')} 的效果`);
+    } else {
+      this.addLog(`   ↩️ ${player.name} 选择不执行任何效果`);
+    }
+
+    // 将所有展示的牌移入对应玩家的弃牌区
+    for (const r of revealedCards) {
+      const owner = this.getPlayer(r.ownerId);
+      if (owner && owner.deck.length > 0) {
+        const card = owner.deck.shift()!;
+        owner.discard.push(card);
+        this.addLog(`   ↩️ ${card.name} 归还 ${r.ownerName} 弃牌区`);
+      }
     }
 
     // 清除等待状态
@@ -5842,6 +6001,56 @@ export class MultiplayerGame {
         break;
       }
         
+      // ============ 幽谷响（选择对手牌库顶牌执行效果）============
+      case '幽谷响': {
+        // [妨害] 展示所有对手牌库顶牌，选择最多3张非鬼王执行效果
+        const youguOpponents = this.state.players.filter(p => p.id !== player.id);
+        
+        // 收集所有对手牌库顶牌
+        const youguRevealedCards: Array<{ card: CardInstance; ownerId: string; ownerName: string }> = [];
+        for (const opp of youguOpponents) {
+          if (opp.deck.length > 0) {
+            const topCard = opp.deck[0];
+            youguRevealedCards.push({
+              card: topCard,
+              ownerId: opp.id,
+              ownerName: opp.name
+            });
+            this.addLog(`   👁️ 幽谷响：展示 ${opp.name} 牌库顶牌 ${topCard.name}`, { visibility: 'public' });
+          } else {
+            this.addLog(`   ⚠️ ${opp.name} 牌库为空`);
+          }
+        }
+        
+        // 筛选非鬼王卡牌
+        const youguSelectableCards = youguRevealedCards.filter(r => r.card.cardType !== 'boss');
+        
+        if (youguSelectableCards.length === 0) {
+          // 无可选卡牌，将所有展示牌移入弃牌区
+          for (const r of youguRevealedCards) {
+            const owner = this.getPlayer(r.ownerId);
+            if (owner && owner.deck.length > 0) {
+              const card = owner.deck.shift()!;
+              owner.discard.push(card);
+              this.addLog(`   ↩️ ${card.name} 归还 ${r.ownerName} 弃牌区`);
+            }
+          }
+          this.addLog(`   ✨ 幽谷响：无可选卡牌执行效果`);
+        } else {
+          // 设置pendingChoice等待玩家选择
+          this.state.pendingChoice = {
+            type: 'youguXiangSelect',
+            playerId: player.id,
+            revealedCards: youguRevealedCards,
+            selectableCandidates: youguSelectableCards.map(r => r.card.instanceId),
+            maxSelect: 3,
+            prompt: `选择最多3张御魂执行其效果（${youguSelectableCards.length}张可选）`
+          };
+          this.addLog(`   ⏳ 幽谷响：等待选择要执行效果的御魂...`);
+        }
+        break;
+      }
+        
       // ============ 其他无交互御魂 ============
       default:
         this.executeYokaiEffectSimple(player, { name: effectKey } as any);
@@ -6491,6 +6700,13 @@ export class MultiplayerGame {
         this.drawCards(player, 1);
         player.damage += 1;
         this.addLog(`      → 抓牌+1，伤害+1（简化）`);
+        break;
+
+      // HP7
+      case '幽谷响':
+        // [妨害] 完整效果需要交互选择，简化版仅输出日志
+        // 幽谷响的简化效果：当被其他效果（如轮入道）触发时，跳过交互
+        this.addLog(`      → 效果跳过（需要玩家交互选择）`);
         break;
 
       default:

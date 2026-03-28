@@ -258,7 +258,7 @@ export interface GameState {
       | 'treeDemonDiscard' | 'rinyuChoice' | 'bangJingExile' | 'diceGhostExile' 
       | 'diceGhostTarget' | 'selectCardsMulti' | 'selectCardPutTop' | 'wheelMonkDiscard'
       | 'wangliangChoice' | 'meiYaoSelect' | 'akajitaSelect' | 'fanHunXiangChoice'
-      | 'tufoSelect'
+      | 'tufoSelect' | 'youguXiangSelect' | 'naginataSoulDiscard' | 'zhenMuShouTarget'
       // 地藏像相关
       | 'dizangConfirm' | 'dizangSelectShikigami' | 'dizangReplaceShikigami';
     playerId: string;

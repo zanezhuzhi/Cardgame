@@ -854,6 +854,24 @@ export class SocketServer {
       callback?.(result);
     });
 
+    // 幽谷响选择响应
+    socket.on('game:youguXiangSelectResponse' as any, (data: { selectedIds: string[] }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleYouguXiangSelectResponse(socket.id, data.selectedIds);
+
+      if (result.success) {
+        // 广播游戏状态更新
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
     // 置顶手牌响应（天邪鬼黄等卡牌效果）
     socket.on('game:selectCardPutTopResponse' as any, (data: { selectedId: string }, callback?: (result: { success: boolean; error?: string }) => void) => {
       const room = this.roomManager.getPlayerRoom(socket.id);

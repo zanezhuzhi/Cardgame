@@ -5,6 +5,59 @@
  */
 import type { CardInstance, OnmyojiCard, ShikigamiCard, BossCard } from './cards';
 import type { TempBuff } from '../game/TempBuff';
+import type { PendingChoice } from './pendingChoice';
+/**
+ * 伤害来源类型
+ * @description 用于区分不同来源的伤害，镜姬【妖】效果需要免疫阴阳术伤害
+ */
+export type DamageSourceType = 'spell' | 'yokai' | 'shikigami' | 'boss' | 'token' | 'penalty' | 'other';
+/**
+ * 伤害池
+ * @description 精细追踪当前回合各来源累积的伤害点数
+ * 用于镜姬【妖】效果：只免疫阴阳术（spell）伤害，御魂/式神伤害正常生效
+ */
+export interface DamagePool {
+    /** 阴阳术伤害（镜姬免疫） */
+    spell: number;
+    /** 御魂效果伤害（镜姬不免疫） */
+    yokai: number;
+    /** 式神技能伤害（镜姬不免疫） */
+    shikigami: number;
+    /** 其他来源伤害 */
+    other: number;
+}
+/** 创建空伤害池 */
+export declare function createEmptyDamagePool(): DamagePool;
+/** 计算伤害池总伤害 */
+export declare function getTotalDamage(pool: DamagePool): number;
+/** 计算可用于指定目标的伤害（镜姬免疫spell） */
+export declare function getAvailableDamageForTarget(pool: DamagePool, isImmuneToSpell: boolean): number;
+/**
+ * 伤害来源信息
+ * @description 记录一次伤害的完整来源信息
+ */
+export interface DamageSource {
+    /** 伤害来源类型 */
+    type: DamageSourceType;
+    /** 来源卡牌ID（可选） */
+    cardId?: string;
+    /** 来源卡牌名称（可选） */
+    cardName?: string;
+    /** 来源玩家ID */
+    playerId: string;
+}
+/**
+ * 伤害分配项
+ * @description 描述对单个目标的伤害分配
+ */
+export interface DamageAllocation {
+    /** 目标卡牌实例ID（游荡妖怪或鬼王） */
+    targetId: string;
+    /** 伤害数值 */
+    damage: number;
+    /** 伤害来源 */
+    source: DamageSource;
+}
 /** 游戏整体阶段 */
 export type GamePhase = 'waiting' | 'setup' | 'playing' | 'ended';
 /** 回合内阶段 - 简化为4个阶段 */
@@ -36,11 +89,31 @@ export interface PlayerState {
     aiStrategy?: 'L1' | 'L2' | 'L3' | 'L4';
     shikigamiState: ShikigamiState[];
     tempBuffs: TempBuff[];
+    revealedDeckCards?: RevealedCard[];
+    prohibitedTargets?: string[];
 }
 export interface ShikigamiState {
     cardId: string;
     isExhausted: boolean;
     markers: Record<string, number>;
+    /** 本回合各技能已使用次数 { skillId: count } */
+    skillUsesThisTurn: Record<string, number>;
+    /** 状态标记（如 'sleep' 沉睡等） */
+    statusFlags: string[];
+}
+/**
+ * 已展示的牌库卡牌信息
+ * @description 记录被查看过的牌库位置，用于UI展示
+ */
+export interface RevealedCard {
+    /** 卡牌实例ID */
+    instanceId: string;
+    /** 牌库位置：'top'(顶), 'bottom'(底), 或具体索引 */
+    position: 'top' | 'bottom' | number;
+    /** 触发展示的玩家ID */
+    revealedBy: string;
+    /** 展示时间戳 */
+    revealedAt: number;
 }
 export interface FieldState {
     yokaiSlots: (CardInstance | null)[];
@@ -73,6 +146,12 @@ export interface GameState {
     turnPhase: TurnPhase | 'start';
     turnStartAt?: number;
     turnTimeoutMs?: number;
+    /** 多人：等待其他玩家回合外反馈时，行动阶段回合计时暂停 */
+    turnTimerPaused?: boolean;
+    /** 多人：暂停瞬间剩余的本回合行动可用时间（毫秒） */
+    turnPausedRemainMs?: number;
+    /** 多人：当前回合外反馈截止时间（Unix 毫秒），便于客户端展示 */
+    outOfTurnFeedbackDeadlineAt?: number;
     field: FieldState;
     shikigamiDeck?: ShikigamiCard[];
     log: GameLogEntry[];
@@ -83,19 +162,26 @@ export interface GameState {
     pendingYokaiRefresh?: boolean;
     /** 当前回合是否已达成「击杀」（游荡妖怪或鬼王生命曾扣至0；用于结算上一回合击杀判定） */
     turnHadKill?: boolean;
+    /**
+     * 当前回合各来源累积的伤害池
+     * 镜姬【妖】效果：只免疫 spell 部分，yokai/shikigami 伤害正常生效
+     */
+    damagePool?: DamagePool;
     /** 等待玩家做出选择（御魂效果、式神技能等） */
-    pendingChoice?: {
-        /** 选择类型 */
-        type: 'salvageChoice' | 'cardSelect' | 'yokaiTarget' | 'yokaiChoice' | 'selectCardsMulti' | 'selectCardPutTop' | 'meiYaoSelect' | 'akajitaSelect' | 'naginataSoulDiscard';
-        /** 等待的玩家ID */
-        playerId: string;
-        /** 选择相关的卡牌信息 */
-        card?: CardInstance;
-        /** 提示文本 */
-        prompt?: string;
-        /** 可选项 */
-        options?: string[];
-    };
+    pendingChoice?: PendingChoice;
+    /** 轮入道效果执行队列（完整执行N次，每次包含交互选择） */
+    wheelMonkQueue?: WheelMonkQueue;
+}
+/** 轮入道效果执行队列 */
+export interface WheelMonkQueue {
+    /** 被弃置的御魂名称 */
+    cardName: string;
+    /** 被弃置的御魂卡牌ID */
+    cardId: string;
+    /** 剩余执行次数（初始值2） */
+    remainingExecutions: number;
+    /** 执行玩家ID */
+    playerId: string;
 }
 export type GameLogType = 'game_start' | 'turn_start' | 'phase_change' | 'turn_end' | 'play_card' | 'use_skill' | 'damage_allocate' | 'defeat_yokai' | 'defeat_boss' | 'draw' | 'discard' | 'exile' | 'boss_arrival' | 'penalty' | 'game_end' | 'chat';
 /** 日志引用对象类型 */

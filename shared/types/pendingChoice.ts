@@ -22,6 +22,20 @@ interface BasePendingChoice {
   playerId: string;
   /** UI 提示文案 */
   prompt?: string;
+  /**
+   * 与《游戏规则说明书》§5.5 / 设计 spec 一致：右下倒计时条应绑定的计时模式。
+   * - `turnTotal`：当前行动玩家本人交互时，与 §5.2 行动阶段全局回合计时同一数据源（含单人「无限制」展示约定）。
+   * - `offTurnResponse`：回合外被点名（§5.4），独立 5 秒响应窗口；与 `outOfTurnFeedbackDeadlineAt` 对齐，不与全局条混用。
+   */
+  timerMode?: 'turnTotal' | 'offTurnResponse';
+  /**
+   * 外壳右上默认「当前步骤」短说明；缺省时客户端可回退到 `prompt`。
+   */
+  stepSummary?: string;
+  /** 左侧「来源」牌缩略/名称锚点；无单卡来源时用 `sourceLabel`。 */
+  sourceCard?: CardInstance;
+  /** 无单卡来源时的占位标题（如妨害类系统标题）。 */
+  sourceLabel?: string;
 }
 
 // ============ 御魂效果相关 ============

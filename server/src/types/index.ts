@@ -132,6 +132,8 @@ export interface GameLogEntry {
     senderName: string;
     rawContent: string;
   };
+  settlementToastText?: string;
+  settlementToastRecipients?: string[];
 }
 
 /** 式神状态 */

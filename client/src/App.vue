@@ -1207,7 +1207,7 @@ import { socketClient } from './network/SocketClient'
 const DevTestPanel = import.meta.env.DEV 
   ? defineAsyncComponent(() => import('./dev/DevTestPanel.vue'))
   : null
-import type { GameState } from '../../shared/types/game'
+import type { GameState, GameLogEntry } from '../../shared/types/game'
 import type { CardInstance } from '../../shared/types/cards'
 import { fieldHasNetCutter, getNetCutterEffectiveHp } from '../../shared/game/netCutterField'
 import PendingChoiceShell from './components/PendingChoiceShell.vue'
@@ -1231,7 +1231,12 @@ function lobbyQueryFromCurrentRoute(): Record<string, string> {
   return q
 }
 
-/** 直接打开 /game?mode=multi 且未在大厅进房时：自动回大厅并保留 devPanel */
+/**
+ * /game?mode=multi 且无状态：可能是 match:found 先跳转、game:started 晚一帧到达。
+ * 原逻辑 immediate 会把用户立刻踢回 /，表现为「开局后进不去游戏」。
+ * 防抖后再判断是否仍无 room、无 gs，才回大厅。
+ */
+let multiEmptyKickTimer: ReturnType<typeof setTimeout> | null = null
 watch(
   () => ({
     multi: isMultiMode.value,
@@ -1239,8 +1244,20 @@ watch(
     room: socketClient.currentRoom.value,
   }),
   ({ multi, gs, room }) => {
+    if (multiEmptyKickTimer) {
+      clearTimeout(multiEmptyKickTimer)
+      multiEmptyKickTimer = null
+    }
     if (!multi || gs || room) return
-    router.replace({ path: '/', query: lobbyQueryFromCurrentRoute() })
+    multiEmptyKickTimer = setTimeout(() => {
+      multiEmptyKickTimer = null
+      if (!isMultiMode.value) return
+      const gs2 = socketClient.gameState.value
+      const room2 = socketClient.currentRoom.value
+      if (!gs2 && !room2) {
+        router.replace({ path: '/', query: lobbyQueryFromCurrentRoute() })
+      }
+    }, 500)
   },
   { immediate: true }
 )
@@ -1862,6 +1879,10 @@ if (typeof window !== 'undefined') {
 
 // 组件卸载时的清理
 onUnmounted(() => {
+  if (multiEmptyKickTimer) {
+    clearTimeout(multiEmptyKickTimer)
+    multiEmptyKickTimer = null
+  }
   document.removeEventListener('click', handleGlobalClick)
   if (chatCooldownTimer) clearInterval(chatCooldownTimer)
   // 解绑 socket 监听，避免页面重进/HMR 后重复注册导致重复日志
@@ -2013,6 +2034,16 @@ const pendingShellProps = computed(() => ({
 const settlementToastTrigger = ref(0)
 const settlementToastText = ref('')
 let lastSettlementDedupeKey: string | null = null
+/** pending 步骤切换时与上次不同的 key，用于同类型多段仍可再提示 */
+let lastPendingChoiceToastKey = ''
+
+function bumpSettlementToastFromServer(text: string, dedupeKey: string) {
+  if (!text.trim()) return
+  if (dedupeKey === lastSettlementDedupeKey) return
+  lastSettlementDedupeKey = dedupeKey
+  settlementToastText.value = text.trim()
+  settlementToastTrigger.value++
+}
 
 watch(
   () => (state.value as GameState & { settlementToast?: Record<string, unknown> })?.settlementToast,
@@ -2020,13 +2051,35 @@ watch(
     if (!toast || !myPlayerId.value) return
     const ids = (toast.recipientPlayerIds as string[]) || []
     if (!ids.includes(myPlayerId.value)) return
-    const key = `${toast.logSeq ?? ''}|${toast.timestamp}|${toast.message}`
-    if (key === lastSettlementDedupeKey) return
-    lastSettlementDedupeKey = key
-    settlementToastText.value = String(toast.message ?? '')
-    settlementToastTrigger.value++
+    const key = `st:${toast.logSeq ?? ''}|${toast.timestamp}|${toast.message}`
+    bumpSettlementToastFromServer(String(toast.message ?? ''), key)
   },
   { deep: true }
+)
+
+/** §5.5：多段 pending 切换时，未带 settlementToastFor 的日志也能在中部淡出当前步骤说明 */
+watch(
+  () => {
+    const pc = state.value?.pendingChoice as Record<string, unknown> | undefined
+    if (!pc || !myPlayerId.value) return ''
+    if (pc.playerId !== myPlayerId.value) return ''
+    const text = String(pc.stepSummary || pc.prompt || '').trim()
+    if (!text) return ''
+    return `${String(pc.type)}|${text}`
+  },
+  (key) => {
+    if (!myPlayerId.value) return
+    if (!key) {
+      lastPendingChoiceToastKey = ''
+      return
+    }
+    if (key === lastPendingChoiceToastKey) return
+    lastPendingChoiceToastKey = key
+    const pc = state.value?.pendingChoice as Record<string, unknown> | undefined
+    const text = String(pc?.stepSummary || pc?.prompt || '').trim()
+    if (!text) return
+    bumpSettlementToastFromServer(text, `pc:${key}|${state.value?.lastUpdate ?? 0}`)
+  }
 )
 
 function clearShikigamiCountdown() {
@@ -2582,7 +2635,30 @@ watch(() => state.value?.log?.length ?? 0, (newLen, oldLen) => {
   }
   
   const addedCount = newLen - lastLogLength
+  const prevLogLen = lastLogLength
   lastLogLength = newLen
+
+  // §5.5：日志条目上携带的 settlementToastRecipients / settlementToastText（与信息栏同源可读文案）
+  if (isMultiMode.value && myPlayerId.value) {
+    const logArr = state.value?.log
+    if (logArr && addedCount > 0) {
+      const from = Math.max(0, prevLogLen)
+      const to = Math.min(logArr.length, from + addedCount)
+      for (let i = from; i < to; i++) {
+        const e = logArr[i] as GameLogEntry & {
+          settlementToastRecipients?: string[]
+          settlementToastText?: string
+        }
+        const ids = e.settlementToastRecipients
+        const txt = e.settlementToastText
+        if (!ids?.includes(myPlayerId.value) || !txt?.trim()) continue
+        bumpSettlementToastFromServer(
+          txt,
+          `log:${e.logSeq ?? i}|${e.timestamp}|${txt}`
+        )
+      }
+    }
+  }
   
   // 如果正在自动滚动中（批量消息场景），直接滚动不判断
   if (autoScrolling) {

@@ -356,6 +356,10 @@ export interface GameLogEntry {
     senderName: string;
     rawContent: string;
   };
+  /** §5.5：与信息栏同源的中部提示（可读文案，不含占位符）；与 settlementToastRecipients 成对 */
+  settlementToastText?: string;
+  /** 应显示上述中部提示的玩家 ID 列表 */
+  settlementToastRecipients?: string[];
 }
 
 // ============ 游戏动作 ============

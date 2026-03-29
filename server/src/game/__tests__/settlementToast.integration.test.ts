@@ -42,5 +42,14 @@ describe('settlementToast', () => {
     expect(st.settlementToast?.recipientPlayerIds).toEqual([p0.id]);
     expect(st.settlementToast?.message).toMatch(/抓牌\+2|抓牌/);
     expect(st.settlementToast?.logSeq).toBeDefined();
+
+    const withToast = st.log.filter((e) => (e as { settlementToastRecipients?: string[] }).settlementToastRecipients?.length);
+    expect(withToast.length).toBeGreaterThan(0);
+    const toastEntry = withToast[withToast.length - 1] as typeof withToast[number] & {
+      settlementToastRecipients?: string[];
+      settlementToastText?: string;
+    };
+    expect(toastEntry.settlementToastRecipients).toEqual([p0.id]);
+    expect(toastEntry.settlementToastText).toMatch(/抓牌\+2|抓牌/);
   });
 });

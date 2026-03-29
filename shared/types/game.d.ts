@@ -226,6 +226,8 @@ export interface GameLogEntry {
         senderName: string;
         rawContent: string;
     };
+    settlementToastText?: string;
+    settlementToastRecipients?: string[];
 }
 export type GameAction = {
     type: 'PLAY_CARD';

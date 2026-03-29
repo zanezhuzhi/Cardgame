@@ -3832,10 +3832,12 @@ export class MultiplayerGame {
         prompt && prompt.trim().length > 0
           ? prompt.trim()
           : `请选择：${options.join(' / ')}`;
+      const ts = Date.now();
       this.state.settlementToast = {
         message: toastMsg,
         recipientPlayerIds: [playerId],
-        timestamp: Date.now(),
+        logSeq: this.nextLogSeq,
+        timestamp: ts,
       };
       this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
     });
@@ -5425,8 +5427,10 @@ export class MultiplayerGame {
       if (this.harassmentPipelineChoiceResolve) {
         this.harassmentPipelineChoiceResolve = null;
       }
-      this.state.pendingChoice = undefined;
-      this.checkAndContinueWheelMonkQueue();
+      // 不得清空 pendingChoice：完整御魂效果可能已设置 yokaiTarget 等供玩家操作
+      if (!this.state.pendingChoice) {
+        this.checkAndContinueWheelMonkQueue();
+      }
       this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
     }
   }
@@ -5468,8 +5472,9 @@ export class MultiplayerGame {
       if (this.harassmentPipelineChoiceResolve) {
         this.harassmentPipelineChoiceResolve = null;
       }
-      this.state.pendingChoice = undefined;
-      this.checkAndContinueWheelMonkQueue();
+      if (!this.state.pendingChoice) {
+        this.checkAndContinueWheelMonkQueue();
+      }
       this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
     }
   }
@@ -7379,9 +7384,9 @@ export class MultiplayerGame {
 
     this.addLog(`   🎭 使用 ${target.ownerName} 的 ${card.name} 效果`);
 
-    // 执行该牌的效果（视为当前玩家打出）
-    // 这里使用简化版本：只执行基础效果，不支持递归选择
-    this.executeSimpleCardEffect(player, card);
+    // 与轮入道一致：走完整御魂效果（含 pendingChoice）；勿再用 executeSimpleCardEffect 跳过交互
+    const effectKey = card.cardId === 'yokai_004' ? '天邪鬼青' : (card.name || '');
+    this.executeYokaiEffectByName(player, effectKey, card);
 
     // 将该牌置入拥有者的弃牌堆（主动弃置，触发【触】）
     this.discard(owner, card, 'active');
@@ -7389,8 +7394,8 @@ export class MultiplayerGame {
   }
 
   /**
-   * 执行简化版卡牌效果（用于魅妖等"使用其效果"场景）
-   * 只执行即时效果，不触发交互选择
+   * 执行简化版卡牌效果（当前用于幽谷响多选结算等仍需弱交互路径）
+   * 魅妖借用牌库顶牌请走 executeYokaiEffectByName，与轮入道一致。
    */
   private executeSimpleCardEffect(player: PlayerState, card: CardInstance) {
     const cardName = card.name;
@@ -8013,7 +8018,7 @@ export class MultiplayerGame {
     
     const ts = Date.now();
     const logSeq = this.nextLogSeq++;
-    this.state.log.push({
+    const logEntry: GameLogEntry = {
       type: 'game_start',
       message: processedMessage,
       timestamp: ts,
@@ -8021,7 +8026,12 @@ export class MultiplayerGame {
       visibility: options?.visibility || 'public',
       playerId: options?.playerId,
       refs: Object.keys(finalRefs).length > 0 ? finalRefs : undefined,
-    });
+    };
+    if (options?.settlementToastFor && options.settlementToastFor.length > 0) {
+      logEntry.settlementToastRecipients = [...options.settlementToastFor];
+      logEntry.settlementToastText = message;
+    }
+    this.state.log.push(logEntry);
 
     if (options?.settlementToastFor && options.settlementToastFor.length > 0) {
       this.state.settlementToast = {

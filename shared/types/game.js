@@ -6,6 +6,24 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_GAME_CONFIG = void 0;
+exports.createEmptyDamagePool = createEmptyDamagePool;
+exports.getTotalDamage = getTotalDamage;
+exports.getAvailableDamageForTarget = getAvailableDamageForTarget;
+/** 创建空伤害池 */
+function createEmptyDamagePool() {
+    return { spell: 0, yokai: 0, shikigami: 0, other: 0 };
+}
+/** 计算伤害池总伤害 */
+function getTotalDamage(pool) {
+    return pool.spell + pool.yokai + pool.shikigami + pool.other;
+}
+/** 计算可用于指定目标的伤害（镜姬免疫spell） */
+function getAvailableDamageForTarget(pool, isImmuneToSpell) {
+    if (isImmuneToSpell) {
+        return pool.yokai + pool.shikigami + pool.other;
+    }
+    return pool.spell + pool.yokai + pool.shikigami + pool.other;
+}
 /** 默认游戏配置 */
 exports.DEFAULT_GAME_CONFIG = {
     playerCount: 2,

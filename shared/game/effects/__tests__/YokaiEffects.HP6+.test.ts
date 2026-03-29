@@ -280,15 +280,14 @@ describe('三味', () => {
     gameState = createTestGameState(player);
   });
 
-  it('添加阴阳术伤害buff', async () => {
+  it('打出时不添加 SPELL_DAMAGE_BONUS（仅实时加伤）', async () => {
     const result = await executeYokaiEffect('三味', {
       player, gameState, card: createTestCard('yokai', '三味')
     });
 
     expect(result.success).toBe(true);
     const buff = player.tempBuffs.find(b => (b as any).source === '三味');
-    expect(buff).toBeDefined();
-    expect(buff?.value).toBe(2);
+    expect(buff).toBeUndefined();
   });
   
   it('本回合已使用阴阳术时，立即获得伤害加成', async () => {
@@ -339,7 +338,7 @@ describe('三味', () => {
     expect(player.damage).toBe(4); // 2张 × 2伤害 = +4
   });
   
-  it('无已使用牌时，仅添加buff无即时伤害', async () => {
+  it('无已使用牌时，伤害+0且无 buff', async () => {
     (player as any).played = [];
     player.damage = 0;
     
@@ -348,10 +347,9 @@ describe('三味', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(player.damage).toBe(0); // 无即时伤害
-    // 但buff仍然添加
+    expect(player.damage).toBe(0);
     const buff = player.tempBuffs.find(b => (b as any).source === '三味');
-    expect(buff).toBeDefined();
+    expect(buff).toBeUndefined();
   });
   
   // ============ 【触】弃置效果测试 ============
@@ -796,9 +794,9 @@ describe('轮入道（递归执行）', () => {
     expect(result.success).toBe(true);
     // 【触】弃置抓牌+3（三味效果不抓牌）
     expect(player.hand.length).toBe(3);
-    // 三味添加了2次SPELL_DAMAGE_BONUS buff
+    // 三味仅实时结算，不留下 SPELL_DAMAGE_BONUS
     const bonusBuffs = player.tempBuffs.filter(b => (b as any).source === '三味');
-    expect(bonusBuffs.length).toBe(2);
+    expect(bonusBuffs.length).toBe(0);
   });
   
   it('🟢 轮入道+三味：本回合有阴阳术时伤害正确累加', async () => {
@@ -823,11 +821,8 @@ describe('轮入道（递归执行）', () => {
     expect(result.success).toBe(true);
     // 三味效果执行2次，每次统计2张阴阳术 → 伤害+4 × 2 = +8
     expect(player.damage).toBe(8);
-    // 同时累加2个SPELL_DAMAGE_BONUS buff
     const bonusBuffs = player.tempBuffs.filter(b => (b as any).source === '三味');
-    expect(bonusBuffs.length).toBe(2);
-    // 每个buff值为2
-    expect(bonusBuffs.every(b => b.value === 2)).toBe(true);
+    expect(bonusBuffs.length).toBe(0);
   });
 });
 

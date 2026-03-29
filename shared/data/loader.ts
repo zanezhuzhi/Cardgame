@@ -176,14 +176,15 @@ export function createTokenInstance(card: TokenCard): CardInstance {
 
 /** 从恶评卡创建实例 */
 export function createPenaltyInstance(card: PenaltyCard): CardInstance {
+  const ch = card.charm;
   return {
     instanceId: generateInstanceId(),
     cardId: card.id,
     cardType: 'penalty',
     name: card.name,
-    hp: card.hp,
-    maxHp: card.hp,
-    charm: card.charm,
+    hp: 0,
+    maxHp: 0,
+    charm: typeof ch === 'number' ? ch : -1,
     image: card.image,
   };
 }

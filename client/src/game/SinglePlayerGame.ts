@@ -23,7 +23,8 @@ import type {
 import cardsData from '../../../shared/data/cards.json';
 
 // 导入御魂效果执行器及弃置触发辅助函数
-import { executeYokaiEffect as executeYokaiEffectHandler, onTreeDemonDiscard, onSanmiDiscard } from '../../../shared/game/effects/YokaiEffects';
+import { executeYokaiEffect as executeYokaiEffectHandler } from '../../../shared/game/effects/YokaiEffects';
+import { clearFieldNetCutter, getNetCutterEffectiveHp } from '../../../shared/game/netCutterField';
 
 // 导入式神技能执行器
 import { executeSkill as executeShikigamiSkill } from '../../../shared/game/effects/ShikigamiSkills';
@@ -1182,9 +1183,17 @@ export class SinglePlayerGame {
       yokai.currentHp = yokai.hp;
     }
 
-    // 计算可以造成的伤害（取玩家伤害和妖怪剩余HP的较小值）
-    const damageToApply = Math.min(player.damage, yokai.currentHp);
-    
+    // 网切：有效退治血量 = 式神 HP 盘面修正（与 MultiplayerGame.attackYokai 一致）；分配伤害为增量扣血，用“已造成伤势”与有效上限比较
+    const effectiveMax = getNetCutterEffectiveHp(this.state.field, yokai.hp, 'yokai');
+    const damageAlready = yokai.hp - yokai.currentHp;
+    if (damageAlready >= effectiveMax) {
+      await this.killYokai(targetSlotIndex);
+      this.notifyChange();
+      return true;
+    }
+    const remainingNeeded = Math.max(0, effectiveMax - damageAlready);
+    const damageToApply = Math.min(player.damage, remainingNeeded);
+
     // 扣除伤害
     player.damage -= damageToApply;
     yokai.currentHp -= damageToApply;
@@ -1256,15 +1265,24 @@ export class SinglePlayerGame {
       this.notifyChange();
       return false;
     }
-    
+
+    const bossBaseHp = this.state.field.bossCurrentHp;
+    const bossEffectiveHp = getNetCutterEffectiveHp(this.state.field, bossBaseHp, 'boss');
+
     // 扣除伤害
     player.damage -= damage;
     this.state.field.bossCurrentHp -= damage;
-    
-    this.addLog(`⚔️ 对鬼王【${boss.name}】造成 ${damage} 点伤害（剩余:${this.state.field.bossCurrentHp}）`);
-    
-    // 检查鬼王是否被击败 → 直接退治（进入弃牌堆）
-    if (this.state.field.bossCurrentHp <= 0) {
+
+    if (bossEffectiveHp !== bossBaseHp) {
+      this.addLog(
+        `⚔️ 对鬼王【${boss.name}】造成 ${damage} 点伤害（网切: HP ${bossBaseHp}→${bossEffectiveHp}，剩余:${this.state.field.bossCurrentHp}）`
+      );
+    } else {
+      this.addLog(`⚔️ 对鬼王【${boss.name}】造成 ${damage} 点伤害（剩余:${this.state.field.bossCurrentHp}）`);
+    }
+
+    // 与 MultiplayerGame.attackBoss 一致：按有效 HP 判定击败
+    if (damage >= bossEffectiveHp) {
       this.state.field.bossCurrentHp = 0;
       await this.retireBoss();
       this.notifyChange();
@@ -1451,7 +1469,9 @@ export class SinglePlayerGame {
     
     // 进入清理阶段
     this.state.turnPhase = 'cleanup';
-    
+
+    clearFieldNetCutter(this.state.field);
+
     // 处理战场上的妖怪：存活的恢复HP（击杀时已直接退治，无需额外处理）
     for (let i = 0; i < this.state.field.yokaiSlots.length; i++) {
       const yokai = this.state.field.yokaiSlots[i];
@@ -1460,18 +1480,11 @@ export class SinglePlayerGame {
       yokai.currentHp = yokai.hp;
     }
     
-    // 清理阶段：手牌 + 已打出 → 弃牌堆（含弃置触发）
+    // 清理阶段：手牌 + 已打出 → 弃牌堆（规则弃置，不触发树妖/三味等【触】）
+    // 与《游戏规则说明书》一致：回合结束移入弃牌堆不视为主动弃置
     const cardsToDiscard = [...player.hand, ...player.played];
     for (const card of cardsToDiscard) {
       player.discard.push(card);
-      if (card.name === '树妖') {
-        onTreeDemonDiscard(player, card);
-        this.addLog(`🌳 树妖弃置触发：抓牌+2`);
-      }
-      if (card.name === '三味') {
-        onSanmiDiscard(player, card);
-        this.addLog(`🎵 三味弃置触发：抓牌+3`);
-      }
     }
     player.hand = [];
     player.played = [];

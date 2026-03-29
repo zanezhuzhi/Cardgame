@@ -3468,12 +3468,15 @@ export class MultiplayerGame {
     // 地藏像特殊处理：需要二次确认
     // 如果当前没有等待确认状态，先触发确认对话框
     if (card.name === '地藏像' && !this.state.pendingChoice) {
-      this.state.pendingChoice = {
-        type: 'dizangConfirm',
-        playerId: player.id,
-        card: card,
-        prompt: '确定打出地藏像？此牌将被超度'
-      };
+      this.state.pendingChoice = this.withPlayedYokaiSource(
+        {
+          type: 'dizangConfirm',
+          playerId: player.id,
+          card: card,
+          prompt: '确定打出地藏像？此牌将被超度',
+        },
+        card,
+      );
       this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
       return { success: true };  // 等待玩家确认
     }
@@ -3735,7 +3738,10 @@ export class MultiplayerGame {
   /**
    * 妨害管线用 SkillContext：发动者为 sourcePlayer；onChoice 经 pending + Socket 续行
    */
-  private buildSkillContextForHarassment(sourcePlayer: PlayerState): SkillContext {
+  private buildSkillContextForHarassment(
+    sourcePlayer: PlayerState,
+    harassmentSourceYokai?: CardInstance,
+  ): SkillContext {
     const { shiki, slotIndex } = this.pickHarassmentSkillSlot(sourcePlayer);
     let state = sourcePlayer.shikigamiState[slotIndex];
     if (!state) state = sourcePlayer.shikigamiState[0];
@@ -3788,7 +3794,13 @@ export class MultiplayerGame {
     };
     ctx.onChoice = async (options, prompt) => {
       const subject = ctx.harassmentResistSubject ?? (sourcePlayer as any);
-      return this.waitHarassmentPipelineChoice(subject.id, options, prompt);
+      return this.waitHarassmentPipelineChoice(
+        subject.id,
+        options,
+        prompt,
+        undefined,
+        harassmentSourceYokai,
+      );
     };
     return ctx;
   }
@@ -3798,6 +3810,7 @@ export class MultiplayerGame {
     options: string[],
     prompt?: string,
     meta?: { wangliangTargetId?: string },
+    sourceCard?: CardInstance,
   ): Promise<number> {
     return new Promise((resolve, reject) => {
       if (this.harassmentPipelineChoiceResolve) {
@@ -3805,13 +3818,16 @@ export class MultiplayerGame {
         return;
       }
       this.harassmentPipelineChoiceResolve = resolve;
-      this.state.pendingChoice = {
+      const base: any = {
         type: 'harassmentPipelineChoice',
         playerId,
         options,
         prompt: prompt ?? '',
         meta,
-      } as any;
+      };
+      this.state.pendingChoice = sourceCard
+        ? this.withPlayedYokaiSource(base, sourceCard)
+        : base;
       const toastMsg =
         prompt && prompt.trim().length > 0
           ? prompt.trim()
@@ -3909,6 +3925,16 @@ export class MultiplayerGame {
     }
   }
   
+  /** 为 pending 挂上当前打出的御魂，供客户端外壳「来源」展示 */
+  private withPlayedYokaiSource<T extends Record<string, unknown>>(pending: T, played: CardInstance): T {
+    const p = pending.prompt as string | undefined;
+    return {
+      ...pending,
+      sourceCard: played,
+      stepSummary: (pending.stepSummary as string | undefined) ?? p,
+    } as T;
+  }
+
   /**
    * 执行御魂效果（完整版）
    */
@@ -3935,12 +3961,15 @@ export class MultiplayerGame {
             // 添加展示状态
             const topCard = DeckRevealHelper.revealTopCard(player, player.id);
             if (topCard) {
-              this.state.pendingChoice = {
-                type: 'salvageChoice',
-                playerId: player.id,
-                card: topCard,
-                prompt: `查看牌库顶牌【${topCard.name}】，是否超度？`
-              };
+              this.state.pendingChoice = this.withPlayedYokaiSource(
+                {
+                  type: 'salvageChoice',
+                  playerId: player.id,
+                  card: topCard,
+                  prompt: `查看牌库顶牌【${topCard.name}】，是否超度？`,
+                },
+                card
+              );
               this.addLog(`   👁️ 查看牌库顶牌：${topCard.name}`, { 
                 visibility: 'private', 
                 playerId: player.id 
@@ -3975,12 +4004,15 @@ export class MultiplayerGame {
               }
             } else {
               // 多个目标时让玩家选择
-              this.state.pendingChoice = {
-                type: 'yokaiTarget',
-                playerId: player.id,
-                prompt: '选择要退治的妖怪（生命≤4）',
-                options: validTargets.map(y => y.instanceId),
-              };
+              this.state.pendingChoice = this.withPlayedYokaiSource(
+                {
+                  type: 'yokaiTarget',
+                  playerId: player.id,
+                  prompt: '选择要退治的妖怪（生命≤4）',
+                  options: validTargets.map(y => y.instanceId),
+                },
+                card
+              );
               this.addLog(`   🎯 御魂：选择退治目标...`);
             }
           }
@@ -3994,12 +4026,15 @@ export class MultiplayerGame {
             this.addLog(`   ✨ 御魂：伤害+1`);
             break;
           }
-          this.state.pendingChoice = {
-            type: 'yokaiChoice',
-            playerId: player.id,
-            options: ['抓牌+1', '伤害+1'],
-            prompt: '选择一个效果'
-          };
+          this.state.pendingChoice = this.withPlayedYokaiSource(
+            {
+              type: 'yokaiChoice',
+              playerId: player.id,
+              options: ['抓牌+1', '伤害+1'],
+              prompt: '选择一个效果',
+            },
+            card
+          );
           this.addLog(`   🎯 御魂：选择抓牌+1 或 伤害+1`);
           break;
         }
@@ -4011,14 +4046,17 @@ export class MultiplayerGame {
           
           // 如果有手牌，让玩家选择要弃置的牌
           if (player.hand.length > 0) {
-            this.state.pendingChoice = {
-              type: 'selectCardsMulti',
-              playerId: player.id,
-              cards: player.hand.map(c => c.instanceId),
-              maxCount: player.hand.length,
-              minCount: 0,
-              prompt: '选择要弃置的手牌（可不选）'
-            };
+            this.state.pendingChoice = this.withPlayedYokaiSource(
+              {
+                type: 'selectCardsMulti',
+                playerId: player.id,
+                cards: player.hand.map(c => c.instanceId),
+                maxCount: player.hand.length,
+                minCount: 0,
+                prompt: '选择要弃置的手牌（可不选）',
+              },
+              card
+            );
             this.addLog(`   🎯 御魂：选择要弃置的手牌...`);
           }
           break;
@@ -4029,18 +4067,21 @@ export class MultiplayerGame {
           this.addLog(`   ✨ 御魂：抓牌+2`, { settlementToastFor: [player.id] });
           // 如果有手牌，弹出选择界面让玩家选1张置顶
           if (player.hand.length > 0) {
-            this.state.pendingChoice = {
-              type: 'selectCardPutTop',
-              playerId: player.id,
-              prompt: '选择1张手牌置于牌库顶',
-              count: 1
-            };
+            this.state.pendingChoice = this.withPlayedYokaiSource(
+              {
+                type: 'selectCardPutTop',
+                playerId: player.id,
+                prompt: '选择1张手牌置于牌库顶',
+                count: 1,
+              },
+              card
+            );
             this.addLog(`   ⏳ 等待选择1张手牌置于牌库顶...`);
           }
           break;
           
         case '赤舌': {
-          this.startAkajitaHarassment(player);
+          this.startAkajitaHarassment(player, card);
           break;
         }
           
@@ -4058,34 +4099,43 @@ export class MultiplayerGame {
           this.addLog(`   ✨ 御魂：抓牌+2`, { settlementToastFor: [player.id] });
           // 如果有手牌，让玩家选择要弃置的牌
           if (player.hand.length > 0) {
-            this.state.pendingChoice = {
-              type: 'treeDemonDiscard',
-              playerId: player.id,
-              prompt: '选择1张手牌弃置'
-            };
+            this.state.pendingChoice = this.withPlayedYokaiSource(
+              {
+                type: 'treeDemonDiscard',
+                playerId: player.id,
+                prompt: '选择1张手牌弃置',
+              },
+              card
+            );
             this.addLog(`   ⏳ 等待选择1张手牌弃置...`);
           }
           break;
           
         case '日女巳时':
           // 选择：鬼火+1 / 抓牌+2 / 伤害+2
-          this.state.pendingChoice = {
-            type: 'rinyuChoice',
-            playerId: player.id,
-            prompt: '选择一项效果',
-            options: ['ghostFire', 'draw', 'damage'] // 鬼火+1, 抓牌+2, 伤害+2
-          };
+          this.state.pendingChoice = this.withPlayedYokaiSource(
+            {
+              type: 'rinyuChoice',
+              playerId: player.id,
+              prompt: '选择一项效果',
+              options: ['ghostFire', 'draw', 'damage'], // 鬼火+1, 抓牌+2, 伤害+2
+            },
+            card
+          );
           this.addLog(`   ⏳ 等待选择：鬼火+1 / 抓牌+2 / 伤害+2`);
           break;
           
         case '蚌精':
           // 超度1张手牌，抓牌+2
           if (player.hand.length > 0) {
-            this.state.pendingChoice = {
-              type: 'bangJingExile',
-              playerId: player.id,
-              prompt: '选择1张手牌超度'
-            };
+            this.state.pendingChoice = this.withPlayedYokaiSource(
+              {
+                type: 'bangJingExile',
+                playerId: player.id,
+                prompt: '选择1张手牌超度',
+              },
+              card
+            );
             this.addLog(`   ⏳ 等待选择1张手牌超度...`);
           } else {
             // 无手牌时仅抓牌（根据策划文档：无手牌时不可打出，这里做兜底）
@@ -4150,22 +4200,25 @@ export class MultiplayerGame {
             this.addLog(`   ✨ 御魂：无可选牌（对手牌库空或无HP<5的牌）`);
           } else if (usableCount === 0) {
             // 有候选牌但全是令牌/恶评，显示给玩家看（展示有价值），但需要取消按钮
-            this.state.pendingChoice = {
-              type: 'meiYaoSelect',
-              playerId: player.id,
-              prompt: `对手牌库顶均为不可用牌`,
-              hasUsable: false,
-              candidates: meiYaoCandidates.map(c => ({
-                instanceId: c.card.instanceId,
-                cardId: c.card.cardId,
-                cardType: c.card.cardType,
-                name: c.card.name,
-                hp: c.card.hp,
-                ownerName: c.ownerName,
-                ownerId: c.ownerId,
-                usable: c.usable
-              }))
-            } as any;
+            this.state.pendingChoice = this.withPlayedYokaiSource(
+              {
+                type: 'meiYaoSelect',
+                playerId: player.id,
+                prompt: `对手牌库顶均为不可用牌`,
+                hasUsable: false,
+                candidates: meiYaoCandidates.map(c => ({
+                  instanceId: c.card.instanceId,
+                  cardId: c.card.cardId,
+                  cardType: c.card.cardType,
+                  name: c.card.name,
+                  hp: c.card.hp,
+                  ownerName: c.ownerName,
+                  ownerId: c.ownerId,
+                  usable: c.usable,
+                })),
+              },
+              card
+            ) as any;
             this.addLog(`   ⏳ 对手牌库顶均为不可用牌...`);
           } else if (usableCount === 1 && meiYaoCandidates.length === 1) {
             // 只有一张可用牌且总共就一张，自动选择
@@ -4173,22 +4226,25 @@ export class MultiplayerGame {
             this.executeMeiYaoEffect(player, target);
           } else {
             // 多张候选牌，需要玩家选择（传递所有牌，包括不可用的用于展示）
-            this.state.pendingChoice = {
-              type: 'meiYaoSelect',
-              playerId: player.id,
-              prompt: `选择1张对手牌库顶牌使用其效果（HP<5）`,
-              hasUsable: true,
-              candidates: meiYaoCandidates.map(c => ({
-                instanceId: c.card.instanceId,
-                cardId: c.card.cardId,
-                cardType: c.card.cardType,
-                name: c.card.name,
-                hp: c.card.hp,
-                ownerName: c.ownerName,
-                ownerId: c.ownerId,
-                usable: c.usable
-              }))
-            } as any;
+            this.state.pendingChoice = this.withPlayedYokaiSource(
+              {
+                type: 'meiYaoSelect',
+                playerId: player.id,
+                prompt: `选择1张对手牌库顶牌使用其效果（HP<5）`,
+                hasUsable: true,
+                candidates: meiYaoCandidates.map(c => ({
+                  instanceId: c.card.instanceId,
+                  cardId: c.card.cardId,
+                  cardType: c.card.cardType,
+                  name: c.card.name,
+                  hp: c.card.hp,
+                  ownerName: c.ownerName,
+                  ownerId: c.ownerId,
+                  usable: c.usable,
+                })),
+              },
+              card
+            ) as any;
             this.addLog(`   ⏳ 等待选择对手牌库顶牌...`);
           }
           break;
@@ -4202,17 +4258,20 @@ export class MultiplayerGame {
             break;
           }
           // 第一步：选择超度手牌
-          this.state.pendingChoice = {
-            type: 'diceGhostExile',
-            playerId: player.id,
-            prompt: '选择1张手牌超度',
-            options: player.hand.map(c => ({
-              instanceId: c.instanceId,
-              name: c.name,
-              hp: c.hp ?? 0,
-              charm: (c as any).charm ?? 0
-            }))
-          };
+          this.state.pendingChoice = this.withPlayedYokaiSource(
+            {
+              type: 'diceGhostExile',
+              playerId: player.id,
+              prompt: '选择1张手牌超度',
+              options: player.hand.map(c => ({
+                instanceId: c.instanceId,
+                name: c.name,
+                hp: c.hp ?? 0,
+                charm: (c as any).charm ?? 0,
+              })),
+            },
+            card
+          );
           this.addLog(`   ⏳ 等待选择超度手牌...`);
           break;
         }
@@ -4231,7 +4290,7 @@ export class MultiplayerGame {
           this.addLog(`   ✨ 御魂：抓牌+1`);
           const xyOpponents = this.state.players.filter(p => p.id !== player.id);
           if (xyOpponents.length > 0) {
-            this.startXueYouHunHarassment(player.id, xyOpponents);
+            this.startXueYouHunHarassment(player.id, xyOpponents, card);
           }
           break;
         }
@@ -4251,12 +4310,15 @@ export class MultiplayerGame {
             this.executeWheelMonkEffect(player, target.instanceId);
           } else {
             // 多张符合条件，让玩家选择
-            this.state.pendingChoice = {
-              type: 'wheelMonkDiscard',
-              playerId: player.id,
-              candidates: validYokai.map(c => c.instanceId),
-              prompt: '选择要弃置的御魂（生命≤6），其效果将执行2次'
-            };
+            this.state.pendingChoice = this.withPlayedYokaiSource(
+              {
+                type: 'wheelMonkDiscard',
+                playerId: player.id,
+                candidates: validYokai.map(c => c.instanceId),
+                prompt: '选择要弃置的御魂（生命≤6），其效果将执行2次',
+              },
+              card
+            );
             this.addLog(`   🎯 御魂：选择要弃置的御魂...`);
           }
           break;
@@ -4283,11 +4345,14 @@ export class MultiplayerGame {
           
           // 如果有手牌，让玩家选择要弃置的牌
           if (player.hand.length > 0) {
-            this.state.pendingChoice = {
-              type: 'naginataSoulDiscard',
-              playerId: player.id,
-              prompt: '选择1张手牌弃置'
-            };
+            this.state.pendingChoice = this.withPlayedYokaiSource(
+              {
+                type: 'naginataSoulDiscard',
+                playerId: player.id,
+                prompt: '选择1张手牌弃置',
+              },
+              card
+            );
             this.addLog(`   ⏳ 等待选择1张手牌弃置...`);
           } else {
             // 无手牌可弃置时，直接检查御魂计数
@@ -4308,7 +4373,7 @@ export class MultiplayerGame {
               this.addLog(`   👁️ ${p.name} 牌库为空`);
             }
           }
-          this.startWangliangHarassment(player);
+          this.startWangliangHarassment(player, card);
           break;
         }
           
@@ -4332,7 +4397,7 @@ export class MultiplayerGame {
           const fhxOpponents = this.state.players.filter(p => p.id !== player.id);
           if (fhxOpponents.length > 0) {
             // 开始返魂香妨害流程
-            this.startFanHunXiangHarassment(player.id, fhxOpponents);
+            this.startFanHunXiangHarassment(player.id, fhxOpponents, card);
           }
           break;
         }
@@ -4387,13 +4452,16 @@ export class MultiplayerGame {
               this.addLog(`   🚫 镇墓兽：${leftPlayer.name} 指定 ${sortedTargets[0].name} 为禁止退治目标`);
             } else {
               // 等待左手边玩家选择
-              this.state.pendingChoice = {
-                type: 'zhenMuShouTarget',
-                playerId: leftPlayer.id,
-                candidates: zmsTargets.map(t => t.instanceId),
-                restrictedPlayerId: player.id,
-                prompt: `镇墓兽：选择一个目标，本回合 ${player.name} 不能将其退治`
-              } as any;
+              this.state.pendingChoice = this.withPlayedYokaiSource(
+                {
+                  type: 'zhenMuShouTarget',
+                  playerId: leftPlayer.id,
+                  candidates: zmsTargets.map(t => t.instanceId),
+                  restrictedPlayerId: player.id,
+                  prompt: `镇墓兽：选择一个目标，本回合 ${player.name} 不能将其退治`,
+                },
+                card
+              ) as any;
               this.addLog(`   ⏳ 镇墓兽：等待 ${leftPlayer.name} 选择禁止退治目标...`);
             }
           } else {
@@ -4441,14 +4509,17 @@ export class MultiplayerGame {
             } else {
               // 真人玩家：触发选择交互
               const maxCount = Math.min(3, spellCards.length);
-              this.state.pendingChoice = {
-                type: 'tufoSelect',
-                playerId: player.id,
-                cards: spellCards,  // 传递完整卡牌对象，方便客户端显示
-                maxCount,
-                minCount: 0,
-                prompt: `选择最多${maxCount}张阴阳术置入手牌`
-              };
+              this.state.pendingChoice = this.withPlayedYokaiSource(
+                {
+                  type: 'tufoSelect',
+                  playerId: player.id,
+                  cards: spellCards, // 传递完整卡牌对象，方便客户端显示
+                  maxCount,
+                  minCount: 0,
+                  prompt: `选择最多${maxCount}张阴阳术置入手牌`,
+                },
+                card
+              );
               this.addLog(`   ⏳ 等待选择阴阳术...`);
             }
           }
@@ -4513,13 +4584,16 @@ export class MultiplayerGame {
               
               if (player.shikigami.length >= 3) {
                 // 式神已满，触发置换选择
-                this.state.pendingChoice = {
-                  type: 'dizangReplaceShikigami',
-                  playerId: player.id,
-                  newShikigami: selectedShikigami,
-                  currentShikigami: player.shikigami,
-                  prompt: `选择要替换的式神，或放弃获取 ${selectedShikigami.name}`
-                };
+                this.state.pendingChoice = this.withPlayedYokaiSource(
+                  {
+                    type: 'dizangReplaceShikigami',
+                    playerId: player.id,
+                    newShikigami: selectedShikigami,
+                    currentShikigami: player.shikigami,
+                    prompt: `选择要替换的式神，或放弃获取 ${selectedShikigami.name}`,
+                  },
+                  card
+                );
                 this.addLog(`   ⏳ 等待选择替换的式神...`);
               } else {
                 // 直接获取
@@ -4532,12 +4606,15 @@ export class MultiplayerGame {
               }
             } else {
               // 2张，触发二选一
-              this.state.pendingChoice = {
-                type: 'dizangSelectShikigami',
-                playerId: player.id,
-                candidates: drawnShikigami,
-                prompt: '从2张式神中选择1张'
-              };
+              this.state.pendingChoice = this.withPlayedYokaiSource(
+                {
+                  type: 'dizangSelectShikigami',
+                  playerId: player.id,
+                  candidates: drawnShikigami,
+                  prompt: '从2张式神中选择1张',
+                },
+                card
+              );
               this.addLog(`   ⏳ 等待选择式神...`);
             }
           }
@@ -4584,14 +4661,17 @@ export class MultiplayerGame {
             this.addLog(`   ✨ 御魂：超度 ${count} 张 [${cardNames}]，伤害+${count * 2}`);
           } else {
             // 真人玩家：设置pendingChoice让客户端选择
-            this.state.pendingChoice = {
-              type: 'shangHunNiaoExile',
-              playerId: player.id,
-              prompt: `选择要超度的手牌（每张+2伤害）`,
-              candidates: player.hand.map(c => c.instanceId),
-              minCount: 0,
-              maxCount: player.hand.length
-            };
+            this.state.pendingChoice = this.withPlayedYokaiSource(
+              {
+                type: 'shangHunNiaoExile',
+                playerId: player.id,
+                prompt: `选择要超度的手牌（每张+2伤害）`,
+                candidates: player.hand.map(c => c.instanceId),
+                minCount: 0,
+                maxCount: player.hand.length,
+              },
+              card
+            );
             this.addLog(`   ⏳ 等待选择超度手牌（0~${player.hand.length}张）...`);
           }
           break;
@@ -4696,7 +4776,7 @@ export class MultiplayerGame {
           
           if (selectableCards.length === 0) {
             this.addLog(`   ✨ 幽谷响：无可选卡牌执行效果`);
-            void this.runYouguXiangHarassmentAfterSelect(player, revealedCards, []);
+            void this.runYouguXiangHarassmentAfterSelect(player, revealedCards, [], card);
           } else if (player.isAI) {
             const scored = selectableCards.map(r => {
               const c = r.card;
@@ -4717,17 +4797,20 @@ export class MultiplayerGame {
             } else {
               this.addLog(`   ↩️ 幽谷响：AI选择不执行效果`);
             }
-            void this.runYouguXiangHarassmentAfterSelect(player, revealedCards, selectedIds);
+            void this.runYouguXiangHarassmentAfterSelect(player, revealedCards, selectedIds, card);
           } else {
             // 真人玩家：设置pendingChoice等待选择
-            this.state.pendingChoice = {
-              type: 'youguXiangSelect',
-              playerId: player.id,
-              revealedCards: revealedCards,
-              selectableCandidates: selectableCards.map(r => r.card.instanceId),
-              maxSelect: 3,
-              prompt: `选择最多3张御魂执行其效果（${selectableCards.length}张可选）`
-            };
+            this.state.pendingChoice = this.withPlayedYokaiSource(
+              {
+                type: 'youguXiangSelect',
+                playerId: player.id,
+                revealedCards: revealedCards,
+                selectableCandidates: selectableCards.map(r => r.card.instanceId),
+                maxSelect: 3,
+                prompt: `选择最多3张御魂执行其效果（${selectableCards.length}张可选）`,
+              },
+              card
+            );
             this.addLog(`   ⏳ 幽谷响：等待选择要执行效果的御魂...`);
           }
           break;
@@ -4894,11 +4977,20 @@ export class MultiplayerGame {
    * 开始返魂香妨害流程
    * 让每名对手依次选择：弃置1张手牌 或 获得1张恶评
    */
-  private startFanHunXiangHarassment(sourcePlayerId: string, opponents: PlayerState[]): void {
+  private startFanHunXiangHarassment(
+    sourcePlayerId: string,
+    opponents: PlayerState[],
+    sourceYokai?: CardInstance,
+  ): void {
     // 存储待处理的对手列表
     (this.state as any).fanHunXiangQueue = opponents.map(p => p.id);
     (this.state as any).fanHunXiangSource = sourcePlayerId;
-    
+    if (sourceYokai) {
+      (this.state as any).fanHunXiangSourceCard = sourceYokai;
+    } else {
+      delete (this.state as any).fanHunXiangSourceCard;
+    }
+
     // 处理第一个对手
     this.processNextFanHunXiangOpponent();
   }
@@ -4912,7 +5004,8 @@ export class MultiplayerGame {
       // 所有对手处理完毕，清理状态
       delete (this.state as any).fanHunXiangQueue;
       delete (this.state as any).fanHunXiangSource;
-      
+      delete (this.state as any).fanHunXiangSourceCard;
+
       // 检查轮入道队列
       this.checkAndContinueWheelMonkQueue();
       this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
@@ -4968,7 +5061,8 @@ export class MultiplayerGame {
     }
 
     try {
-      const ctx = this.buildSkillContextForHarassment(source);
+      const harassmentSource = (this.state as any).fanHunXiangSourceCard as CardInstance | undefined;
+      const ctx = this.buildSkillContextForHarassment(source, harassmentSource);
       const action = createHarassmentAction(source.id, '返魂香', async (target, _c) => {
         this.addLog(`   🔥 [妨害] ${target.name} 需要选择：弃牌或获得恶评`);
         const choice = await _c.onChoice(
@@ -5038,11 +5132,20 @@ export class MultiplayerGame {
 
   // ── 雪幽魂妨害（每名对手依次走 HarassmentPipeline） ──
 
-  private startXueYouHunHarassment(sourcePlayerId: string, opponents: PlayerState[]): void {
+  private startXueYouHunHarassment(
+    sourcePlayerId: string,
+    opponents: PlayerState[],
+    sourceYokai?: CardInstance,
+  ): void {
     const q = opponents.map(p => p.id);
     if (q.length === 0) return;
     (this.state as any).xueYouHunQueue = q;
     (this.state as any).xueYouHunSource = sourcePlayerId;
+    if (sourceYokai) {
+      (this.state as any).xueYouHunSourceCard = sourceYokai;
+    } else {
+      delete (this.state as any).xueYouHunSourceCard;
+    }
     this.processNextXueYouHunOpponent();
   }
 
@@ -5051,6 +5154,7 @@ export class MultiplayerGame {
     if (!queue || queue.length === 0) {
       delete (this.state as any).xueYouHunQueue;
       delete (this.state as any).xueYouHunSource;
+      delete (this.state as any).xueYouHunSourceCard;
       this.checkAndContinueWheelMonkQueue();
       this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
       return;
@@ -5088,7 +5192,8 @@ export class MultiplayerGame {
     }
 
     try {
-      const ctx = this.buildSkillContextForHarassment(source);
+      const harassmentSource = (this.state as any).xueYouHunSourceCard as CardInstance | undefined;
+      const ctx = this.buildSkillContextForHarassment(source, harassmentSource);
       const action = createHarassmentAction(source.id, '雪幽魂', async (target, _c) => {
         const penaltyCards = target.hand.filter(c => c.cardType === 'penalty');
         if (penaltyCards.length === 0) {
@@ -5107,6 +5212,8 @@ export class MultiplayerGame {
             target.id,
             options,
             `${target.name}：雪幽魂 — 选择弃置哪张恶评`,
+            undefined,
+            harassmentSource,
           );
           const pick = penaltyCards[ix] ?? penaltyCards[0]!;
           const idx = target.hand.findIndex(c => c.instanceId === pick.instanceId);
@@ -5134,7 +5241,7 @@ export class MultiplayerGame {
 
   // ── 魍魉之匣：一次性展示全员牌库顶（与客户端 wangliangChoice 横排 UI 一致） ──
 
-  private startWangliangHarassment(caster: PlayerState): void {
+  private startWangliangHarassment(caster: PlayerState, sourceYokai?: CardInstance): void {
     const others = this.state.players.filter(p => p.id !== caster.id);
     const ordered: PlayerState[] = [caster, ...others];
     const allTargets = ordered.map(p => {
@@ -5169,21 +5276,22 @@ export class MultiplayerGame {
         this.addLog(`   👁️ ${p.name} 牌库为空`);
       }
     }
-    this.state.pendingChoice = {
+    const wl: any = {
       type: 'wangliangChoice',
       playerId: caster.id,
       allTargets,
       decisions: [] as any[],
       currentIndex: 0,
-    } as any;
+    };
+    this.state.pendingChoice = sourceYokai ? this.withPlayedYokaiSource(wl, sourceYokai) : wl;
     this.addLog(`   ⏳ 魍魉之匣：等待 ${caster.name} 确认各玩家牌库顶保留/弃置...`);
     this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
   }
 
   // ── 赤舌妨害：管线逐目标结算（单候选立即置顶）；多候选统一进入 akajitaBatch 并行选择 ──
 
-  private startAkajitaHarassment(caster: PlayerState): void {
-    void this.runAkajitaHarassmentAsync(caster).catch((e) => {
+  private startAkajitaHarassment(caster: PlayerState, sourceYokai?: CardInstance): void {
+    void this.runAkajitaHarassmentAsync(caster, sourceYokai).catch((e) => {
       this.addLog(`   ⚠️ 赤舌妨害结算失败: ${e}`);
       this.state.pendingChoice = undefined;
       this.clearAkajitaTimeout();
@@ -5192,7 +5300,10 @@ export class MultiplayerGame {
     });
   }
 
-  private async runAkajitaHarassmentAsync(caster: PlayerState): Promise<void> {
+  private async runAkajitaHarassmentAsync(
+    caster: PlayerState,
+    sourceYokai?: CardInstance,
+  ): Promise<void> {
     const opponents = this.state.players.filter(p => p.id !== caster.id);
     const eligible = opponents.filter((opp) => {
       const spellCard = opp.discard.find(c => c.name === '基础术式');
@@ -5207,7 +5318,7 @@ export class MultiplayerGame {
     }
 
     const deferred: PlayerState[] = [];
-    const ctx = this.buildSkillContextForHarassment(caster);
+    const ctx = this.buildSkillContextForHarassment(caster, sourceYokai);
     const action = createHarassmentAction(caster.id, '赤舌', async (target, _c) => {
       const spellCard = target.discard.find(c => c.name === '基础术式');
       const darumaCard = target.discard.find(c => c.name === '招福达摩');
@@ -5259,14 +5370,15 @@ export class MultiplayerGame {
         ],
       };
     });
-    this.state.pendingChoice = {
+    const aj: any = {
       type: 'akajitaBatch',
       sourcePlayerId: caster.id,
       playerId: caster.id,
       deadline,
       targets,
       responses: {} as Record<string, string>,
-    } as any;
+    };
+    this.state.pendingChoice = sourceYokai ? this.withPlayedYokaiSource(aj, sourceYokai) : aj;
     this.autoFillAiAkajitaBatchResponses();
     if ((this.state.pendingChoice as any)?.type === 'akajitaBatch') {
       this.startAkajitaTimeout();
@@ -5286,6 +5398,7 @@ export class MultiplayerGame {
   private async runMeiYaoHarassmentAfterSelect(
     source: PlayerState,
     selected: { ownerId: string; ownerName: string; instanceId: string },
+    meiYaoSourceYokai?: CardInstance,
   ): Promise<void> {
     const owner = this.getPlayer(selected.ownerId);
     if (!owner) {
@@ -5297,7 +5410,7 @@ export class MultiplayerGame {
     }
     const card = owner.deck[cardIdx]!;
     try {
-      const ctx = this.buildSkillContextForHarassment(source);
+      const ctx = this.buildSkillContextForHarassment(source, meiYaoSourceYokai);
       const action = createHarassmentAction(source.id, '魅妖', async (target, _c) => {
         this.executeMeiYaoEffect(source, {
           ownerId: target.id,
@@ -5322,10 +5435,11 @@ export class MultiplayerGame {
     source: PlayerState,
     revealedCards: Array<{ card: CardInstance; ownerId: string; ownerName: string }>,
     selectedIds: string[],
+    youguSourceYokai?: CardInstance,
   ): Promise<void> {
     const selectedSet = new Set(selectedIds);
     try {
-      const ctx = this.buildSkillContextForHarassment(source);
+      const ctx = this.buildSkillContextForHarassment(source, youguSourceYokai);
       for (const r of revealedCards) {
         const owner = this.getPlayer(r.ownerId);
         if (!owner || owner.deck.length === 0) {
@@ -5864,8 +5978,9 @@ export class MultiplayerGame {
 
     const revealedSnapshot = [...revealedCards];
     const idsSnapshot = [...ids];
+    const youguSrc = (pendingChoice as any).sourceCard as CardInstance | undefined;
     this.state.pendingChoice = undefined;
-    void this.runYouguXiangHarassmentAfterSelect(player, revealedSnapshot, idsSnapshot);
+    void this.runYouguXiangHarassmentAfterSelect(player, revealedSnapshot, idsSnapshot, youguSrc);
     return { success: true };
   }
 
@@ -5962,19 +6077,23 @@ export class MultiplayerGame {
     // 存储选中的式神
     (this.state as any).dizangSelectedShikigami = selectedShikigami;
 
+    const dizangSource = (this.state.pendingChoice as any).sourceCard as CardInstance | undefined;
     // 清除等待状态
     this.state.pendingChoice = undefined;
 
     // 检查是否需要置换
     if (player.shikigami.length >= 3) {
       // 式神已满，触发置换选择
-      this.state.pendingChoice = {
-        type: 'dizangReplaceShikigami',
+      const replacePending = {
+        type: 'dizangReplaceShikigami' as const,
         playerId: player.id,
         newShikigami: selectedShikigami,
         currentShikigami: player.shikigami,
-        prompt: `选择要替换的式神，或放弃获取 ${selectedShikigami.name}`
+        prompt: `选择要替换的式神，或放弃获取 ${selectedShikigami.name}`,
       };
+      this.state.pendingChoice = dizangSource
+        ? this.withPlayedYokaiSource(replacePending, dizangSource)
+        : replacePending;
       this.addLog(`   ⏳ 等待选择替换的式神...`);
     } else {
       // 直接获取
@@ -6149,8 +6268,9 @@ export class MultiplayerGame {
     this.state.wheelMonkQueue = {
       cardName: targetCard.name || '',
       cardId: targetCard.cardId || '',
+      sourceCard: targetCard,
       remainingExecutions: 2,
-      playerId: player.id
+      playerId: player.id,
     };
     
     // 执行第一次完整效果
@@ -6227,16 +6347,21 @@ export class MultiplayerGame {
    * 为轮入道执行完整御魂效果（复用executeYokaiEffect的switch-case逻辑）
    */
   private executeYokaiEffectForWheelMonk(player: PlayerState, effectKey: string): void {
-    // 调用现有的executeYokaiEffect分支逻辑
-    // 这里需要复用现有的switch-case，但跳过轮入道本身避免无限递归
-    this.executeYokaiEffectByName(player, effectKey);
+    const q = this.state.wheelMonkQueue;
+    this.executeYokaiEffectByName(player, effectKey, q?.sourceCard);
   }
   
   /**
    * 根据御魂名称执行完整效果（含交互）
    * 用于轮入道队列执行
    */
-  private executeYokaiEffectByName(player: PlayerState, effectKey: string): void {
+  private executeYokaiEffectByName(
+    player: PlayerState,
+    effectKey: string,
+    sourceYokai?: CardInstance,
+  ): void {
+    const attach = <T extends Record<string, unknown>>(p: T) =>
+      (sourceYokai ? this.withPlayedYokaiSource(p, sourceYokai) : p) as T;
     // 复用executeYokaiEffect中的switch-case逻辑（跳过轮入道本身避免递归）
     switch (effectKey) {
       // ============ 树妖 ============
@@ -6244,11 +6369,11 @@ export class MultiplayerGame {
         // 抓牌+2，弃置1张
         this.drawCards(player, 2);
         if (player.hand.length > 0) {
-          this.state.pendingChoice = {
+          this.state.pendingChoice = attach({
             type: 'treeDemonDiscard',
             playerId: player.id,
-            prompt: '选择1张手牌弃置（树妖效果）'
-          };
+            prompt: '选择1张手牌弃置（树妖效果）',
+          });
           this.addLog(`   🌳 树妖：抓牌+2，请选择弃置1张手牌`);
         } else {
           this.addLog(`   🌳 树妖：抓牌+2（无手牌可弃）`);
@@ -6263,12 +6388,12 @@ export class MultiplayerGame {
         if (player.deck.length > 0) {
           const topCard = DeckRevealHelper.revealTopCard(player, player.id);
           if (topCard) {
-            this.state.pendingChoice = {
+            this.state.pendingChoice = attach({
               type: 'salvageChoice',
               playerId: player.id,
               card: topCard,
-              prompt: `查看牌库顶牌【${topCard.name}】，是否超度？`
-            };
+              prompt: `查看牌库顶牌【${topCard.name}】，是否超度？`,
+            });
             this.addLog(`   👁️ 查看牌库顶牌：${topCard.name}`, { visibility: 'private', playerId: player.id });
           }
         } else {
@@ -6296,12 +6421,12 @@ export class MultiplayerGame {
           }
         } else {
           // 多个目标时让玩家选择
-          this.state.pendingChoice = {
+          this.state.pendingChoice = attach({
             type: 'yokaiTarget',
             playerId: player.id,
             prompt: '选择要退治的妖怪（生命≤4）',
             options: validTargets.map(y => y.instanceId),
-          };
+          });
           this.addLog(`   🎯 天邪鬼绿：选择退治目标...`);
         }
         break;
@@ -6315,12 +6440,12 @@ export class MultiplayerGame {
           player.damage += 1;
           this.addLog(`   ✨ 天邪鬼青：伤害+1（无法抓牌）`);
         } else {
-          this.state.pendingChoice = {
+          this.state.pendingChoice = attach({
             type: 'yokaiChoice',
             playerId: player.id,
             options: ['抓牌+1', '伤害+1'],
-            prompt: '选择一个效果'
-          };
+            prompt: '选择一个效果',
+          });
           this.addLog(`   🎯 天邪鬼青：选择抓牌+1 或 伤害+1`);
         }
         break;
@@ -6332,14 +6457,14 @@ export class MultiplayerGame {
         player.damage += 1;
         this.addLog(`   ✨ 天邪鬼赤：伤害+1`);
         if (player.hand.length > 0) {
-          this.state.pendingChoice = {
+          this.state.pendingChoice = attach({
             type: 'selectCardsMulti',
             playerId: player.id,
             cards: player.hand.map(c => c.instanceId),
             maxCount: player.hand.length,
             minCount: 0,
-            prompt: '选择要弃置的手牌（可不选）'
-          };
+            prompt: '选择要弃置的手牌（可不选）',
+          });
           this.addLog(`   🎯 天邪鬼赤：选择要弃置的手牌...`);
         }
         break;
@@ -6350,12 +6475,12 @@ export class MultiplayerGame {
         this.drawCards(player, 2);
         this.addLog(`   ✨ 天邪鬼黄：抓牌+2`);
         if (player.hand.length > 0) {
-          this.state.pendingChoice = {
+          this.state.pendingChoice = attach({
             type: 'selectCardPutTop',
             playerId: player.id,
             prompt: '选择1张手牌置于牌库顶',
-            count: 1
-          };
+            count: 1,
+          });
           this.addLog(`   ⏳ 天邪鬼黄：等待选择1张手牌置于牌库顶...`);
         }
         break;
@@ -6363,12 +6488,12 @@ export class MultiplayerGame {
       // ============ 日女巳时 ============
       case '日女巳时':
         // 选择：鬼火+1 / 抓牌+2 / 伤害+2
-        this.state.pendingChoice = {
+        this.state.pendingChoice = attach({
           type: 'rinyuChoice',
           playerId: player.id,
           prompt: '选择一项效果',
-          options: ['ghostFire', 'draw', 'damage']
-        };
+          options: ['ghostFire', 'draw', 'damage'],
+        });
         this.addLog(`   ⏳ 日女巳时：等待选择鬼火+1 / 抓牌+2 / 伤害+2`);
         break;
         
@@ -6376,11 +6501,11 @@ export class MultiplayerGame {
       case '蚌精':
         // 超度1张手牌，抓牌+2
         if (player.hand.length > 0) {
-          this.state.pendingChoice = {
+          this.state.pendingChoice = attach({
             type: 'bangJingExile',
             playerId: player.id,
-            prompt: '选择1张手牌超度'
-          };
+            prompt: '选择1张手牌超度',
+          });
           this.addLog(`   ⏳ 蚌精：等待选择1张手牌超度...`);
         } else {
           this.drawCards(player, 2);
@@ -6394,7 +6519,7 @@ export class MultiplayerGame {
         if (player.hand.length === 0) {
           this.addLog(`   ✨ 骰子鬼：没有手牌可超度`);
         } else {
-          this.state.pendingChoice = {
+          this.state.pendingChoice = attach({
             type: 'diceGhostExile',
             playerId: player.id,
             prompt: '选择1张手牌超度',
@@ -6402,16 +6527,16 @@ export class MultiplayerGame {
               instanceId: c.instanceId,
               name: c.name,
               hp: c.hp ?? 0,
-              charm: (c as any).charm ?? 0
-            }))
-          };
+              charm: (c as any).charm ?? 0,
+            })),
+          });
           this.addLog(`   ⏳ 骰子鬼：等待选择超度手牌...`);
         }
         break;
         
       // ============ 赤舌（妨害，对手选择）============
       case '赤舌': {
-        this.startAkajitaHarassment(player);
+        this.startAkajitaHarassment(player, sourceYokai);
         break;
       }
         
@@ -6454,12 +6579,14 @@ export class MultiplayerGame {
             this.addLog(`   ✨ 魅妖：对手牌库顶牌均不可用（令牌/恶评）`);
           } else {
             // 设置选择
-            this.state.pendingChoice = {
-              type: 'meiYaoSelect',
-              playerId: player.id,
-              prompt: '魅妖：选择1张对手牌库顶牌使用其效果',
-              candidates: meiYaoCandidates
-            } as any;
+            this.state.pendingChoice = attach(
+              {
+                type: 'meiYaoSelect',
+                playerId: player.id,
+                prompt: '魅妖：选择1张对手牌库顶牌使用其效果',
+                candidates: meiYaoCandidates,
+              } as any,
+            ) as any;
             this.addLog(`   ⏳ 魅妖：等待选择对手牌库顶牌...`);
           }
         }
@@ -6525,13 +6652,13 @@ export class MultiplayerGame {
             this.addLog(`   🚫 镇墓兽：${leftPlayer.name} 指定 ${selectedTarget.name} 为禁止退治目标`);
           } else {
             // 设置 pendingChoice，等待左手边玩家选择
-            this.state.pendingChoice = {
+            this.state.pendingChoice = attach({
               type: 'zhenMuShouTarget',
               playerId: leftPlayer.id,
               candidates: zmsValidTargets.map(t => t.instanceId),
               restrictedPlayerId: player.id,
-              prompt: `镇墓兽：选择一个目标，本回合 ${player.name} 不能将其退治`
-            } as any;
+              prompt: `镇墓兽：选择一个目标，本回合 ${player.name} 不能将其退治`,
+            } as any);
             this.addLog(`   ⏳ 镇墓兽：等待 ${leftPlayer.name} 选择禁止退治目标...`);
           }
         }
@@ -6564,17 +6691,17 @@ export class MultiplayerGame {
         
         if (youguSelectableCards.length === 0) {
           this.addLog(`   ✨ 幽谷响：无可选卡牌执行效果`);
-          void this.runYouguXiangHarassmentAfterSelect(player, youguRevealedCards, []);
+          void this.runYouguXiangHarassmentAfterSelect(player, youguRevealedCards, [], sourceYokai);
         } else {
           // 设置pendingChoice等待玩家选择
-          this.state.pendingChoice = {
+          this.state.pendingChoice = attach({
             type: 'youguXiangSelect',
             playerId: player.id,
             revealedCards: youguRevealedCards,
             selectableCandidates: youguSelectableCards.map(r => r.card.instanceId),
             maxSelect: 3,
-            prompt: `选择最多3张御魂执行其效果（${youguSelectableCards.length}张可选）`
-          };
+            prompt: `选择最多3张御魂执行其效果（${youguSelectableCards.length}张可选）`,
+          });
           this.addLog(`   ⏳ 幽谷响：等待选择要执行效果的御魂...`);
         }
         break;
@@ -6591,18 +6718,18 @@ export class MultiplayerGame {
           const selectCount = Math.min(2, yinmoluoCandidates.length);
           
           // 设置pendingChoice等待玩家选择
-          this.state.pendingChoice = {
+          this.state.pendingChoice = attach({
             type: 'yinmoluoSelect',
             playerId: player.id,
             candidates: yinmoluoCandidates.map(c => ({
               instanceId: c.instanceId,
               name: c.name,
               hp: c.hp ?? 0,
-              cardType: c.cardType
+              cardType: c.cardType,
             })),
             selectCount,
-            prompt: `选择${selectCount}张弃牌区的牌使用其效果（HP<6）`
-          };
+            prompt: `选择${selectCount}张弃牌区的牌使用其效果（HP<6）`,
+          });
           this.addLog(`   ⏳ 阴摩罗：等待选择弃牌区的牌...`);
         }
         break;
@@ -6610,7 +6737,7 @@ export class MultiplayerGame {
         
       // ============ 其他无交互御魂 ============
       default:
-        this.executeYokaiEffectSimple(player, { name: effectKey } as any);
+        this.executeYokaiEffectSimple(player, { name: effectKey } as any, sourceYokai);
         break;
     }
     
@@ -6627,7 +6754,11 @@ export class MultiplayerGame {
    * @param player 玩家
    * @param card 御魂卡牌
    */
-  private executeYokaiEffectSimple(player: PlayerState, card: CardInstance): void {
+  private executeYokaiEffectSimple(
+    player: PlayerState,
+    card: CardInstance,
+    harassmentSource?: CardInstance,
+  ): void {
     const effectKey = card.name || '';
     
     switch (effectKey) {
@@ -6684,8 +6815,7 @@ export class MultiplayerGame {
         // 收集需要选择的对手
         const opponents = this.state.players.filter(p => p.id !== player.id);
         if (opponents.length > 0) {
-          // 开始返魂香妨害流程
-          this.startFanHunXiangHarassment(player.id, opponents);
+          this.startFanHunXiangHarassment(player.id, opponents, harassmentSource);
         }
         break;
       }
@@ -6711,7 +6841,7 @@ export class MultiplayerGame {
         this.addLog(`   ✨ ${effectKey}：抓牌+1`);
         const xyOpponents = this.state.players.filter(p => p.id !== player.id);
         if (xyOpponents.length > 0) {
-          this.startXueYouHunHarassment(player.id, xyOpponents);
+          this.startXueYouHunHarassment(player.id, xyOpponents, harassmentSource);
         }
         break;
       }
@@ -6720,7 +6850,7 @@ export class MultiplayerGame {
         this.drawCards(player, 1);
         player.damage += 1;
         this.addLog(`   ✨ ${effectKey}：抓牌+1，伤害+1`);
-        this.startWangliangHarassment(player);
+        this.startWangliangHarassment(player, harassmentSource);
         break;
       }
         
@@ -7153,11 +7283,13 @@ export class MultiplayerGame {
       return { success: true };
     }
 
-    // 第二步：选择退治目标
-    this.state.pendingChoice = {
-      type: 'diceGhostTarget',
+    // 第二步：选择退治目标（保留第一步挂上的 sourceCard = 打出的骰子鬼）
+    const prevSrc = (this.state.pendingChoice as any)?.sourceCard as CardInstance | undefined;
+    const dgPrompt = `选择1个HP≤${maxHp}的游荡妖怪退治`;
+    const dgBase = {
+      type: 'diceGhostTarget' as const,
       playerId: player.id,
-      prompt: `选择1个HP≤${maxHp}的游荡妖怪退治`,
+      prompt: dgPrompt,
       maxHp: maxHp,
       options: validTargets.map(({ yokai, index }) => ({
         instanceId: yokai!.instanceId,
@@ -7165,9 +7297,12 @@ export class MultiplayerGame {
         name: yokai!.name,
         hp: yokai!.hp ?? 0,
         charm: (yokai as any)?.charm ?? 0,
-        slotIndex: index
-      }))
+        slotIndex: index,
+      })),
     };
+    this.state.pendingChoice = prevSrc
+      ? ({ ...dgBase, sourceCard: prevSrc, stepSummary: dgPrompt } as any)
+      : (dgBase as any);
     this.addLog(`   ⏳ 等待选择退治目标（HP≤${maxHp}）...`);
 
     this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
@@ -7355,7 +7490,7 @@ export class MultiplayerGame {
         {
           const xyOpponents = this.state.players.filter(p => p.id !== player.id);
           if (xyOpponents.length > 0) {
-            this.startXueYouHunHarassment(player.id, xyOpponents);
+            this.startXueYouHunHarassment(player.id, xyOpponents, card);
           }
         }
         break;
@@ -7374,11 +7509,14 @@ export class MultiplayerGame {
         this.addLog(`      → 抓牌+1`);
         // 如果有手牌，让玩家选择要弃置的牌
         if (player.hand.length > 0) {
-          this.state.pendingChoice = {
-            type: 'naginataSoulDiscard',
-            playerId: player.id,
-            prompt: '选择1张手牌弃置'
-          };
+          this.state.pendingChoice = this.withPlayedYokaiSource(
+            {
+              type: 'naginataSoulDiscard',
+              playerId: player.id,
+              prompt: '选择1张手牌弃置',
+            },
+            card,
+          );
           this.addLog(`      ⏳ 等待选择1张手牌弃置...`);
         } else {
           // 无手牌可弃置时，直接检查御魂计数
@@ -7469,8 +7607,9 @@ export class MultiplayerGame {
       ownerName: selected.ownerName,
       instanceId: selectedCardId,
     };
+    const meiSrc = pendingChoice.sourceCard as CardInstance | undefined;
     this.state.pendingChoice = undefined;
-    void this.runMeiYaoHarassmentAfterSelect(player, selectedPayload);
+    void this.runMeiYaoHarassmentAfterSelect(player, selectedPayload, meiSrc);
     return { success: true };
   }
 

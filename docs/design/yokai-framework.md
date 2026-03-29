@@ -65,7 +65,7 @@
 | **超度** | 4 | 唐纸伞妖、蚌精、骰子鬼、伤魂鸟 |
 | **复制** | 2 | 轮入道(双重效果)、飞缘魔(鬼王效果) |
 | **触发** | 3 | 树妖(弃置)、三味(弃置)、铮(抵抗) |
-| **TempBuff** | 4 | 涅槃之火、网切、针女、三味 |
+| **TempBuff** | 3 | 涅槃之火、网切、针女 |
 | **特殊** | 3 | 地藏像(获式神)、涂佛(回收)、阴摩罗(复用) |
 
 ### 2.2 交互类型分布
@@ -144,7 +144,7 @@
 | ID | 名称 | 类型 | 交互 | 验收 |
 |----|------|------|------|:----:|
 | yokai_037 | 青女房 | 综合+抵抗 | 无 | 🔄 |
-| yokai_038 | 三味 | TempBuff+触发 | 无 | 🔄 |
+| yokai_038 | 三味 | 实时统计伤害+【触】弃置 | 无 | 🔄 |
 
 > ✅ = 已验收  🔄 = 待验收
 
@@ -477,7 +477,7 @@ enum TempBuffType {
   
   // === 伤害类 ===
   SKILL_DAMAGE_BONUS = 'SKILL_DAMAGE_BONUS',         // 针女: 式神技能伤害+2
-  SPELL_DAMAGE_BONUS = 'SPELL_DAMAGE_BONUS',         // 三味: 阴阳术伤害+2(统计)
+  SPELL_DAMAGE_BONUS = 'SPELL_DAMAGE_BONUS',         // 山童【怪力】等；三味为打出时即时加伤，不注册此类型
   
   // === 目标类 ===
   HP_REDUCTION = 'HP_REDUCTION',                     // 网切: 妖怪HP-1, 鬼王HP-2
@@ -506,7 +506,7 @@ interface TempBuff {
 | `SKILL_COST_REDUCTION` | 涅槃之火 | turn | 使用技能时 | 消耗-1 |
 | `HP_REDUCTION` | 网切 | turn | 攻击结算时 | HP-1/-2 |
 | `SKILL_DAMAGE_BONUS` | 针女 | turn | 使用技能后 | 伤害+2 |
-| `SPELL_DAMAGE_BONUS` | 三味 | turn | 统计阶段 | 伤害+2×X |
+| `SPELL_DAMAGE_BONUS` | 山童【怪力】等 | turn | 打出阴阳术时 | 每张学式额外加伤（带次数）；**三味不用此 buff，仅即时统计 `played`** |
 | `PROHIBIT_RETIRE` | 镇墓兽 | turn | 退治时 | 禁止退治 |
 | `NAGINATA_SOUL_PENDING` | 薙魂 | turn | 打出时 | 3御魂则+2 |
 | `ON_SKILL_USED` | 针女 | turn | 技能后 | 回调触发 |

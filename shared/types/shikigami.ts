@@ -107,6 +107,13 @@ export interface SkillContext {
   /** 除 player 以外的所有玩家 */
   opponents: PlayerState[];
 
+  /**
+   * 妨害抵抗链当前正在结算的「被妨害玩家」（≠ skill 发动者 ctx.player）。
+   * 由 `HarassmentPipeline.resolveForSingleTarget` 在单目标结算期间写入并在结束时恢复；
+   * 供服务端注入的 `onChoice` / `onSelectCards` 将 UI 归属到正确座位。未跑管线时不设置。
+   */
+  harassmentResistSubject?: PlayerState;
+
   // ── 交互回调（由 GameManager / 服务端 注入） ──
 
   /**

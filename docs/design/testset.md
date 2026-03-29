@@ -130,12 +130,40 @@ cd server && npm test
 
 ---
 
+### 2026-03-28：多人返魂香 — pendingChoice 归属非行动者 + AI 步进漏判
+
+| 项目 | 内容 |
+|------|------|
+| **Bug 描述** | 打出返魂香后，被问起的一方（尤其机器人）不出现交互；出牌方一直等待，提示需先完成当前选择，对局形同卡死 |
+| **易混表现** | 日志里已有「[妨害] 某某 需要选择：弃牌或获得恶评」，但 AI 永远不会提交选择；真人出牌方仍被全局 `pendingChoice` 锁住 |
+| **根因** | ① `pendingChoice.playerId` 是**被妨害的对手**，不是 `currentPlayerIndex`。② `SocketServer.runAiTurnStep` 原逻辑只在「**当前回合座位**为 AI/托管」时运行；人类回合内挂起的 `fanHunXiangChoice` 不会触发 AI 代答，队列无法前进 |
+| **为何单测易漏** | `MultiplayerGame.handleFanHunXiangChoiceResponse` 与客户端分支可单独正确；缺的是 **「状态更新后 AI 步进是否覆盖非当前回合的 pending」** 的集成/烟囱断言 |
+| **修复** | 在 `runAiTurnStep` 开头优先判断：`pendingChoice.type === 'fanHunXiangChoice'` 且被询问者为 AI/离线托管 → 调用 `handleFanHunXiangChoiceResponse`（有手牌优先选弃牌）。服务端 `notifyStateChange` 会继续广播并 `scheduleAiTurn` |
+
+#### 教训（避免同类复发）
+
+1. **凡 `pendingChoice.playerId !== currentPlayer`** 的交互，AI/托管逻辑必须与「是否当前回合座位」解耦；不应只在 `pc.playerId === cur.id` 分支里处理。
+2. 新增妨害类 pending 时，在 `docs/design/testset.md` 与本节补一条：**谁是 pending 的「责任座位」、AI 是否在人类回合也要代答**。
+3. 建议在 `server` 增加一条测试：人类当前回合 + AI 对手 + `fanHunXiangChoice`，断言一步内 `pendingChoice` 被清空或进入下一对手。
+
+#### 延伸（待修复）：持有「铮」时受妨害不触发（多人）
+
+| 项目 | 内容 |
+|------|------|
+| **现象** | 手牌有「铮」时，对手妨害（含返魂香二选一）直接进妨害本身的选择/结算，**不出现**「是否弃置铮抵消」的抵抗交互 |
+| **根因（设计文档已写管线，服务端未接）** | `shared/game/effects/HarassmentPipeline.ts` 已定义铮/青女房等妨害抵抗；`shared/types/pendingChoice.ts` 有 `harassmentResist`。但 `MultiplayerGame.startFanHunXiangHarassment` 等路径**直接** `processNextFanHunXiangOpponent` / `fanHunXiangChoice`，**未先**走妨害统一管线，与策划文档中「返魂香可被铮抵消」不一致 |
+| **改进方向** | 长期仍应妨害入口统一走 `HarassmentPipeline`；短期已在返魂香流程实现与管线一致的青女房→铮→返魂香二选一（`server/.../fanHunXiangResist.integration.test.ts`） |
+
+---
+
 ## 7) 已修复 Bug 简要记录
 
 > 所有 `bug：XXX` 格式提交的问题，修复后在此简要记录原因
 
 | 日期 | 问题 | 根因 | 修复 |
 |------|------|------|------|
+| 2026-03 | **多人返魂香：对手无反馈、出牌方卡死** | `fanHunXiangChoice` 挂在被妨害者；`runAiTurnStep` 仅在「当前回合座位」为 AI 时执行，人类出牌时从不代 AI 应答 | `SocketServer.runAiTurnStep` 开头对 AI/托管被询问者调用 `handleFanHunXiangChoiceResponse`（见 §6 复盘） |
+| 2026-03 | **多人持有铮时受返魂香妨害不触发抵抗** | 同上；曾用手写 `harassmentHandResist` | **已修**：返魂香改走 `resolveHarassment`，统一 `harassmentPipelineChoice` + `game:harassmentPipelineChoiceResponse`（旧事件名仍转发） |
 | 2026-03 | **退治/超度选择改为默认退治** | 规则简化：HP降为0时不再弹出退治/超度选项，直接退治（进弃牌堆） | 服务端 `handleAllocateDamage`/`handleAttackBoss` 击杀后直接退治；移除 `pendingDeathChoices`/`pendingBossDeath` 逻辑；客户端移除选择弹窗；`endTurn` 不再需要自动退治兜底 |
 | 2025-03 | **树妖弃牌未触发** | 服务端 switch-case 直接 `shift()` 跳过选择 | 改用 `pendingChoice` 触发弃牌选择 UI |
 | 2025-03 | **赤舌置顶牌对手不可见** | 牌库操作后未更新 `revealedDeckCards` | 在 YokaiEffects.ts 中为对手添加 `revealedDeckCards` 记录 |
@@ -175,6 +203,19 @@ cd server && npm test
 3. `client/src/App.vue` — 在 `watch(gameState)` 中添加对应 UI 弹窗逻辑
 
 **防遗漏建议**：在卡牌具体文档中预先定义所需的 pendingChoice 类型，开发时对照检查。
+
+---
+
+### 8.2b 多人妨害：`pendingChoice` 责任座位与 AI 步进
+
+**问题描述**：部分妨害把 `pendingChoice` 挂在**对手**（非 `currentPlayerIndex`），若只在「当前回合是 AI」时才执行 `runAiTurnStep` 内的代答，会导致人类出牌、AI 被问时永远无人应答，全局交互锁死（返魂香为典型）。
+
+**规则**：
+
+- 实现 AI/托管代答时，按 **`pendingChoice.playerId`** 判断是否代答，不要默认等于「当前回合玩家」。
+- 文档与 PR 中写清：该 pending 的**责任客户端**是谁、超时与托管如何收口。
+
+**相关**：`HarassmentPipeline`、`harassmentResist`（铮/青女房）未接入服务端妨害路径时，抵抗根本不出现，见 §6「铮延伸」。
 
 ---
 

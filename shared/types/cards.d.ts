@@ -9,6 +9,35 @@ export type CardType = 'onmyoji' | 'shikigami' | 'spell' | 'token' | 'penalty' |
 export type CardSubtype = '御魂' | '鬼火' | '令牌' | '妨害' | '持续';
 /** 效果类型标记 */
 export type EffectType = '启' | '触' | '永' | '妖' | '自';
+/**
+ * 卡牌性别属性（位掩码）
+ * - 0 (0b00): 无性别（既不是男也不是女）
+ * - 1 (0b01): 男性
+ * - 2 (0b10): 女性
+ * - 3 (0b11): 双性（既是男也是女）
+ *
+ * 用于游戏效果判定，如"三尾狐女"只影响女性目标
+ */
+export type CardGender = 0 | 1 | 2 | 3;
+/** 性别位掩码常量 */
+export declare const Gender: {
+    readonly NONE: CardGender;
+    readonly MALE: CardGender;
+    readonly FEMALE: CardGender;
+    readonly BOTH: CardGender;
+};
+/**
+ * 判断是否为男性（男性或双性）
+ */
+export declare function isMale(gender: CardGender | undefined): boolean;
+/**
+ * 判断是否为女性（女性或双性）
+ */
+export declare function isFemale(gender: CardGender | undefined): boolean;
+/**
+ * 判断是否有性别（非无性别）
+ */
+export declare function hasGender(gender: CardGender | undefined): boolean;
 /** 阴阳师卡 - 只有名称和形象，无技能（为了玩家平衡） */
 export interface OnmyojiCard {
     id: string;
@@ -38,6 +67,7 @@ export interface ShikigamiCard {
     passive: ShikigamiPassive;
     skill: ShikigamiSkill;
     multiPlayer?: boolean;
+    gender?: CardGender;
     image: string;
 }
 export interface SpellCard {
@@ -80,6 +110,7 @@ export interface BossCard {
     arrivalEffect: string;
     yokaiEffect: string;
     multiPlayer?: boolean;
+    gender?: CardGender;
     image: string;
 }
 export interface YokaiCard {
@@ -93,6 +124,7 @@ export interface YokaiCard {
     effectType: EffectType;
     fieldEffect?: string;
     multiPlayer?: boolean;
+    gender?: CardGender;
     image: string;
 }
 /** 所有御魂卡（可进入玩家牌库的卡） */
@@ -112,6 +144,7 @@ export interface CardInstance {
     charm?: number;
     effect?: string;
     keywords?: string[];
+    gender?: CardGender;
     image: string;
     isExhausted?: boolean;
     markers?: Record<string, number>;

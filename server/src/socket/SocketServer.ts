@@ -1133,7 +1133,38 @@ export class SocketServer {
       callback?.(result);
     });
 
-    // 返魂香选择响应
+    // 妨害管线 onChoice（返魂香：青女房/铮/弃牌或恶评等，统一 pending）
+    socket.on('game:harassmentPipelineChoiceResponse' as any, (data: { choice: number }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+
+      const result = room.game.handleHarassmentPipelineChoiceResponse(socket.id, data.choice);
+
+      if (result.success) {
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+
+      callback?.(result);
+    });
+
+    /** 兼容旧客户端事件名 */
+    socket.on('game:harassmentHandResistResponse' as any, (data: { choice: number }, callback?: (result: { success: boolean; error?: string }) => void) => {
+      const room = this.roomManager.getPlayerRoom(socket.id);
+      if (!room || !room.game) {
+        callback?.({ success: false, error: '游戏未开始' });
+        return;
+      }
+      const result = room.game.handleHarassmentPipelineChoiceResponse(socket.id, data.choice);
+      if (result.success) {
+        this.broadcastGameState(room.id, room.game.getState());
+      }
+      callback?.(result);
+    });
+
+    // 返魂香选择响应（兼容旧客户端 → 统一走管线续行）
     socket.on('game:fanHunXiangChoiceResponse' as any, (data: { choice: number }, callback?: (result: { success: boolean; error?: string }) => void) => {
       const room = this.roomManager.getPlayerRoom(socket.id);
       if (!room || !room.game) {
@@ -1141,10 +1172,9 @@ export class SocketServer {
         return;
       }
 
-      const result = room.game.handleFanHunXiangChoiceResponse(socket.id, data.choice);
+      const result = room.game.handleHarassmentPipelineChoiceResponse(socket.id, data.choice);
 
       if (result.success) {
-        // 广播游戏状态更新
         this.broadcastGameState(room.id, room.game.getState());
       }
 
@@ -1598,6 +1628,51 @@ export class SocketServer {
 
     const state = game.getState();
     if (state.phase !== 'playing') return;
+
+    const pcPipe = (state as any).pendingChoice;
+    if (pcPipe?.type === 'harassmentPipelineChoice') {
+      const rid = pcPipe.playerId as string;
+      if (this.aiManager.isAI(rid) || game.isOfflineHostedPlayer(rid)) {
+        this.aiTurnBusy.add(roomId);
+        try {
+          const opts: string[] = pcPipe.options || [];
+          const opt0 = String(opts[0] ?? '');
+          let choice = 0;
+          if (opt0.includes('弃置1张手牌')) {
+            const opp = game.getPlayer(rid);
+            choice = opp && opp.hand.length > 0 ? 0 : 1;
+          } else if (pcPipe.meta?.wangliangTargetId != null) {
+            const tid = pcPipe.meta.wangliangTargetId as string;
+            choice = tid === rid ? 0 : 1;
+          } else if (
+            opts.length === 2 &&
+            opts[0] === '基础术式' &&
+            opts[1] === '招福达摩'
+          ) {
+            choice = 0;
+          } else if (opts.some(o => String(o).startsWith('弃置「')) && opts.length >= 2) {
+            const { aiDecide_雪幽魂 } = await import(
+              '../../../shared/game/effects/YokaiEffects'
+            );
+            const opp = game.getPlayer(rid);
+            if (opp) {
+              const penalties = opp.hand.filter((c: { cardType?: string }) => c.cardType === 'penalty');
+              const pickId = aiDecide_雪幽魂(penalties as any);
+              const ix = opts.findIndex(o => {
+                const m = String(o).match(/弃置「(.+)」/);
+                const card = penalties.find((p: { name?: string }) => p.name === m?.[1]);
+                return card?.instanceId === pickId;
+              });
+              choice = ix >= 0 ? ix : 0;
+            }
+          }
+          game.handleHarassmentPipelineChoiceResponse(rid, choice);
+        } finally {
+          this.aiTurnBusy.delete(roomId);
+        }
+        return;
+      }
+    }
 
     const cur = state.players[state.currentPlayerIndex];
     const isSeatAI = this.aiManager.isAI(cur.id);

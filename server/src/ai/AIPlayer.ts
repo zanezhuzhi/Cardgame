@@ -139,7 +139,10 @@ export class AIPlayer {
    */
   private getPlayableCards(player: PlayerState, _field: FieldState): CardInstance[] {
     return player.hand.filter(
-      c => c.cardType !== 'token' && c.cardType !== 'penalty'
+      c =>
+        c.cardType !== 'token' &&
+        c.cardType !== 'penalty' &&
+        c.name !== '恶评'
     );
   }
   

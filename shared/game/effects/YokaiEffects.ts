@@ -3,6 +3,8 @@
  * 实现38种妖怪的御魂效果
  */
 
+import { applyNetCutterToField as applyNetCutterFieldBuff } from '../netCutterField';
+
 // 直接定义需要的类型接口（避免模块解析问题）
 interface CardInstance {
   instanceId: string;
@@ -901,7 +903,7 @@ export function aiDecide_轮入道(card: CardInstance, context?: { ghostFire?: n
     '伤魂鸟': Math.min(handCount, 4),  // 需超度大量手牌才有高伤害
     '地藏像': 2,      // 需超度自身，获取2式神（消耗大但式神价值高）
     '网切': 2,        // 状态效果不叠加
-    '三味': 2,        // 执行两次只是添加两个buff
+    '三味': 2,        // 轮入道×2：实时伤害结算两次，按当时 played 计数
     '招福达摩': 0,    // 不可打出/无效果
   };
   
@@ -933,28 +935,7 @@ export function aiSelect_轮入道(
 // 设计文档: 状态存储在 gameState.field 级别（影响全局），覆盖不叠加
 registerEffect('网切', async (ctx) => {
   const { gameState, player } = ctx;
-  
-  // 确保 field.tempBuffs 存在
-  if (!gameState.field.tempBuffs) {
-    gameState.field.tempBuffs = [];
-  }
-  
-  // 移除已存在的网切效果（避免叠加，实现覆盖）
-  gameState.field.tempBuffs = gameState.field.tempBuffs.filter(
-    (buff: any) => buff.type !== 'NET_CUTTER_HP_REDUCTION'
-  );
-  
-  // 添加新的网切效果（field级别）
-  gameState.field.tempBuffs.push({
-    type: 'NET_CUTTER_HP_REDUCTION',
-    yokaiHpModifier: -1,
-    bossHpModifier: -2,
-    minHp: 1,
-    expiresAt: 'endOfTurn',
-    sourcePlayerId: player.id,
-    source: '网切'
-  });
-  
+  applyNetCutterFieldBuff(gameState.field, { sourcePlayerId: player.id });
   return { success: true, message: '网切：本回合所有妖怪HP-1，鬼王HP-2' };
 });
 
@@ -1711,21 +1692,14 @@ registerEffect('三味', async (ctx) => {
     }
   }
   
-  // 2. 即时伤害加成
+  // 2. 即时伤害加成（仅打出时按已打出区统计一次，无后续 SPELL_DAMAGE_BONUS）
   const immediateDamage = ghostFireCount * 2;
   player.damage += immediateDamage;
-  
-  // 3. 添加buff用于之后使用阴阳术的伤害加成
-  player.tempBuffs.push({
-    type: 'SPELL_DAMAGE_BONUS' as any,
-    value: 2,
-    duration: 1,
-    source: '三味'
-  } as any);
-  
-  const msg = ghostFireCount > 0 
-    ? `三味：已用${ghostFireCount}张鬼火牌/阴阳术，伤害+${immediateDamage}，之后每使用阴阳术再+2`
-    : '三味：本回合每使用阴阳术伤害+2';
+
+  const msg =
+    ghostFireCount > 0
+      ? `三味：已用${ghostFireCount}张御魂(鬼火)/阴阳术，伤害+${immediateDamage}`
+      : '三味：本回合尚无符合条件的已打出牌，伤害+0';
   
   return { success: true, message: msg, damage: immediateDamage };
 });
@@ -1843,7 +1817,7 @@ export const YOKAI_EFFECT_DEFS: YokaiEffectDef[] = [
   { cardId: 'yokai_035', cardName: '伤魂鸟', effects: [] },  // 特殊：超度X张伤害+2X
   { cardId: 'yokai_036', cardName: '阴摩罗', effects: [{ type: 'RECOVER_FROM_DISCARD' }] },
   { cardId: 'yokai_037', cardName: '青女房', effects: [{ type: 'DRAW', count: 2 }, { type: 'GHOST_FIRE', value: 1 }] },
-  { cardId: 'yokai_038', cardName: '三味', effects: [{ type: 'TEMP_BUFF', buffType: 'SPELL_DAMAGE_BONUS', value: 2 }] },
+  { cardId: 'yokai_038', cardName: '三味', effects: [] }, // 实时统计 played，无 TEMP_BUFF
 ];
 
 /** 根据卡牌ID获取效果定义 */

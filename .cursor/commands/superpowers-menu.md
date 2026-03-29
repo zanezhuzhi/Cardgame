@@ -1,4 +1,4 @@
----
+![1774777647116](image/superpowers-menu/1774777647116.png)---
 description: Superpowers 技能菜单（14 项索引 + 子代理 code-reviewer）
 ---
 

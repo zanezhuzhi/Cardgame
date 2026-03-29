@@ -44,11 +44,22 @@ Cardgame/
 │           ├── ShikigamiSkills.test.ts # 式神技能测试
 │           ├── BossEffects.test.ts   # 鬼王效果测试
 │           ├── EffectEngine.test.ts  # 效果引擎测试
-│           └── EffectiveHP.test.ts   # HP系统测试
+│           ├── EffectiveHP.test.ts   # HP系统测试
+│           └── AIDecision.test.ts    # aiDecide_* 纯函数
 ├── server/
 │   └── src/
 │       └── game/
-│           └── MultiplayerGame.test.ts # 服务端游戏逻辑测试
+│           ├── __tests__/
+│           │   ├── multiplayerTestHarness.ts   # MultiplayerGame + handleAction 封装
+│           │   ├── multiplayerHarness.test.ts
+│           │   ├── MultiplayerGame.interaction.test.ts # pendingChoice 响应链
+│           │   ├── gameFlow.integration.test.ts  # 纯 GameState 契约（非实例）
+│           │   ├── gameFlow.multiplayer.test.ts # MultiplayerGame 真实例流程
+│           │   └── yokaiEffects.integration.test.ts
+│           ├── MultiplayerGame.test.ts
+│           └── ...
+│       └── socket/
+│           └── socket.smoke.test.ts      # 进程内 socket.io 烟囱
 └── client/
     └── src/
         └── __tests__/                # 客户端测试(待建设)
@@ -63,9 +74,9 @@ Cardgame/
 | 数据一致性 | ✅ 良好 | 150+ |
 | HP系统 | ✅ 良好 | 28 |
 | 牌库管理 | ✅ 良好 | 12 |
-| 服务端游戏逻辑 | 🟡 薄弱 | <10 |
-| Socket事件 | 🔴 缺失 | 0 |
-| AI决策 | 🔴 缺失 | 0 |
+| 服务端游戏逻辑（MultiplayerGame、Socket 烟囱） | 🟢 加强中 | 以 `cd server && npm test` 统计为准 |
+| Socket事件 | 🟡 烟囱级 | 少量进程内 io 用例 |
+| AI决策（aiDecide_* 纯函数） | 🟢 已起步 | AIDecision.test.ts |
 | 客户端网络 | 🔴 缺失 | 0 |
 
 ---
@@ -358,8 +369,12 @@ expect(interactCount).toBe(2);
 - Socket 事件处理
 - 状态同步
 
+**服务端「真集成」约定**（与 `gameFlow.integration` 区分）:
+- **协议级集成测试**应尽可能经过 **`MultiplayerGame` 的公开动作入口**（`handleAction`、`handlePlayCard` 路径、以及各 `handle*Response`），或使用 `game/__tests__/multiplayerTestHarness.ts` 封装，避免仅用裸 `GameState` 改写导致与服务端分支脱钩。
+- **例外**：纯状态不变量、数据工厂、与房间无关的 **`GameState` 契约**可保留在 `gameFlow.integration.test.ts` 等文件中，但须在文件头明确标注「非 MultiplayerGame 行为集成」。
+
 **特点**:
-- 可能需要 Mock Socket
+- 可能需要 Mock Socket（或以内存 `socket.io` 起停做烟囱用例）
 - 验证完整的请求-响应链
 - 关注状态一致性
 
@@ -382,8 +397,11 @@ expect(interactCount).toBe(2);
 ```bash
 # === 运行测试 ===
 
-# 运行所有测试
+# 运行所有测试（或仓库根目录一键）
 cd shared && npm test
+
+# 根目录顺序跑 shared + server（若已配置 npm script test:all）
+# npm run test:all
 
 # 运行指定文件
 cd shared && npm test -- YokaiEffects
@@ -402,6 +420,9 @@ cd shared && npm run test:coverage
 
 cd server && npm test
 cd server && npm test -- MultiplayerGame
+
+# 仓库根目录（shared 与 server 顺序执行）
+# npm run test:all
 ```
 
 ### 6.2 Vitest 配置

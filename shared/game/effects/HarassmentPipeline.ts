@@ -178,33 +178,39 @@ async function resolveForSingleTarget(
     applied: false,
   };
 
-  // 依次执行抵抗链
-  for (const handler of resistHandlers) {
-    if (!handler.canResist(target, ctx)) continue;
+  const prevSubject = ctx.harassmentResistSubject;
+  ctx.harassmentResistSubject = target;
+  try {
+    // 依次执行抵抗链
+    for (const handler of resistHandlers) {
+      if (!handler.canResist(target, ctx)) continue;
 
-    const resistResult = await handler.resolve(target, ctx);
+      const resistResult = await handler.resolve(target, ctx);
 
-    // 收集前置效果日志
-    result.preEffectLogs.push(...resistResult.preEffectLogs);
-    logs.push(...resistResult.preEffectLogs);
+      // 收集前置效果日志
+      result.preEffectLogs.push(...resistResult.preEffectLogs);
+      logs.push(...resistResult.preEffectLogs);
 
-    if (resistResult.immune) {
-      result.immune = true;
-      result.immuneSource = handler.id;
-      logs.push(`🛡️ ${target.name}：${handler.id} — 完全免疫妨害`);
-      break; // 完全免疫，跳过后续抵抗和妨害执行
+      if (resistResult.immune) {
+        result.immune = true;
+        result.immuneSource = handler.id;
+        logs.push(`🛡️ ${target.name}：${handler.id} — 完全免疫妨害`);
+        break; // 完全免疫，跳过后续抵抗和妨害执行
+      }
+      // 非免疫（如花鸟卷/食梦貘）：记录前置效果，继续后续处理
     }
-    // 非免疫（如花鸟卷/食梦貘）：记录前置效果，继续后续处理
-  }
 
-  // 未免疫 → 执行妨害
-  if (!result.immune) {
-    await action.applyToTarget(target, ctx);
-    result.applied = true;
-    logs.push(`💥 ${target.name}：受到 ${action.sourceSkillName} 妨害`);
-  }
+    // 未免疫 → 执行妨害（apply 阶段仍携带 subject，便于回调识别「当前受影响玩家」）
+    if (!result.immune) {
+      await action.applyToTarget(target, ctx);
+      result.applied = true;
+      logs.push(`💥 ${target.name}：受到 ${action.sourceSkillName} 妨害`);
+    }
 
-  return result;
+    return result;
+  } finally {
+    ctx.harassmentResistSubject = prevSubject;
+  }
 }
 
 // ============ 首次妨害追踪 ============

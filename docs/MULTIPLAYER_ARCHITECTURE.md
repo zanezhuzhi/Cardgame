@@ -404,4 +404,55 @@ CREATE TABLE game_players (
 
 ---
 
+## 七、妨害抵抗管线统一接入（规划）
+
+> 目标：`shared/game/EffectClassification.ts` 中 **`HARASSMENT_CARDS`** 所列御魂/式神妨害，在 **多人服务端** 结算时 **统一** 经过 `shared/game/effects/HarassmentPipeline.ts` 的抵抗链（青女房 → 铮 → 萤草种子 → 花鸟卷 → 食梦貘沉睡…），避免出现「策划/单测有管线、线上 switch-case 绕开」的双轨问题。
+
+### 7.1 现状
+
+| 层级 | 状态 |
+|------|------|
+| **分类真相源** | `HARASSMENT_CARDS`：赤舌、魅妖、雪幽魂、魍魉之匣、返魂香、镇墓兽、飞缘魔、幽谷响 + 百目鬼/般若/巫蛊师/丑时之女/铁鼠 等 |
+| **管线实现** | `resolveHarassment` + `registerResistHandler`，依赖 `SkillContext.onChoice` |
+| **多人服务端** | `MultiplayerGame` 大量 **手写** `[妨害]` 分支；**返魂香** 已走 `resolveHarassment` + `harassmentPipelineChoice`；其余妨害仍可能跳过管线 |
+| **根因** | 未调用 `resolveHarassment`；`buildSkillContext` 中 `onChoice` 为占位；`onChoice` 未绑定 **被询问的 `playerId`**（抵抗方 ≠ 出牌方） |
+
+### 7.2 目标架构（单轨）
+
+1. **Shared（管线契约）**  
+   - 在 `resolveForSingleTarget` 进入抵抗链 **前**，将当前 `target` 挂到 `SkillContext`（建议字段：`harassmentResistSubject?: PlayerState` 或仅 `harassmentResistSubjectId: string`），使 `onChoice` 实现者知道「弹窗归属谁」。  
+   - 可选：新增显式 API `onChoiceForPlayer(playerId, options, prompt)`，默认实现回退到 `harassmentResistSubject`。
+
+2. **Server（MultiplayerGame）**  
+   - 提供 **`buildSkillContextForHarassment(sourcePlayer: PlayerState)`**：注入真实 `onChoice`：设 `pendingChoice`（通用 `harassmentPipelineChoice` 或复用 `choiceModal` 协议）、**阻塞侧** 用 `Promise` + 内部 `Map<requestId, resolve>` 或与现有 `handleXxxResponse` 对接的 **单槽 continuation**（与当前 `pendingChoice` 模型一致）。  
+   - 提供 **`applyHarassmentToOpponents(source, cardName, targets, applyToTarget)`**：内部 `await resolveHarassment(createHarassmentAction(...), targets, ctx)`。  
+   - **Socket**：一种通用 `game:harassmentPipelineChoiceResponse`（或按类型分事件，但参数统一 `{ choiceIndex }`），避免每种妨害单独加 socket。  
+   - **AI**：`runAiTurnStep` 对 `pendingChoice.playerId !== currentPlayer` 的管线类 pending **按策略代答**（与现 `fanHunXiangChoice` / `harassmentHandResist` 规则一致）。
+
+3. **Client**  
+   - `App.vue`：监听统一 pending 类型，复用 `choiceModal`；若管线需选卡/多目标，再挂 `onSelectCards` 等与 `SkillContext` 对齐。
+
+### 7.3 迁移顺序（建议）
+
+按 **对手循环结构** 与 **依赖交互** 复杂度分批替换手写循环，每批带 **集成测试**（铮免疫 + 青女房免疫 + 不弃置后仍吃满妨害）：
+
+| 批次 | 内容 | 备注 |
+|:----:|------|------|
+| **0** | Shared：`SkillContext.harassmentResistSubject` + `resolveForSingleTarget` try/finally 注入/恢复 | ✅ 已合并：`shared/types/shikigami.ts`、`HarassmentPipeline.ts`；单测覆盖 apply/onChoice 期间 subject 与结束后清空 |
+| **1** | 返魂香：`resolveHarassment` + `buildSkillContextForHarassment` + `handleHarassmentPipelineChoiceResponse` | ✅ 已合并（`harassmentPipelineChoice` / 旧 socket 兼容转发） |
+| **2** | **每名对手同质** 的妨害：雪幽魂式（弃恶评/恶评）、魍魉之匣（恶评）、简单 foreach | ✅ 已合并：`startXueYouHunHarassment` / `startWangliangHarassment`（魍魉由**发动者** `waitHarassmentPipelineChoice` + `meta.wangliangTargetId`；弃顶仍 `deck.pop` 与旧版一致） |
+| **3** | **强交互**：赤舌、魅妖、幽谷响（牌库顶/多选）、镇墓兽、飞缘魔 | ✅ 赤舌 / 魅妖（选牌后）/ 幽谷响（申报后、含 AI 路径）已走 `resolveHarassment`；**镇墓兽**（左手指定禁退治）、**飞缘魔**（鬼王魂嵌套）仍未统一管线 |
+| **4** | **式神技能妨害**（百目鬼/般若/巫蛊师/丑时之女/铁鼠） | 入口从 `ShikigamiSkillEngine` 或 `MultiplayerGame` 技能分支统一调到 `applyHarassmentToOpponents` |
+
+### 7.4 测试与验收
+
+- **清单驱动**：以 `HARASSMENT_CARDS` 与 `BOSS_RAID_EFFECTS`（若来袭也要统一「展示青女房」）为 checklist，每项至少：**免疫成功**、**拒绝抵抗后结算正确**、**AI 不卡死**。  
+- **回归**：`server` 下现有 `fanHunXiangResist.integration.test.ts` 扩展或并行增加 `harassmentPipeline.multiplayer.test.ts`。
+
+### 7.5 已知技术债（管线内）
+
+- `HarassmentPipeline` 中花鸟卷 **置顶手牌** 仍为 TODO（自动选牌）；统一接入多人时，应优先接 `onSelectCards` 以免与「统一 SkillContext」目标冲突。
+
+---
+
 **下一步建议**：完成 Phase 2（游戏同步），让多人对战可以正常进行，再考虑账号系统。

@@ -698,6 +698,29 @@ describe('HarassmentPipeline', () => {
         savedHandlers.forEach(h => registerResistHandler(h));
       }
     });
+
+    it('🟢 applyToTarget 期间 ctx.harassmentResistSubject 为当前目标，管线结束后清除', async () => {
+      const savedHandlers = [...getResistHandlers()];
+      clearResistHandlers();
+      try {
+        const target1 = createTestPlayer({ id: 't1', name: '目标1' });
+        const target2 = createTestPlayer({ id: 't2', name: '目标2' });
+        const seen: string[] = [];
+
+        const action = createHarassmentAction('p1', '百目鬼', async (_target, c) => {
+          seen.push(c.harassmentResistSubject!.id);
+        });
+
+        const ctx = createTestContext();
+        expect(ctx.harassmentResistSubject).toBeUndefined();
+        await resolveHarassment(action, [target1, target2], ctx);
+        expect(seen).toEqual(['t1', 't2']);
+        expect(ctx.harassmentResistSubject).toBeUndefined();
+      } finally {
+        clearResistHandlers();
+        savedHandlers.forEach(h => registerResistHandler(h));
+      }
+    });
   });
 
   describe('青女房抵抗（展示免疫）', () => {
@@ -714,8 +737,16 @@ describe('HarassmentPipeline', () => {
       });
 
       // onChoice 返回 0 = 选择展示青女房
-      const ctx = createTestContext({ onChoice: async () => 0 });
+      let subjectDuringChoice: string | undefined;
+      const ctx = createTestContext({
+        onChoice: async () => {
+          subjectDuringChoice = ctx.harassmentResistSubject?.id;
+          return 0;
+        },
+      });
       const result = await resolveHarassment(action, [target], ctx);
+      expect(subjectDuringChoice).toBe('t1');
+      expect(ctx.harassmentResistSubject).toBeUndefined();
 
       expect(result.affectedCount).toBe(0);
       expect(result.targets[0]!.immune).toBe(true);

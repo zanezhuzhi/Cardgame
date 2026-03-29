@@ -189,6 +189,8 @@ export interface WheelMonkQueue {
     cardName: string;
     /** 被弃置的御魂卡牌ID */
     cardId: string;
+    /** 被弃置的御魂实例（pending 左侧「来源」等为轮入道替身效果用） */
+    sourceCard?: CardInstance;
     /** 剩余执行次数（初始值2） */
     remainingExecutions: number;
     /** 执行玩家ID */

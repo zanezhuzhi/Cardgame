@@ -10,7 +10,7 @@
  *  - 带计数上限的 Buff（如山童怪力）用 remainingCount 控制剩余触发次数
  *  - GameManager 读取 Buff 后若 remainingCount 归零则自动移除
  */
-export type TempBuffType = 'DAMAGE_BONUS' | 'SHIKIGAMI_SKILL_DAMAGE_BONUS' | 'SPELL_DAMAGE_BONUS' | 'EXILE_KILL_DAMAGE' | 'FIRST_NON_FEMALE_DAMAGE' | 'LINKED_TARGET_DAMAGE' | 'GHOST_FIRE_BONUS' | 'NEXT_YOKAI_DOUBLE' | 'FIRST_KILL_TO_HAND' | 'DISCARD_FOR_DAMAGE' | 'SKIP_CLEANUP';
+export type TempBuffType = 'DAMAGE_BONUS' | 'SHIKIGAMI_SKILL_DAMAGE_BONUS' | 'SPELL_DAMAGE_BONUS' | 'EXILE_KILL_DAMAGE' | 'FIRST_NON_FEMALE_DAMAGE' | 'LINKED_TARGET_DAMAGE' | 'GHOST_FIRE_BONUS' | 'NEXT_YOKAI_DOUBLE' | 'FIRST_KILL_TO_HAND' | 'DISCARD_FOR_DAMAGE' | 'SKIP_CLEANUP' | 'SKILL_COST_REDUCTION' | 'HARASS_COUNT' | 'EXTRA_TURN' | 'DRAW_BONUS' | 'KACHOU_RESIST_USED' | 'USHI_HARASS_REWARD' | 'SLEEP_STATE' | 'YUMEKUI_DREAM_SHIELD' | 'SKILL_DAMAGE_PER_FIRE' | 'KILL_DRAW_BONUS' | 'IMMUNITY_HARASSMENT';
 export interface BaseTempBuff {
     type: TempBuffType;
     sourceCardId?: string;
@@ -64,7 +64,63 @@ export interface DiscardForDamageBuff extends BaseTempBuff {
 export interface SkipCleanupBuff extends BaseTempBuff {
     type: 'SKIP_CLEANUP';
 }
-export type TempBuff = DamageBonusBuff | ShikigamiSkillDamageBuff | SpellDamageBuff | ExileKillDamageBuff | FirstNonFemaleDamageBuff | LinkedTargetDamageBuff | GhostFireBonusBuff | NextYokaiDoubleBuff | FirstKillToHandBuff | DiscardForDamageBuff | SkipCleanupBuff;
+/** 式神技能鬼火消耗减少（涅槃之火） */
+export interface SkillCostReductionBuff extends BaseTempBuff {
+    type: 'SKILL_COST_REDUCTION';
+    value: number;
+    source?: string;
+}
+/** 本回合妨害次数追踪（HarassmentPipeline 内部使用） */
+export interface HarassCountBuff extends BaseTempBuff {
+    type: 'HARASS_COUNT';
+    value: number;
+}
+/** 额外回合（追月神觉醒技） */
+export interface ExtraTurnBuff extends BaseTempBuff {
+    type: 'EXTRA_TURN';
+}
+/** 本回合抓牌额外+N */
+export interface DrawBonusBuff extends BaseTempBuff {
+    type: 'DRAW_BONUS';
+    bonus: number;
+    remainingCount: number;
+}
+/** 花鸟卷抵抗已使用标记（每回合限1次） */
+export interface KachouResistUsedBuff extends BaseTempBuff {
+    type: 'KACHOU_RESIST_USED';
+}
+/** 丑时之女：首次妨害时抓牌+1 */
+export interface UshiHarassRewardBuff extends BaseTempBuff {
+    type: 'USHI_HARASS_REWARD';
+    drawBonus: number;
+    triggered: boolean;
+}
+/** 食梦貘沉睡状态标记 */
+export interface SleepStateBuff extends BaseTempBuff {
+    type: 'SLEEP_STATE';
+}
+/** 食梦貘梦境保护（沉睡中受妨害弃牌触发） */
+export interface YumekuiDreamShieldBuff extends BaseTempBuff {
+    type: 'YUMEKUI_DREAM_SHIELD';
+    discardCount: number;
+}
+/** 按鬼火数加伤（书翁墨龙） */
+export interface SkillDamagePerFireBuff extends BaseTempBuff {
+    type: 'SKILL_DAMAGE_PER_FIRE';
+    damagePerFire: number;
+    firePaid: number;
+}
+/** 退治妖怪时抓牌（山兔蹦跳） */
+export interface KillDrawBonusBuff extends BaseTempBuff {
+    type: 'KILL_DRAW_BONUS';
+    drawCount: number;
+    remainingCount: number;
+}
+/** 妨害完全免疫（青女房展示后的标记） */
+export interface ImmunityHarassmentBuff extends BaseTempBuff {
+    type: 'IMMUNITY_HARASSMENT';
+}
+export type TempBuff = DamageBonusBuff | ShikigamiSkillDamageBuff | SpellDamageBuff | ExileKillDamageBuff | FirstNonFemaleDamageBuff | LinkedTargetDamageBuff | GhostFireBonusBuff | NextYokaiDoubleBuff | FirstKillToHandBuff | DiscardForDamageBuff | SkipCleanupBuff | SkillCostReductionBuff | HarassCountBuff | ExtraTurnBuff | DrawBonusBuff | KachouResistUsedBuff | UshiHarassRewardBuff | SleepStateBuff | YumekuiDreamShieldBuff | SkillDamagePerFireBuff | KillDrawBonusBuff | ImmunityHarassmentBuff;
 export declare class TempBuffManager {
     private buffs;
     constructor(initial?: TempBuff[]);
@@ -134,6 +190,12 @@ export declare class TempBuffManager {
     triggerFirstKillToHand(targetHp: number): boolean;
     /** 是否需要跳过清理阶段（食梦貘） */
     shouldSkipCleanup(): boolean;
+    /**
+     * 获取式神技能消耗减少量（涅槃之火）
+     * 多张叠加时累加所有 value
+     * @returns 总减少量（用于计算实际消耗 = 原消耗 - 返回值，最低为 0）
+     */
+    getSkillCostReduction(): number;
     /** 序列化（用于状态同步） */
     toJSON(): TempBuff[];
     /** 从序列化数据恢复 */

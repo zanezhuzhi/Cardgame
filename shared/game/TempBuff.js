@@ -179,6 +179,15 @@ class TempBuffManager {
     shouldSkipCleanup() {
         return this.has('SKIP_CLEANUP');
     }
+    /**
+     * 获取式神技能消耗减少量（涅槃之火）
+     * 多张叠加时累加所有 value
+     * @returns 总减少量（用于计算实际消耗 = 原消耗 - 返回值，最低为 0）
+     */
+    getSkillCostReduction() {
+        const buffs = this.get('SKILL_COST_REDUCTION');
+        return buffs.reduce((sum, b) => sum + b.value, 0);
+    }
     // ── 序列化 ──────────────────────────────────────────────────────
     /** 序列化（用于状态同步） */
     toJSON() {

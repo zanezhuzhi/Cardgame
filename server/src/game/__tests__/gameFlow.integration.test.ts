@@ -1,8 +1,12 @@
 /**
- * 游戏流程集成测试
+ * 游戏流程「状态契约」练习（非 MultiplayerGame 集成）
  * @file server/src/game/__tests__/gameFlow.integration.test.ts
- * 
- * 验证点：
+ *
+ * ⚠️ 本文件大量用例直接构造/修改 `GameState`，不经过 `MultiplayerGame.handleAction` /
+ * `handlePlayCard`。意图是验证状态不变量与手工模拟流程；与服务端真实分支对齐的用例见
+ * `gameFlow.multiplayer.test.ts`、`yokaiEffects.integration.test.ts`、`MultiplayerGame.interaction.test.ts`。
+ *
+ * 历史验证点（保留）：
  * 1. 回合流转（鬼火阶段 → 行动阶段 → 清理阶段 → 下一玩家）
  * 2. 出牌操作处理
  * 3. 结束回合逻辑

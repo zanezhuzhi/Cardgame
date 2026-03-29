@@ -1,0 +1,157 @@
+/* 御魂传说 - 设计令牌（Design Tokens） */
+/* 版本：v1.0.0 */
+/* 用途：统一全局变量，确保UI一致性 */
+
+:root {
+  /* ==================== 配色系统 ==================== */
+  
+  /* 主色调 - 日式和风深色背景 */
+  --bg-primary: #1a1a2e;          /* 主背景 - 深色底 */
+  --bg-secondary: #2d1f3d;       /* 次背景 - 紫色调 */
+  --bg-tertiary: #1e3a5f;         /* 三级背景 - 蓝色调 */
+  
+  /* 金色系 - 边框和高亮 */
+  --gold-border: #d4a574;        /* 金色边框（主要） */
+  --gold-bright: #ffd700;         /* 亮金色（高亮） */
+  --gold-dark: #b8860b;           /* 暗金色（渐变） */
+  --gold-gradient: linear-gradient(135deg, #d4a574, #8b6914, #d4a574);
+  
+  /* 功能色 */
+  --sakura-pink: #ffb7c5;         /* 樱花粉 - 装饰、标题 */
+  --ghost-fire-blue: #4fc3f7;     /* 鬼火蓝 - 鬼火图标 */
+  --damage-red: #ff6b6b;          /* 伤害红 - 伤害数值、受伤状态 */
+  --life-green: #81c784;          /* 生命绿 - 可击杀状态 */
+  --charm-gold: #ffc107;          /* 声誉金 - 声誉值 */
+  
+  /* 面板与玻璃态 */
+  --panel-bg: rgba(45, 31, 61, 0.85);     /* 面板背景 - 磨砂玻璃 */
+  --panel-border: rgba(212, 165, 116, 0.5);  /* 面板边框 - 半透明金色 */
+  --panel-glass: rgba(255, 255, 255, 0.05);  /* 玻璃态光效 */
+  
+  /* 卡牌类型色 */
+  --card-spell-bg: linear-gradient(145deg, #1565c0, #0d47a1);
+  --card-spell-border: #42a5f5;
+  
+  --card-yokai-bg: linear-gradient(145deg, #2e7d32, #1b5e20);
+  --card-yokai-border: #66bb6a;
+  
+  --card-token-bg: linear-gradient(145deg, #ef6c00, #e65100);
+  --card-token-border: #ffb74d;
+  
+  --card-penalty-bg: linear-gradient(145deg, #455a64, #37474f);
+  --card-penalty-border: #78909c;
+  
+  --card-boss-bg: linear-gradient(145deg, #6a1b9a, #4a148c);
+  --card-boss-border: #ab47bc;
+  
+  /* ==================== 间距系统（8点基准）==================== */
+  --space-xs: 4px;    /* 微间距 - 图标与文字 */
+  --space-sm: 8px;    /* 小间距 - 组件内元素 */
+  --space-md: 16px;   /* 中间距 - 组件之间 */
+  --space-lg: 24px;   /* 大间距 - 区块之间 */
+  --space-xl: 32px;   /* 超大间距 - 区块组 */
+  --space-2xl: 48px;  /* 超级大间距 - 页面级 */
+  
+  /* ==================== 卡牌尺寸 ==================== */
+  --card-hand-width: 120px;   /* 手牌宽度 */
+  --card-hand-height: 170px;  /* 手牌高度 */
+  --card-yokai-width: 100px;  /* 妖怪卡宽度 */
+  --card-yokai-height: 140px; /* 妖怪卡高度 */
+  --card-shiki-width: 80px;   /* 式神卡宽度 */
+  --card-shiki-height: 110px; /* 式神卡高度 */
+  --card-boss-width: 140px;   /* 鬼王卡宽度 */
+  --card-boss-height: 200px;  /* 鬼王卡高度 */
+  
+  /* ==================== 圆角系统 ==================== */
+  --radius-sm: 4px;   /* 小圆角 - 标签 */
+  --radius-md: 8px;   /* 中圆角 - 按钮、面板 */
+  --radius-lg: 12px;  /* 大圆角 - 弹窗 */
+  --radius-xl: 16px;  /* 超大圆角 - 大厅卡片 */
+  --radius-full: 50%; /* 完全圆角 - 头像 */
+  
+  /* ==================== 字体系统 ==================== */
+  --font-family-base: 'Microsoft YaHei', 'Hiragino Sans GB', sans-serif;
+  --font-family-title: 'Microsoft YaHei', 'Hiragino Sans GB', sans-serif;
+  
+  --font-size-xs: 10px;   /* 微小文字 - 标签 */
+  --font-size-sm: 11px;   /* 小文字 - 辅助信息 */
+  --font-size-base: 12px; /* 基础文字 - 正文 */
+  --font-size-md: 14px;   /* 中等文字 - 标题 */
+  --font-size-lg: 16px;   /* 大文字 - 卡牌名称 */
+  --font-size-xl: 20px;   /* 超大文字 - 弹窗标题 */
+  --font-size-2xl: 24px;  /* 巨大文字 - 页面标题 */
+  --font-size-3xl: 32px;  /* 超级巨大 - 主标题 */
+  
+  /* ==================== 阴影系统 ==================== */
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 10px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 8px 25px rgba(0, 0, 0, 0.4);
+  --shadow-xl: 0 12px 40px rgba(0, 0, 0, 0.5);
+  
+  /* 金色发光阴影 */
+  --shadow-gold-sm: 0 2px 8px rgba(212, 165, 116, 0.3);
+  --shadow-gold-md: 0 4px 15px rgba(212, 165, 116, 0.4);
+  --shadow-gold-lg: 0 6px 25px rgba(212, 165, 116, 0.5);
+  
+  /* ==================== 过渡动画 ==================== */
+  --transition-fast: 150ms ease-out;       /* 快速过渡 - 点击反馈 */
+  --transition-base: 200ms ease-out;      /* 基础过渡 - 悬停 */
+  --transition-slow: 300ms ease-in-out;    /* 慢速过渡 - 页面切换 */
+  --transition-slower: 500ms ease-in-out; /* 超慢过渡 - 动画 */
+  
+  /* ==================== Z-index 层级 ==================== */
+  --z-base: 0;          /* 基础层 - 背景 */
+  --z-panel: 10;        /* 面板层 - 普通面板 */
+  --z-dropdown: 20;     /* 下拉层 - 下拉菜单 */
+  --z-tooltip: 100;     /* 提示层 - 悬浮提示 */
+  --z-modal: 1000;      /* 弹窗层 - 模态框 */
+  --z-overlay: 9999;    /* 遮罩层 - 全屏遮罩 */
+  
+  /* ==================== 组件尺寸 ==================== */
+  --avatar-size: 48px;           /* 玩家头像尺寸 */
+  --avatar-size-sm: 32px;        /* 小头像尺寸 */
+  --avatar-size-lg: 64px;        /* 大头像尺寸 */
+  
+  --btn-height: 44px;            /* 按钮高度 */
+  --btn-height-sm: 32px;         /* 小按钮高度 */
+  --btn-height-lg: 52px;         /* 大按钮高度 */
+  
+  --input-height: 44px;          /* 输入框高度 */
+  
+  /* ==================== 状态颜色 ==================== */
+  --color-normal: rgba(255, 255, 255, 1);
+  --color-disabled: rgba(255, 255, 255, 0.4);
+  --color-hover: rgba(255, 255, 255, 0.8);
+  
+  --color-success: #81c784;
+  --color-warning: #ffc107;
+  --color-error: #ff6b6b;
+  --color-info: #4fc3f7;
+  
+  /* ==================== 布局断点 ==================== */
+  --breakpoint-mobile: 768px;
+  --breakpoint-tablet: 1024px;
+  --breakpoint-desktop: 1280px;
+  
+  /* ==================== 游戏特定 ==================== */
+  --hp-bar-height: 6px;
+  --damage-number-size: 24px;
+  --charm-badge-size: 18px;
+}
+
+/* ==================== 暗色主题（可选）==================== */
+[data-theme="dark"] {
+  --bg-primary: #0d0d1a;
+  --bg-secondary: #1a1225;
+  --bg-tertiary: #122035;
+}
+
+/* ==================== 浅色主题（可选）==================== */
+[data-theme="light"] {
+  --bg-primary: #f5f5f5;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e8e8e8;
+  
+  /* 在浅色主题中，文字颜色需要反转 */
+  /* 注意：这只是一个示例，实际使用需要更完整的色彩调整 */
+}

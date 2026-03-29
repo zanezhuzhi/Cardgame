@@ -137,7 +137,15 @@
             <div class="boss-info">
               <div class="boss-name">{{boss.name}}</div>
               <div class="boss-stat">
-                <span :class="{'hp-damaged': state?.field.bossCurrentHp < boss.hp}">❤️{{state?.field.bossCurrentHp}}/{{boss.hp}}</span>
+                <span class="skill-cost-display field-hp-wrap" :class="{'hp-damaged': displayBossCurrentHp < displayBossMaxHp}">
+                  <template v-if="showBossHpNetCutterStrike">
+                    <span class="cost-original">❤️{{bossHpRawCurrent}}/{{bossHpRawMax}}</span>
+                    <span class="cost-reduced">❤️{{displayBossCurrentHp}}/{{displayBossMaxHp}}</span>
+                  </template>
+                  <template v-else>
+                    ❤️{{displayBossCurrentHp}}/{{displayBossMaxHp}}
+                  </template>
+                </span>
                 <span>👑{{boss.charm||0}}</span>
               </div>
             </div>
@@ -163,6 +171,9 @@
               <span class="countdown-icon">⏱️</span>
               <span class="countdown-text">回合倒计时：{{ turnCountdownDisplay }}</span>
               <div v-if="turnCountdownMax > 0" class="countdown-progress" :style="{ width: (turnCountdown / turnCountdownMax * 100) + '%' }"></div>
+              <div v-if="multiplayerWaitingForOffTurnFeedback" class="off-turn-wait-hint">
+                等待其他玩家响应…（本回合计时尚未消耗）
+              </div>
             </div>
           </div>
           <div class="yokai-grid">
@@ -183,7 +194,15 @@
                 <div class="yokai-info">
                   <div class="y-name">{{y.name}}</div>
                   <div class="y-stat">
-                    <span :class="{'hp-damaged': getYokaiCurrentHp(y) < getYokaiMaxHp(y)}">❤️{{getYokaiCurrentHp(y)}}/{{getYokaiMaxHp(y)}}</span>
+                    <span class="skill-cost-display field-hp-wrap" :class="{'hp-damaged': displayYokaiCurrentHp(y) < displayYokaiMaxHp(y)}">
+                      <template v-if="yokaiHpShowNetCutterStrike(y)">
+                        <span class="cost-original">❤️{{getYokaiCurrentHp(y)}}/{{getYokaiMaxHp(y)}}</span>
+                        <span class="cost-reduced">❤️{{displayYokaiCurrentHp(y)}}/{{displayYokaiMaxHp(y)}}</span>
+                      </template>
+                      <template v-else>
+                        ❤️{{displayYokaiCurrentHp(y)}}/{{displayYokaiMaxHp(y)}}
+                      </template>
+                    </span>
                     <span>👑{{y.charm||0}}</span>
                   </div>
                 </div>
@@ -360,7 +379,7 @@
                     <span v-for="(eff, i) in getHandCardEffects(c)" :key="i">{{eff.icon}}{{eff.value}}</span>
                   </template>
                 </div>
-                <div class="c-stat" v-else-if="c.cardType === 'penalty'">💔{{c.charm||0}}</div>
+                <div class="c-stat" v-else-if="c.cardType === 'penalty'">👑{{ c.charm ?? -1 }}</div>
                 <div class="c-stat" v-else>—</div>
               </div>
             </div>
@@ -425,20 +444,23 @@
 
       <!-- 弹窗：效果选择（CHOICE效果） -->
       <div class="modal" v-if="choiceModal.show">
-        <div class="modal-box choice-modal">
-          <p class="modal-title">🎯 选择一个效果</p>
-          <div class="choice-options">
-            <button v-for="(opt, i) in choiceModal.options" :key="i"
-                    class="choice-btn" @click="resolveChoice(i)">
-              {{opt}}
-            </button>
+        <PendingChoiceShell v-bind="pendingShellProps">
+          <div class="modal-box choice-modal">
+            <p class="modal-title">🎯 选择一个效果</p>
+            <div class="choice-options">
+              <button v-for="(opt, i) in choiceModal.options" :key="i"
+                      class="choice-btn" @click="resolveChoice(i)">
+                {{opt}}
+              </button>
+            </div>
           </div>
-        </div>
+        </PendingChoiceShell>
       </div>
 
       <!-- 弹窗：超度选择（唐纸伞妖等御魂效果） -->
       <div class="modal" v-if="salvageChoiceModal.show">
-        <div class="modal-box salvage-choice-modal">
+        <PendingChoiceShell v-bind="pendingShellProps">
+          <div class="modal-box salvage-choice-modal">
           <p class="modal-title">👁️ 查看牌库顶牌</p>
           <p class="modal-hint">{{salvageChoiceModal.prompt}}</p>
           <div class="salvage-card-preview">
@@ -465,11 +487,13 @@
             <button class="btn secondary" @click="handleSalvageChoice(false)">↩️ 不超度</button>
           </div>
         </div>
+        </PendingChoiceShell>
       </div>
 
       <!-- 弹窗：地藏像确认（二次确认防误操作） -->
       <div class="modal" v-if="dizangConfirmModal.show">
-        <div class="modal-box dizang-confirm-modal">
+        <PendingChoiceShell v-bind="pendingShellProps">
+          <div class="modal-box dizang-confirm-modal">
           <p class="modal-title">🙏 打出地藏像</p>
           <p class="modal-hint">{{ dizangConfirmModal.prompt }}</p>
           <div class="dizang-card-preview" v-if="dizangConfirmModal.card">
@@ -487,11 +511,13 @@
             <button class="btn secondary" @click="handleDizangConfirm(false)">❌ 取消</button>
           </div>
         </div>
+        </PendingChoiceShell>
       </div>
 
       <!-- 弹窗：地藏像式神选择（二选一） -->
       <div class="modal" v-if="dizangSelectModal.show">
-        <div class="modal-box dizang-select-modal">
+        <PendingChoiceShell v-bind="pendingShellProps">
+          <div class="modal-box dizang-select-modal">
           <p class="modal-title">✨ 选择式神</p>
           <p class="modal-hint">{{ dizangSelectModal.prompt }}</p>
           <div class="dizang-shikigami-grid">
@@ -506,11 +532,13 @@
             </div>
           </div>
         </div>
+        </PendingChoiceShell>
       </div>
 
       <!-- 弹窗：地藏像式神置换（式神已满时） -->
       <div class="modal" v-if="dizangReplaceModal.show">
-        <div class="modal-box dizang-replace-modal">
+        <PendingChoiceShell v-bind="pendingShellProps">
+          <div class="modal-box dizang-replace-modal">
           <p class="modal-title">🔄 式神置换</p>
           <p class="modal-hint">{{ dizangReplaceModal.prompt }}</p>
           <div class="dizang-new-shikigami" v-if="dizangReplaceModal.newShikigami">
@@ -539,11 +567,13 @@
             <button class="btn secondary" @click="handleDizangReplaceShikigami(null)">❌ 放弃获取</button>
           </div>
         </div>
+        </PendingChoiceShell>
       </div>
 
       <!-- 弹窗：妖怪目标选择（天邪鬼绿等御魂效果） -->
       <div class="modal" v-if="yokaiTargetModal.show">
-        <div class="modal-box yokai-target-modal">
+        <PendingChoiceShell v-bind="pendingShellProps">
+          <div class="modal-box yokai-target-modal">
           <p class="modal-title">🎯 {{yokaiTargetModal.prompt}}</p>
           <div class="yokai-target-grid">
             <div v-for="y in yokaiTargetModal.candidates" :key="y.instanceId"
@@ -554,16 +584,24 @@
               <img v-if="getCardImage(y)" :src="getCardImage(y)" class="yokai-target-img" />
               <div class="yokai-target-info">
                 <div class="yokai-target-name">{{y.name}}</div>
-                <div class="yokai-target-stat">❤️{{ getYokaiCurrentHp(y) }}</div>
+                <div class="yokai-target-stat skill-cost-display field-hp-wrap">
+                  <template v-if="yokaiHpShowNetCutterStrike(y)">
+                    <span class="cost-original">❤️{{getYokaiCurrentHp(y)}}/{{getYokaiMaxHp(y)}}</span>
+                    <span class="cost-reduced">❤️{{displayYokaiCurrentHp(y)}}/{{displayYokaiMaxHp(y)}}</span>
+                  </template>
+                  <template v-else>❤️{{displayYokaiCurrentHp(y)}}/{{displayYokaiMaxHp(y)}}</template>
+                </div>
               </div>
             </div>
           </div>
         </div>
+        </PendingChoiceShell>
       </div>
 
       <!-- 弹窗：卡牌选择（弃牌/超度选择等） -->
       <div class="modal" v-if="cardSelectModal.show">
-        <div class="modal-box card-select-modal">
+        <PendingChoiceShell v-bind="pendingShellProps">
+          <div class="modal-box card-select-modal">
           <p class="modal-title">{{cardSelectModal.title}}</p>
           <p class="modal-hint">{{cardSelectModal.hint || `选择 ${cardSelectModal.count} 张牌`}}</p>
           <div class="card-select-grid">
@@ -597,25 +635,35 @@
             </button>
           </div>
         </div>
+        </PendingChoiceShell>
       </div>
 
       <!-- 弹窗：目标选择 -->
       <div class="modal" v-if="targetModal.show">
-        <div class="modal-box target-modal">
+        <PendingChoiceShell v-bind="pendingShellProps">
+          <div class="modal-box target-modal">
           <p class="modal-title">🎯 选择目标</p>
           <div class="target-grid">
             <div v-for="c in targetModal.candidates" :key="c.instanceId"
                  class="target-card" @click="resolveTarget(c.instanceId)">
               <div class="c-name">{{c.name}}</div>
-              <div class="c-stat">❤️{{ getYokaiCurrentHp(c) }}</div>
+              <div class="c-stat skill-cost-display field-hp-wrap">
+                <template v-if="yokaiHpShowNetCutterStrike(c)">
+                  <span class="cost-original">❤️{{getYokaiCurrentHp(c)}}/{{getYokaiMaxHp(c)}}</span>
+                  <span class="cost-reduced">❤️{{displayYokaiCurrentHp(c)}}/{{displayYokaiMaxHp(c)}}</span>
+                </template>
+                <template v-else>❤️{{displayYokaiCurrentHp(c)}}/{{displayYokaiMaxHp(c)}}</template>
+              </div>
             </div>
           </div>
         </div>
+        </PendingChoiceShell>
       </div>
 
       <!-- 弹窗：赤舌选择（对手选择置于牌库顶的卡牌） -->
       <div class="modal" v-if="akajitaSelectModal.show">
-        <div class="modal-box akajita-select-modal">
+        <PendingChoiceShell v-bind="pendingShellProps">
+          <div class="modal-box akajita-select-modal">
           <p class="modal-title">👅 赤舌：选择置于牌库顶</p>
           <p class="modal-hint">你的弃牌堆中同时有基础术式和招福达摩，选择一张置于牌库顶</p>
           <div class="akajita-countdown">
@@ -625,17 +673,22 @@
               <div class="countdown-progress" :style="{ width: (akajitaSelectModal.countdown / 5 * 100) + '%' }"></div>
             </div>
           </div>
-          <div class="akajita-options">
-            <button v-for="opt in akajitaSelectModal.options" :key="opt.name"
-                    class="akajita-option-btn"
-                    :class="opt.name === '基础术式' ? 'spell-btn' : 'token-btn'"
-                    @click="handleAkajitaSelect(opt.name)">
-              <span class="opt-icon">{{ opt.name === '基础术式' ? '📜' : '🎎' }}</span>
-              <span class="opt-name">{{ opt.name }}</span>
+          <div class="akajita-options akajita-card-pick">
+            <button v-for="c in akajitaSelectModal.candidates" :key="c.instanceId"
+                    type="button"
+                    class="akajita-card-btn"
+                    :class="c.name === '基础术式' ? 'spell-btn' : 'token-btn'"
+                    @click="handleAkajitaSelect(c.instanceId)">
+              <div class="akajita-card-art-wrap">
+                <img v-if="getCardImageById(c.cardId)" :src="getCardImageById(c.cardId)!" class="akajita-card-art" alt="" />
+                <span v-else class="opt-icon">{{ c.name === '基础术式' ? '📜' : '🎎' }}</span>
+              </div>
+              <span class="opt-name">{{ c.name }}</span>
             </button>
           </div>
           <p class="akajita-timeout-hint">超时将自动选择【基础术式】</p>
         </div>
+        </PendingChoiceShell>
       </div>
 
       <!-- 赤舌牌库提示浮窗（场景B：自动置顶） -->
@@ -646,7 +699,8 @@
 
       <!-- 弹窗：魍魉之匣选择（点选要弃置的牌库顶牌） -->
       <div class="modal" v-if="wangliangModal.show">
-        <div class="modal-box wangliang-modal">
+        <PendingChoiceShell v-bind="pendingShellProps">
+          <div class="modal-box wangliang-modal">
           <p class="modal-title">📦 魍魉之匣</p>
           <p class="modal-hint">默认全部保留，点选要<b>弃置</b>的牌</p>
           <div class="wl-card-row">
@@ -691,6 +745,7 @@
             </button>
           </div>
         </div>
+        </PendingChoiceShell>
       </div>
 
       <!-- 弹窗：超度区查看（公共区域） -->
@@ -718,7 +773,7 @@
                   <template v-else-if="getHandCardEffects(c).length">
                     <span v-for="(eff, i) in getHandCardEffects(c)" :key="i">{{eff.icon}}{{eff.value}}</span>
                   </template>
-                  <template v-else-if="c.cardType === 'penalty' || c.type === 'penalty'">💔{{c.charm||0}}</template>
+                  <template v-else-if="c.cardType === 'penalty' || c.type === 'penalty'">👑{{ c.charm ?? -1 }}</template>
                   <template v-else>🎁</template>
                 </div>
               </div>
@@ -754,7 +809,7 @@
                   <template v-else-if="getHandCardEffects(c).length">
                     <span v-for="(eff, i) in getHandCardEffects(c)" :key="i">{{eff.icon}}{{eff.value}}</span>
                   </template>
-                  <template v-else-if="c.cardType === 'penalty'">💔{{c.charm||0}}</template>
+                  <template v-else-if="c.cardType === 'penalty'">👑{{ c.charm ?? -1 }}</template>
                   <template v-else>🎁</template>
                 </div>
               </div>
@@ -790,7 +845,7 @@
                   <template v-else-if="getHandCardEffects(c).length">
                     <span v-for="(eff, i) in getHandCardEffects(c)" :key="i">{{eff.icon}}{{eff.value}}</span>
                   </template>
-                  <template v-else-if="c.cardType === 'penalty'">💔{{c.charm||0}}</template>
+                  <template v-else-if="c.cardType === 'penalty'">👑{{ c.charm ?? -1 }}</template>
                   <template v-else>🎁</template>
                 </div>
               </div>
@@ -824,7 +879,7 @@
                   <template v-else-if="c.cardType === 'yokai' || c.cardType === 'token'">
                     <span class="c-hp-face">❤️{{ c.hp || '?' }}</span>
                   </template>
-                  <template v-else-if="c.cardType === 'penalty'">💔{{c.charm||0}}</template>
+                  <template v-else-if="c.cardType === 'penalty'">👑{{ c.charm ?? -1 }}</template>
                   <template v-else>🎁</template>
                 </div>
               </div>
@@ -1108,6 +1163,7 @@
     </Teleport>
     <!-- 开发用：URL 加 ?devPanel=1（可与 mode=multi 同用），生产构建时完全移除 -->
     <component :is="DevTestPanel" v-if="DevTestPanel && showDevTestPanel" />
+    <SettlementToast :trigger="settlementToastTrigger" :text="settlementToastText" />
   </div>
 </template>
 
@@ -1122,6 +1178,9 @@ const DevTestPanel = import.meta.env.DEV
   : null
 import type { GameState } from '../../shared/types/game'
 import type { CardInstance } from '../../shared/types/cards'
+import { fieldHasNetCutter, getNetCutterEffectiveHp } from '../../shared/game/netCutterField'
+import PendingChoiceShell from './components/PendingChoiceShell.vue'
+import SettlementToast from './components/SettlementToast.vue'
 
 // ── 路由与模式 ──────────────────────────────────────
 const route = useRoute()
@@ -1380,6 +1439,24 @@ watch(() => socketClient.gameState.value, (newState) => {
           socketClient.send('game:treeDemonDiscardResponse', { selectedId: ids[0] || '' })
         }
       }
+    } else if (newState.pendingChoice?.type === 'naginataSoulDiscard' && newState.pendingChoice.playerId === myPlayerId.value) {
+      // 监听 pendingChoice：薙魂弃牌（抓牌+1 后必须弃置 1 张，与 SocketServer game:naginataSoulDiscardResponse 对应）
+      const pc = newState.pendingChoice as any
+      const player = newState.players.find(p => p.id === myPlayerId.value)
+      if (player && player.hand.length > 0) {
+        cardSelectModal.isServerMultiSelect = true
+        cardSelectModal.show = true
+        cardSelectModal.title = '⚔️ 薙魂：选择1张手牌弃置'
+        cardSelectModal.hint = pc.prompt || '选择1张手牌弃置（含刚抓到的牌）'
+        cardSelectModal.candidates = player.hand
+        cardSelectModal.minCount = 1
+        cardSelectModal.maxCount = 1
+        cardSelectModal.count = 1
+        cardSelectModal.selected = []
+        cardSelectModal.resolve = (ids: string[]) => {
+          socketClient.send('game:naginataSoulDiscardResponse', { selectedId: ids[0] || '' })
+        }
+      }
     } else if (newState.pendingChoice?.type === 'wheelMonkDiscard' && newState.pendingChoice.playerId === myPlayerId.value) {
       // 监听 pendingChoice：轮入道弃牌选择
       const pc = newState.pendingChoice as any
@@ -1543,25 +1620,20 @@ watch(() => socketClient.gameState.value, (newState) => {
       meiYaoViewingAlert.value = null
     }
     
-    // 赤舌选择：监听对手需要选择置于牌库顶的卡牌
-    console.log('[赤舌调试] pendingChoice:', newState.pendingChoice, 'myPlayerId:', myPlayerId.value)
-    if (newState.pendingChoice?.type === 'akajitaSelect') {
-      console.log('[赤舌调试] 检测到akajitaSelect, playerId:', newState.pendingChoice.playerId, '我是:', myPlayerId.value)
-      if (newState.pendingChoice.playerId === myPlayerId.value) {
-        const pc = newState.pendingChoice as any
-        console.log('[赤舌调试] 是我的选择! options:', pc.options, 'deadline:', pc.deadline)
-        // 场景A: 两张都有，需要玩家选择
-        if (pc.options?.length === 2) {
-          akajitaSelectModal.options = pc.options
-          akajitaSelectModal.countdown = Math.ceil((pc.deadline - Date.now()) / 1000)
-          akajitaSelectModal.show = true
-          // 启动倒计时
-          startAkajitaCountdown(pc.deadline)
-          console.log('[赤舌调试] 弹窗已显示!')
-        }
+    if (newState.pendingChoice?.type === 'akajitaBatch') {
+      const pc = newState.pendingChoice as any
+      const mine = pc.targets?.find((t: any) => t.playerId === myPlayerId.value)
+      const responded = pc.responses?.[myPlayerId.value]
+      if (mine?.candidates?.length >= 2 && !responded) {
+        const deadline = Number(pc.deadline) || Number(newState.outOfTurnFeedbackDeadlineAt) || Date.now() + 5000
+        akajitaSelectModal.candidates = mine.candidates
+        akajitaSelectModal.countdown = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+        akajitaSelectModal.show = true
+        startAkajitaCountdown(deadline)
+      } else if (akajitaSelectModal.show) {
+        closeAkajitaSelect()
       }
     } else if (akajitaSelectModal.show) {
-      // pendingChoice 清空或不再是自己的赤舌选择，关闭弹窗
       closeAkajitaSelect()
     }
     
@@ -1598,14 +1670,14 @@ watch(() => socketClient.gameState.value, (newState) => {
       wangliangModal.discardSet = new Set()
     }
     
-    // 返魂香妨害选择：对手被妨害时显示「弃置1张手牌」或「获得1张恶评」
-    if (newState.pendingChoice?.type === 'fanHunXiangChoice' && newState.pendingChoice.playerId === myPlayerId.value) {
+    // 妨害管线 onChoice：返魂香（青女房/铮/弃牌或恶评等）统一 pending
+    if (newState.pendingChoice?.type === 'harassmentPipelineChoice' && newState.pendingChoice.playerId === myPlayerId.value) {
       const pc = newState.pendingChoice as any
       choiceModal.show = true
-      choiceModal.options = pc.options || ['弃置1张手牌', '获得1张恶评']
-      choiceModal.serverYokaiChoice = false  // 不是妖怪效果选择
+      choiceModal.options = pc.options || []
+      choiceModal.serverYokaiChoice = false
       choiceModal.resolve = (choiceIndex: number) => {
-        socketClient.send('game:fanHunXiangChoiceResponse', { choice: choiceIndex })
+        socketClient.send('game:harassmentPipelineChoiceResponse', { choice: choiceIndex })
         choiceModal.show = false
         choiceModal.resolve = null
       }
@@ -1619,7 +1691,12 @@ watch(() => socketClient.gameState.value, (newState) => {
         cardSelectModal.selected = []
         cardSelectModal.resolve = null
       }
-      // 清空赤舌选择弹窗
+      if (choiceModal.show) {
+        choiceModal.show = false
+        choiceModal.options = []
+        choiceModal.resolve = null
+        choiceModal.serverYokaiChoice = false
+      }
       closeAkajitaSelect()
     }
 
@@ -1717,8 +1794,102 @@ let turnCountdownInterval: number | null = null
 const showTurnCountdown = computed(() =>
   isMultiMode.value && !!state.value && state.value.phase === 'playing' && state.value.turnPhase === 'action'
 )
-const turnCountdownDisplay = computed(() =>
-  turnCountdownMax.value <= 0 ? '∞' : `${Math.max(0, turnCountdown.value)}s`
+const turnCountdownDisplay = computed(() => {
+  const s = state.value as any
+  if (
+    isMultiMode.value &&
+    s?.turnTimerPaused &&
+    s?.turnPausedRemainMs != null
+  ) {
+    const sec = Math.max(0, Math.ceil(Number(s.turnPausedRemainMs) / 1000))
+    return `${sec}s（等待他人时已暂停）`
+  }
+  return turnCountdownMax.value <= 0 ? '∞' : `${Math.max(0, turnCountdown.value)}s`
+})
+
+/** 多人：当前回合玩家正在等他人完成 pendingChoice */
+const multiplayerWaitingForOffTurnFeedback = computed(() => {
+  if (!isMultiMode.value || !state.value) return false
+  if (state.value.phase !== 'playing' || state.value.turnPhase !== 'action') return false
+  if (!isMyTurn.value) return false
+  const pc = state.value.pendingChoice as { playerId?: string } | undefined
+  if (!pc?.playerId) return false
+  return pc.playerId !== myPlayerId.value
+})
+
+/** §5.5：与 state.pendingChoice 同步的弹窗外壳（来源 / 步骤说明 / 计时） */
+const pendingShellBind = computed(() => {
+  const st = state.value as Record<string, unknown> | null | undefined
+  if (!st?.pendingChoice) return null
+  const pc = st.pendingChoice as Record<string, unknown>
+  if (pc.playerId !== myPlayerId.value) return null
+  const players = st.players as { id: string }[]
+  const curPid = players[(st.currentPlayerIndex as number) ?? 0]?.id
+  let timerMode: 'turnTotal' | 'offTurnResponse' =
+    pc.playerId === curPid ? 'turnTotal' : 'offTurnResponse'
+  if (pc.timerMode === 'turnTotal' || pc.timerMode === 'offTurnResponse') {
+    timerMode = pc.timerMode as 'turnTotal' | 'offTurnResponse'
+  }
+  const sourceCard = (pc.sourceCard ?? pc.card) as CardInstance | undefined
+  const stepSummary = String(pc.stepSummary ?? pc.prompt ?? '')
+  const fullRules = sourceCard?.effect ? String(sourceCard.effect) : ''
+  const sourceLabel = String(
+    pc.sourceLabel ?? (timerMode === 'offTurnResponse' ? '妨害响应' : '')
+  )
+  const sourceCardName = sourceCard?.name ? String(sourceCard.name) : ''
+  const sourceImageUrl = sourceCard ? getCardImage(sourceCard) : ''
+  const showTimer =
+    isMultiMode.value &&
+    st.phase === 'playing' &&
+    st.turnPhase === 'action'
+
+  return {
+    stepSummary,
+    fullRulesText: fullRules || '（暂无完整规则文本）',
+    sourceLabel,
+    sourceCardName,
+    sourceImageUrl,
+    timerMode,
+    turnCountdownSec: turnCountdown.value,
+    turnCountdownMaxSec: turnCountdownMax.value,
+    offTurnDeadlineAt: (st.outOfTurnFeedbackDeadlineAt as number) ?? null,
+    showTimer,
+  }
+})
+
+const pendingShellProps = computed(() => ({
+  ...(pendingShellBind.value || {
+    stepSummary: '',
+    fullRulesText: '（暂无完整规则文本）',
+    sourceLabel: '',
+    sourceCardName: '',
+    sourceImageUrl: '',
+    timerMode: 'turnTotal' as const,
+    turnCountdownSec: 0,
+    turnCountdownMaxSec: 0,
+    offTurnDeadlineAt: null,
+    showTimer: false,
+  }),
+  showChrome: !!pendingShellBind.value,
+}))
+
+const settlementToastTrigger = ref(0)
+const settlementToastText = ref('')
+let lastSettlementDedupeKey: string | null = null
+
+watch(
+  () => (state.value as GameState & { settlementToast?: Record<string, unknown> })?.settlementToast,
+  (toast) => {
+    if (!toast || !myPlayerId.value) return
+    const ids = (toast.recipientPlayerIds as string[]) || []
+    if (!ids.includes(myPlayerId.value)) return
+    const key = `${toast.logSeq ?? ''}|${toast.timestamp}|${toast.message}`
+    if (key === lastSettlementDedupeKey) return
+    lastSettlementDedupeKey = key
+    settlementToastText.value = String(toast.message ?? '')
+    settlementToastTrigger.value++
+  },
+  { deep: true }
 )
 
 function clearShikigamiCountdown() {
@@ -1801,6 +1972,13 @@ function syncTurnCountdownFromState(newState: any) {
     clearTurnCountdown()
     return
   }
+  if (newState.turnTimerPaused && newState.turnPausedRemainMs != null) {
+    clearTurnCountdown()
+    const sec = Math.max(0, Math.ceil(Number(newState.turnPausedRemainMs) / 1000))
+    turnCountdown.value = sec
+    turnCountdownMax.value = Math.max(1, sec)
+    return
+  }
   const timeoutMs = Number(newState.turnTimeoutMs) || 0
   if (timeoutMs <= 0) {
     turnCountdown.value = 0
@@ -1827,7 +2005,7 @@ const tooltip = reactive<{
   effect: string
   passive: {name: string, effect: string} | null
   skill: {name: string, cost: number, effect: string} | null
-  dynamicEffect: string | null  // 三味等卡牌的动态效果预览
+  dynamicEffect: string | null  // 三味、狂骨等卡牌的动态效果预览
 }>({
   show: false,
   card: null,
@@ -1961,11 +2139,11 @@ const yokaiTargetModal = reactive<{
 const akajitaSelectModal = reactive<{
   show: boolean
   countdown: number
-  options: { name: string; cardId: string }[]
+  candidates: { instanceId: string; cardId: string; name: string }[]
 }>({
   show: false,
   countdown: 5,
-  options: []
+  candidates: []
 })
 let akajitaCountdownTimer: number | null = null
 
@@ -2136,6 +2314,36 @@ const isMyTurn = computed(() => {
 })
 const yokai = computed(() => state.value?.field.yokaiSlots || [])
 const boss = computed(() => state.value?.field.currentBoss)
+/** 场上鬼王：网切等 buff 下的展示 HP（与结算有效生命一致） */
+const displayBossMaxHp = computed(() => {
+  const f = state.value?.field
+  const b = f?.currentBoss
+  if (!f || !b) return b?.hp ?? 0
+  return getNetCutterEffectiveHp(f, b.hp, 'boss')
+})
+const displayBossCurrentHp = computed(() => {
+  const f = state.value?.field
+  const b = f?.currentBoss
+  if (!f || !b) return 0
+  const raw = f.bossCurrentHp ?? b.hp
+  return getNetCutterEffectiveHp(f, raw, 'boss')
+})
+/** 鬼王卡面：印刷血量（划线原值），用于网切与涅槃之火同风格的 HP 展示 */
+const bossHpRawMax = computed(() => state.value?.field.currentBoss?.hp ?? 0)
+const bossHpRawCurrent = computed(() => {
+  const f = state.value?.field
+  const b = f?.currentBoss
+  if (!f || !b) return 0
+  return f.bossCurrentHp ?? b.hp
+})
+const showBossHpNetCutterStrike = computed(() => {
+  const f = state.value?.field
+  if (!f || !fieldHasNetCutter(f)) return false
+  return (
+    displayBossCurrentHp.value !== bossHpRawCurrent.value ||
+    displayBossMaxHp.value !== bossHpRawMax.value
+  )
+})
 const logs = computed(() => (state.value?.log || []).slice(-300))
 
 // 手牌排序显示：不能使用的居左，能使用的居右，内部保持原顺序
@@ -2883,10 +3091,19 @@ function showTooltip(event: MouseEvent, card: CardInstance) {
   } else if (cardType === 'yokai' || cardType === 'token') {
     tooltip.typeLabel = cardType === 'yokai' ? '御魂' : '令牌'
     tooltip.typeClass = cardType === 'yokai' ? 'type-yokai' : 'type-token'
-    const cur = card.currentHp !== undefined ? card.currentHp : (card.hp ?? 0)
-    const face = yokaiFaceOrPrintedHp(card)
+    const f = state.value?.field
+    const onField = !!(f?.yokaiSlots?.some(s => s && s.instanceId === card.instanceId))
+    const curRaw = card.currentHp !== undefined ? card.currentHp : (card.hp ?? 0)
+    const faceRaw = yokaiFaceOrPrintedHp(card)
+    const cur = onField && f ? getNetCutterEffectiveHp(f, curRaw, 'yokai') : curRaw
+    const face = onField && f ? getNetCutterEffectiveHp(f, faceRaw, 'yokai') : faceRaw
+    const strikeHp = !!(onField && f && fieldHasNetCutter(f) && (cur !== curRaw || face !== faceRaw))
     let hpShown: string | number = face
-    if (face > 0 && cur > 0 && cur < face) hpShown = `${cur}/${face}`
+    if (strikeHp) {
+      const rawPair = `${curRaw}/${faceRaw}`
+      const effPair = face > 0 && cur > 0 ? `${cur}/${face}` : cur <= 0 && face > 0 ? `0/${face}` : `${cur}/${face}`
+      hpShown = `${rawPair} → ${effPair}`
+    } else if (face > 0 && cur > 0 && cur < face) hpShown = `${cur}/${face}`
     else if (face > 0 && cur <= 0) hpShown = face
     const effMap = getCardEffectStats(card)
     tooltip.stats = { hp: { icon: '❤️', value: hpShown }, ...(effMap || {}) }
@@ -2894,11 +3111,11 @@ function showTooltip(event: MouseEvent, card: CardInstance) {
     tooltip.passive = null
     tooltip.skill = null
     
-    // 三味动态效果预览：统计本回合已使用的阴阳术和鬼火牌
+    const myPlayerForTip = state.value?.players.find(p => p.id === myPlayerId.value)
+    // 三味：本回合已用阴阳术/鬼火牌 → 预计伤害
     if (card.name === '三味') {
-      const myPlayer = state.value?.players.find(p => p.id === myPlayerId.value)
-      if (myPlayer) {
-        const played = myPlayer.played || []
+      if (myPlayerForTip) {
+        const played = myPlayerForTip.played || []
         let count = 0
         for (const c of played) {
           if (c.cardType === 'spell') {
@@ -2917,6 +3134,21 @@ function showTooltip(event: MouseEvent, card: CardInstance) {
         } else {
           tooltip.dynamicEffect = `💡 打出前先使用阴阳术或鬼火牌可增加伤害`
         }
+      } else {
+        tooltip.dynamicEffect = null
+      }
+    } else if (card.name === '狂骨') {
+      // 与 YokaiEffects 一致：打出瞬间读取当前鬼火为 X，再抓牌+1、伤害+X
+      if (myPlayerForTip) {
+        const gf = Math.max(0, Number(myPlayerForTip.ghostFire) || 0)
+        const gfMax = Number(myPlayerForTip.maxGhostFire) > 0 ? Number(myPlayerForTip.maxGhostFire) : 5
+        if (gf > 0) {
+          tooltip.dynamicEffect = `⚔️ 当前鬼火 ${gf}/${gfMax}，打出时预计伤害 +${gf}，并抓牌+1（伤害先于抓牌锁定）`
+        } else {
+          tooltip.dynamicEffect = `💡 当前鬼火 0：打出时伤害 +0，仅抓牌+1；可先叠加鬼火再出狂骨`
+        }
+      } else {
+        tooltip.dynamicEffect = null
       }
     } else {
       tooltip.dynamicEffect = null
@@ -2925,7 +3157,7 @@ function showTooltip(event: MouseEvent, card: CardInstance) {
     tooltip.typeLabel = '恶评'
     tooltip.typeClass = 'type-penalty'
     tooltip.stats = {
-      charm: { icon: '👑', value: card.charm || -1 }
+      charm: { icon: '👑', value: card.charm ?? -1 }
     }
     tooltip.effect = card.effect || '负面声誉'
     tooltip.passive = null
@@ -2978,8 +3210,17 @@ function showBossTooltip(event: MouseEvent, boss: any) {
   
   tooltip.typeLabel = '鬼王'
   tooltip.typeClass = 'type-boss'
+  const fBt = state.value?.field
+  const rawCurBt = state.value?.field.bossCurrentHp ?? boss.hp
+  const rawMaxBt = boss.hp
+  const btCur = fBt ? getNetCutterEffectiveHp(fBt, rawCurBt, 'boss') : rawCurBt
+  const btMax = fBt ? getNetCutterEffectiveHp(fBt, rawMaxBt, 'boss') : rawMaxBt
+  const showStrikeBt = !!(fBt && fieldHasNetCutter(fBt) && (btCur !== rawCurBt || btMax !== rawMaxBt))
   tooltip.stats = {
-    hp: { icon: '❤️', value: `${state.value?.field.bossCurrentHp || boss.hp}/${boss.hp}` },
+    hp: {
+      icon: '❤️',
+      value: showStrikeBt ? `${rawCurBt}/${rawMaxBt} → ${btCur}/${btMax}` : `${btCur}/${btMax}`,
+    },
     charm: { icon: '👑', value: boss.charm || 0 }
   }
   tooltip.effect = boss.arrivalEffect || boss.effect || '击败后获得声誉'
@@ -3282,13 +3523,13 @@ function closeAkajitaSelect() {
     akajitaCountdownTimer = null
   }
   akajitaSelectModal.show = false
-  akajitaSelectModal.options = []
+  akajitaSelectModal.candidates = []
   akajitaSelectModal.countdown = 5
 }
 
-function handleAkajitaSelect(cardName: string) {
+function handleAkajitaSelect(instanceId: string) {
   socketClient.send('game:akajitaSelectResponse', {
-    selectedCard: cardName
+    selectedId: instanceId,
   })
   closeAkajitaSelect()
 }
@@ -3407,21 +3648,59 @@ function getYokaiMaxHp(y: CardInstance): number {
   // 优先使用maxHp，否则检查原始卡牌数据
   return y.maxHp !== undefined ? y.maxHp : (y.hp || 0)
 }
+
+function yokaiInstanceOnField(y: CardInstance): boolean {
+  return !!(state.value?.field?.yokaiSlots?.some(s => s && s.instanceId === y.instanceId))
+}
+
+/** 网切生效且「印刷/盘面 HP」与「有效 HP」不一致时，场上采用划线原值 + 绿色当前值 */
+function yokaiHpShowNetCutterStrike(y: CardInstance): boolean {
+  if (!yokaiInstanceOnField(y)) return false
+  const f = state.value?.field
+  if (!f || !fieldHasNetCutter(f)) return false
+  return (
+    displayYokaiCurrentHp(y) !== getYokaiCurrentHp(y) ||
+    displayYokaiMaxHp(y) !== getYokaiMaxHp(y)
+  )
+}
+
+/** 游荡区妖怪卡面展示用 HP（仅场上实例受 field 上网切等影响，与结算一致） */
+function displayYokaiCurrentHp(y: CardInstance): number {
+  const f = state.value?.field
+  const raw = getYokaiCurrentHp(y)
+  if (!f || !yokaiInstanceOnField(y)) return raw
+  return getNetCutterEffectiveHp(f, raw, 'yokai')
+}
+function displayYokaiMaxHp(y: CardInstance): number {
+  const f = state.value?.field
+  const raw = getYokaiMaxHp(y)
+  if (!f || !yokaiInstanceOnField(y)) return raw
+  return getNetCutterEffectiveHp(f, raw, 'yokai')
+}
+
+function yokaiRemainingNeededToDefeat(y: CardInstance): number {
+  const f = state.value?.field
+  const rawCur = getYokaiCurrentHp(y)
+  const rawMax = getYokaiMaxHp(y)
+  if (rawCur <= 0) return 0
+  if (!f || !yokaiInstanceOnField(y)) return rawCur
+  const effectiveMax = getNetCutterEffectiveHp(f, rawMax, 'yokai')
+  const damageAlready = rawMax - rawCur
+  return Math.max(0, effectiveMax - damageAlready)
+}
 function isKilled(y: CardInstance): boolean {
   // 服务端使用hp字段，客户端可能用currentHp
   const hp = y.currentHp !== undefined ? y.currentHp : (y.hp || 0)
   return hp <= 0
 }
 function isWounded(y: CardInstance): boolean {
-  // 已受伤：当前HP < 最大HP
-  const currentHp = getYokaiCurrentHp(y)
-  const maxHp = getYokaiMaxHp(y)
+  const currentHp = displayYokaiCurrentHp(y)
+  const maxHp = displayYokaiMaxHp(y)
   return currentHp < maxHp && currentHp > 0
 }
 function canKillYokai(y: CardInstance): boolean {
-  // 玩家伤害足以击杀该妖怪（伤害 >= 剩余HP）
-  const currentHp = getYokaiCurrentHp(y)
-  return (player.value?.damage || 0) >= currentHp && currentHp > 0
+  const need = yokaiRemainingNeededToDefeat(y)
+  return need > 0 && (player.value?.damage || 0) >= need
 }
 function canDamage(y: CardInstance): boolean {
   // 玩家有伤害且妖怪未被击杀
@@ -4663,6 +4942,7 @@ async function confirmReplaceShikigami() {
 .turn-countdown-bar{
   position: relative;
   display:flex;
+  flex-wrap:wrap;
   align-items:center;
   justify-content:center;
   gap:calc(var(--s) * 6);
@@ -4672,6 +4952,15 @@ async function confirmReplaceShikigami() {
   border:calc(var(--s) * 1) solid rgba(255, 130, 130, 0.35);
   border-radius:calc(var(--s) * 8);
   overflow:hidden;
+}
+.turn-countdown-bar .off-turn-wait-hint{
+  flex-basis:100%;
+  text-align:center;
+  font-size:calc(var(--s) * 12);
+  color:rgba(255, 230, 200, 0.95);
+  line-height:1.35;
+  margin:0;
+  padding-top:calc(var(--s) * 2);
 }
 .turn-countdown-bar .countdown-icon{
   font-size:calc(var(--s) * 18);
@@ -5331,11 +5620,16 @@ async function confirmReplaceShikigami() {
   color:#c8b896;
 }
 
-/* 涅槃之火减费显示样式 */
+/* 涅槃之火减费显示样式；场上 HP 网切复用 cost-original / cost-reduced */
 .skill-cost-display {
   display: inline-flex;
   align-items: center;
   gap: calc(var(--s) * 2);
+}
+.field-hp-wrap {
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 100%;
 }
 .cost-original {
   text-decoration: line-through;
@@ -6140,6 +6434,35 @@ async function confirmReplaceShikigami() {
 }
 .akajita-option-btn .opt-icon{font-size:28px}
 .akajita-option-btn .opt-name{font-size:14px;font-weight:bold}
+.akajita-card-pick{
+  flex-wrap:wrap;
+  gap:12px;
+}
+.akajita-card-btn{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:6px;
+  padding:10px;
+  border:2px solid #666;
+  border-radius:12px;
+  background:rgba(0,0,0,0.35);
+  cursor:pointer;
+  transition:all 0.2s ease;
+  min-width:100px;
+}
+.akajita-card-btn:hover{
+  transform:scale(1.03);
+  border-color:#ff8c42;
+  box-shadow:0 0 12px rgba(255,140,66,0.35);
+}
+.akajita-card-btn img{
+  width:72px;
+  height:auto;
+  border-radius:6px;
+  display:block;
+}
+.akajita-card-btn .opt-name{font-size:13px;font-weight:bold;color:#fff}
 .akajita-timeout-hint{
   font-size:12px;
   color:#888;

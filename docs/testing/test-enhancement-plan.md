@@ -2,6 +2,11 @@
 
 > 基于调研结果，制定分阶段的测试增强计划
 
+## 与其它 spec 的关系（并行推进）
+
+- **鬼王区状态机**（主线协议）：见 [`docs/superpowers/specs/2026-03-30-boss-zone-state-machine.md`](../superpowers/specs/2026-03-30-boss-zone-state-machine.md)。与本测试计划**并行**；鬼王推进以该文档为准。
+- **妖怪御魂实现冻结（2026-03-30 起）**：客户端已完成一轮御魂实机验证，双轨推进时**不要修改** `YokaiEffects.ts` 等**妖怪御魂效果的具体实现**。本计划仍可补充用例（MultiplayerGame 流程、`pendingChoice`、鬼王/BossEffects 等），但应用例应 **Mock / 走现有 API**，避免为通过测试而改御魂行级逻辑。
+
 ---
 
 ## 📊 现状分析
@@ -34,7 +39,7 @@
 
 **目标**: 确保 `MultiplayerGame` 核心流程可测试验证
 
-**进展（2026-03-30）**: 已新增 `server/src/game/__tests__/MultiplayerGame.action.test.ts`，覆盖「非当前玩家 / 非行动阶段不可 endTurn」与「当前玩家 endTurn 后轮转与补牌」。可继续在此文件补充 `playCard`、伤害分配、`attackBoss` 等用例。
+**进展（2026-03-30）**: 已新增 `server/src/game/__tests__/MultiplayerGame.action.test.ts`（回合 / endTurn）；另见 `bossZoneStateMachine.integration.test.ts`（鬼王 pendingReveal → 清理翻牌，**不触碰 YokaiEffects**）。可继续在此类文件中补充流程用例；**补充 `playCard` / 御魂结算时遵守上文「御魂实现冻结」**。
 
 **范围**:
 ```

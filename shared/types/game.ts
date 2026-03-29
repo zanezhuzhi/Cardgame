@@ -218,6 +218,17 @@ export interface FieldState {
 
 // ============ 游戏状态 ============
 
+/**
+ * 与信息栏同源文案；仅 recipientPlayerIds 含本机时客户端显示中部提示。
+ */
+export interface SettlementToast {
+  message: string;
+  recipientPlayerIds: string[];
+  /** 可选：与 GameLogEntry.logSeq 对齐便于对账 */
+  logSeq?: number;
+  timestamp: number;
+}
+
 export interface GameState {
   // 基础信息
   roomId: string;
@@ -233,6 +244,12 @@ export interface GameState {
   turnPhase: TurnPhase | 'start';  // 支持 start 作为初始值
   turnStartAt?: number;
   turnTimeoutMs?: number;
+  /** 多人：等待其他玩家回合外反馈时，行动阶段回合计时暂停 */
+  turnTimerPaused?: boolean;
+  /** 多人：暂停瞬间剩余的本回合行动可用时间（毫秒） */
+  turnPausedRemainMs?: number;
+  /** 多人：当前回合外反馈截止时间（Unix 毫秒），便于客户端展示 */
+  outOfTurnFeedbackDeadlineAt?: number;
   
   // 战场
   field: FieldState;
@@ -264,7 +281,8 @@ export interface GameState {
   // ====== 玩家选择等待 ======
   /** 等待玩家做出选择（御魂效果、式神技能等） */
   pendingChoice?: PendingChoice;
-  
+  settlementToast?: SettlementToast;
+
   // ====== 轮入道队列执行 ======
   /** 轮入道效果执行队列（完整执行N次，每次包含交互选择） */
   wheelMonkQueue?: WheelMonkQueue;

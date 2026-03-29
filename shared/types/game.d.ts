@@ -136,6 +136,16 @@ export interface FieldState {
     shikigamiSupply?: ShikigamiCard[];
     exileZone: CardInstance[];
 }
+/**
+ * 与信息栏同源文案；仅 recipientPlayerIds 含本机时客户端显示中部提示。
+ */
+export interface SettlementToast {
+    message: string;
+    recipientPlayerIds: string[];
+    /** 可选：与 GameLogEntry.logSeq 对齐便于对账 */
+    logSeq?: number;
+    timestamp: number;
+}
 export interface GameState {
     roomId: string;
     phase: GamePhase;
@@ -169,6 +179,7 @@ export interface GameState {
     damagePool?: DamagePool;
     /** 等待玩家做出选择（御魂效果、式神技能等） */
     pendingChoice?: PendingChoice;
+    settlementToast?: SettlementToast;
     /** 轮入道效果执行队列（完整执行N次，每次包含交互选择） */
     wheelMonkQueue?: WheelMonkQueue;
 }

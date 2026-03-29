@@ -598,6 +598,37 @@
         </PendingChoiceShell>
       </div>
 
+      <!-- 弹窗：镇墓兽禁止退治（左手边玩家） -->
+      <div class="modal" v-if="zhenMuShouTargetModal.show">
+        <PendingChoiceShell v-bind="pendingShellProps">
+          <div class="modal-box yokai-target-modal">
+            <p class="modal-title">🚫 {{ zhenMuShouTargetModal.prompt }}</p>
+            <div class="yokai-target-grid">
+              <div
+                v-for="y in zhenMuShouTargetModal.candidates"
+                :key="y.instanceId"
+                class="yokai-target-card"
+                @click.stop="handleZhenMuShouTargetChoice(y.instanceId)"
+                @mouseenter="showTooltip($event, y)"
+                @mouseleave="hideTooltip"
+              >
+                <img v-if="getCardImage(y)" :src="getCardImage(y)" class="yokai-target-img" />
+                <div class="yokai-target-info">
+                  <div class="yokai-target-name">{{ y.name }}</div>
+                  <div class="yokai-target-stat skill-cost-display field-hp-wrap">
+                    <template v-if="yokaiHpShowNetCutterStrike(y)">
+                      <span class="cost-original">❤️{{ getYokaiCurrentHp(y) }}/{{ getYokaiMaxHp(y) }}</span>
+                      <span class="cost-reduced">❤️{{ displayYokaiCurrentHp(y) }}/{{ displayYokaiMaxHp(y) }}</span>
+                    </template>
+                    <template v-else>❤️{{ displayYokaiCurrentHp(y) }}/{{ displayYokaiMaxHp(y) }}</template>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </PendingChoiceShell>
+      </div>
+
       <!-- 弹窗：卡牌选择（弃牌/超度选择等） -->
       <div class="modal" v-if="cardSelectModal.show">
         <PendingChoiceShell v-bind="pendingShellProps">
@@ -1365,6 +1396,41 @@ watch(() => socketClient.gameState.value, (newState) => {
       }
     }
 
+    // 镇墓兽：左手边玩家选择禁止退治目标（pending 归属邻座，非打出者）
+    if (newState.pendingChoice?.type === 'zhenMuShouTarget' && newState.pendingChoice.playerId === myPlayerId.value) {
+      const pc = newState.pendingChoice as any
+      const ids: string[] = pc.candidates || []
+      const field = newState.field
+      const candidates: CardInstance[] = []
+      for (const y of field.yokaiSlots) {
+        if (y && ids.includes(y.instanceId)) candidates.push(y)
+      }
+      const boss = field.currentBoss as any
+      if (boss && boss.id && ids.includes(boss.id)) {
+        candidates.push({
+          instanceId: boss.id,
+          cardId: boss.cardId || boss.id,
+          cardType: 'yokai',
+          name: boss.name,
+          hp: field.bossCurrentHp ?? boss.hp ?? 0,
+          maxHp: boss.hp ?? 0,
+        } as CardInstance)
+      }
+      if (candidates.length > 0) {
+        zhenMuShouTargetModal.show = true
+        zhenMuShouTargetModal.candidates = candidates
+        zhenMuShouTargetModal.prompt = pc.prompt || '选择禁止退治目标'
+      } else {
+        zhenMuShouTargetModal.show = false
+        zhenMuShouTargetModal.candidates = []
+      }
+    } else {
+      if (zhenMuShouTargetModal.show) {
+        zhenMuShouTargetModal.show = false
+        zhenMuShouTargetModal.candidates = []
+      }
+    }
+
     // 监听 pendingChoice：御魂二选一弹窗（天邪鬼青等）；pending 被服务端清空（含 GM 超时回合）时关闭
     if (newState.pendingChoice?.type === 'yokaiChoice' && newState.pendingChoice.playerId === myPlayerId.value) {
       choiceModal.serverYokaiChoice = true
@@ -1568,6 +1634,73 @@ watch(() => socketClient.gameState.value, (newState) => {
           socketClient.send('game:diceGhostTargetResponse', { selectedId: ids[0] || '' })
         }
       }
+    } else if (newState.pendingChoice?.type === 'youguXiangSelect' && newState.pendingChoice.playerId === myPlayerId.value) {
+      const pc = newState.pendingChoice as any
+      const revealed = pc.revealedCards || []
+      const selectable = new Set<string>((pc.selectableCandidates || []) as string[])
+      const maxSel = Math.max(0, Number(pc.maxSelect) || 3)
+      const virtualCards: CardInstance[] = revealed
+        .filter((r: any) => r?.card && selectable.has(r.card.instanceId))
+        .map((r: any) => ({
+          ...r.card,
+          _ownerName: r.ownerName,
+        }))
+      if (virtualCards.length > 0) {
+        cardSelectModal.isServerMultiSelect = true
+        cardSelectModal.show = true
+        cardSelectModal.title = '🔔 幽谷响：选择要执行效果的御魂'
+        cardSelectModal.hint = pc.prompt || `最多可选 ${maxSel} 张（可不选）`
+        cardSelectModal.candidates = virtualCards
+        cardSelectModal.minCount = 0
+        cardSelectModal.maxCount = maxSel
+        cardSelectModal.count = maxSel
+        cardSelectModal.selected = []
+        ;(cardSelectModal as any).allowCancel = false
+        cardSelectModal.resolve = (ids: string[]) => {
+          socketClient.send('game:youguXiangSelectResponse', { selectedIds: ids })
+        }
+      }
+    } else if (newState.pendingChoice?.type === 'shangHunNiaoExile' && newState.pendingChoice.playerId === myPlayerId.value) {
+      const pc = newState.pendingChoice as any
+      const player = newState.players.find(p => p.id === myPlayerId.value)
+      if (player && player.hand.length > 0) {
+        const minC = Math.max(0, Number(pc.minCount) || 0)
+        const maxC = Math.max(minC, Number(pc.maxCount) ?? player.hand.length)
+        cardSelectModal.isServerMultiSelect = true
+        cardSelectModal.show = true
+        cardSelectModal.title = '🐦 伤魂鸟：选择要超度的手牌'
+        cardSelectModal.hint = pc.prompt || `可选 ${minC}～${maxC} 张，每张 +2 伤害`
+        cardSelectModal.candidates = player.hand
+        cardSelectModal.minCount = minC
+        cardSelectModal.maxCount = maxC
+        cardSelectModal.count = maxC
+        cardSelectModal.selected = []
+        ;(cardSelectModal as any).allowCancel = minC === 0
+        cardSelectModal.resolve = (ids: string[]) => {
+          socketClient.send('game:shangHunNiaoResponse', { selectedIds: ids })
+        }
+      }
+    } else if (newState.pendingChoice?.type === 'yinmoluoSelect' && newState.pendingChoice.playerId === myPlayerId.value) {
+      const pc = newState.pendingChoice as any
+      const player = newState.players.find(p => p.id === myPlayerId.value)
+      const need = Math.max(1, Number(pc.selectCount) || 2)
+      const idSet = new Set<string>((pc.candidates || []).map((c: any) => c.instanceId))
+      const full = (player?.discard || []).filter(c => idSet.has(c.instanceId))
+      if (player && full.length >= need) {
+        cardSelectModal.isServerMultiSelect = true
+        cardSelectModal.show = true
+        cardSelectModal.title = '🌙 阴摩罗：选择弃牌区的牌'
+        cardSelectModal.hint = pc.prompt || `须选 ${need} 张（HP<6）`
+        cardSelectModal.candidates = full
+        cardSelectModal.minCount = need
+        cardSelectModal.maxCount = need
+        cardSelectModal.count = need
+        cardSelectModal.selected = []
+        ;(cardSelectModal as any).allowCancel = false
+        cardSelectModal.resolve = (ids: string[]) => {
+          socketClient.send('game:yinmoluoSelectResponse', { selectedIds: ids })
+        }
+      }
     } else if (newState.pendingChoice?.type === 'meiYaoSelect' && newState.pendingChoice.playerId === myPlayerId.value) {
       // 监听 pendingChoice：魅妖选择对手牌库顶牌
       const pc = newState.pendingChoice as any
@@ -1696,6 +1829,10 @@ watch(() => socketClient.gameState.value, (newState) => {
         choiceModal.options = []
         choiceModal.resolve = null
         choiceModal.serverYokaiChoice = false
+      }
+      if (zhenMuShouTargetModal.show) {
+        zhenMuShouTargetModal.show = false
+        zhenMuShouTargetModal.candidates = []
       }
       closeAkajitaSelect()
     }
@@ -2211,6 +2348,17 @@ const targetModal = reactive<{
   show: false,
   candidates: [],
   resolve: null
+})
+
+/** 多人：镇墓兽 — 左手边玩家选禁止退治目标 */
+const zhenMuShouTargetModal = reactive<{
+  show: boolean
+  candidates: CardInstance[]
+  prompt: string
+}>({
+  show: false,
+  candidates: [],
+  prompt: '',
 })
 
 // 式神获取/置换弹窗
@@ -3234,7 +3382,7 @@ function showBossTooltip(event: MouseEvent, boss: any) {
 const anyModalOpen = computed(() =>
   hintModal.show || choiceModal.show || cardSelectModal.show ||
   salvageChoiceModal.show || targetModal.show || shikigamiModal.show ||
-  spellSelectModal.show
+  spellSelectModal.show || zhenMuShouTargetModal.show
 )
 
 // 隐藏悬浮提示
@@ -3500,6 +3648,12 @@ function handleYokaiTargetChoice(targetId: string) {
   })
   yokaiTargetModal.show = false
   yokaiTargetModal.candidates = []
+}
+
+function handleZhenMuShouTargetChoice(targetId: string) {
+  socketClient.send('game:zhenMuShouTargetResponse', { targetId })
+  zhenMuShouTargetModal.show = false
+  zhenMuShouTargetModal.candidates = []
 }
 
 // ===== 赤舌选择处理 =====

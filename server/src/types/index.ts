@@ -172,7 +172,7 @@ export interface PlayerState {
   isReady: boolean;
   /** 是否为 AI 座位 */
   isAI?: boolean;
-  aiStrategy?: 'L1' | 'L2' | 'L3' | 'L4';
+  aiStrategy?: 'L0' | 'L1' | 'L2' | 'L3' | 'L4';
   shikigamiState: ShikigamiState[];
   tempBuffs: TempBuff[];
   // 式神选择阶段的临时字段

@@ -112,9 +112,10 @@ export class SocketServer {
     });
     
     // 房间删除时通知所有成员（房间被解散）
-    this.roomManager.onRoomDeleted((roomId) => {
+    this.roomManager.onRoomDeleted((roomId, disbandReason) => {
+      const reason = disbandReason || '房主已离开，房间已解散';
       console.log(`[SocketServer] 房间 ${roomId} 被解散，通知所有成员`);
-      this.io.to(roomId).emit('room:disbanded' as any, { reason: '房主已离开，房间已解散' });
+      this.io.to(roomId).emit('room:disbanded' as any, { reason });
       
       // 让所有socket离开这个房间
       const roomSockets = this.io.sockets.adapter.rooms.get(roomId);
@@ -150,11 +151,12 @@ export class SocketServer {
       return;
     }
     
-    // 构建确认玩家列表
+    // 构建确认玩家列表（按 socketId 去重，避免重复项导致永远无法全员确认）
     const confirmPlayers: ConfirmPlayer[] = [];
-    
-    // 添加真人玩家
+    const seenSockets = new Set<string>();
     for (const p of result.players) {
+      if (seenSockets.has(p.socketId)) continue;
+      seenSockets.add(p.socketId);
       const socket = this.io.sockets.sockets.get(p.socketId);
       if (socket) {
         confirmPlayers.push({
@@ -186,7 +188,8 @@ export class SocketServer {
       });
       return;
     }
-    
+
+    // 含单人匹配在内：一律先走确认阶段（match:confirmPhase），真人点「确认参战」后再开局并进入选式神
     // 创建确认会话
     const session = this.confirmManager.createSession(
       confirmPlayers,
@@ -263,15 +266,15 @@ export class SocketServer {
       return;
     }
 
-    const notConfirmedNames = timedOutHumans.map(p => p.name).join(', ');
-    sessionData.players.forEach(p => {
+    const notConfirmedNames = timedOutHumans.map((p) => p.name).join(', ');
+    const parts: string[] = [];
+    if (startResult.error) parts.push(startResult.error);
+    if (notConfirmedNames) parts.push(`限时内未确认：${notConfirmedNames}`);
+    const reason = parts.join('；') || '确认超时，匹配失败';
+    sessionData.players.forEach((p) => {
       if (!p.isAI && p.socketId) {
         const s = this.io.sockets.sockets.get(p.socketId);
-        s?.emit('match:confirmFailed' as any, {
-          reason: notConfirmedNames
-            ? `确认超时，以下玩家未确认: ${notConfirmedNames}`
-            : (startResult.error || '确认超时，匹配失败'),
-        });
+        s?.emit('match:confirmFailed' as any, { reason });
       }
     });
     this.cleanupAIPlayers(sessionData.players);
@@ -330,6 +333,10 @@ export class SocketServer {
       return { success: false, error: '匹配失败：总人数不足3人' };
     }
 
+    // #region agent log
+    fetch('http://127.0.0.1:7249/ingest/fe374947-e9d9-43de-b23c-53a6c75d96c3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'698d09'},body:JSON.stringify({sessionId:'698d09',runId:'pre-fix',hypothesisId:'H2',location:'SocketServer.ts:startMatchedGame:entry',message:'startMatchedGame entry',data:{humanN:humanPlayers.length,aiN:aiPlayers.length,humanSock:humanPlayers.map(p=>(p.socketId||'').slice(0,8))},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
     // 第一个真人玩家作为房主
     const host = humanPlayers[0];
     const hostSocket = this.io.sockets.sockets.get(host.socketId!);
@@ -344,8 +351,10 @@ export class SocketServer {
       isPrivate: true,
     };
 
+    let createdRoom: Room | undefined;
     try {
-      const room = this.roomManager.createRoom(host.socketId!, host.name, roomConfig);
+      createdRoom = this.roomManager.createRoom(host.socketId!, host.name, roomConfig);
+      const room = createdRoom;
 
       hostSocket.join(room.id);
       hostSocket.data.roomId = room.id;
@@ -361,9 +370,11 @@ export class SocketServer {
         }
       }
 
+      let aiJoinFail = 0;
       for (const ai of aiPlayers) {
         const joinResult = this.roomManager.joinRoom(room.id, ai.id, ai.name);
         if (!joinResult.success) {
+          aiJoinFail++;
           console.warn(`[SocketServer] AI 玩家 ${ai.name} 加入房间失败`);
         }
       }
@@ -374,33 +385,47 @@ export class SocketServer {
           room.setPlayerReady(player.id, true);
         }
       });
+      this.roomManager.notifyRoomUpdate(room.id);
+
+      // #region agent log
+      fetch('http://127.0.0.1:7249/ingest/fe374947-e9d9-43de-b23c-53a6c75d96c3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'698d09'},body:JSON.stringify({sessionId:'698d09',runId:'pre-fix',hypothesisId:'H1_H5',location:'SocketServer.ts:startMatchedGame:preStartGame',message:'before startGame',data:{roomId:room.id,hostId:room.hostId.slice(0,8),playerCount:room.playerCount,aiJoinFail,readySnap:room.players.map(p=>({i:p.id.slice(0,8),h:!!p.isHost,r:!!p.isReady}))},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
 
       const startResult = this.roomManager.startGame(room.id, room.hostId);
+      // #region agent log
+      fetch('http://127.0.0.1:7249/ingest/fe374947-e9d9-43de-b23c-53a6c75d96c3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'698d09'},body:JSON.stringify({sessionId:'698d09',runId:'pre-fix',hypothesisId:'H1',location:'SocketServer.ts:startMatchedGame:startGameResult',message:'startGame result',data:{ok:!!startResult.success,err:startResult.error||null,hasGame:!!room.game},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (!startResult.success || !room.game) {
+        this.roomManager.deleteRoom(room.id, '匹配开局失败，房间已关闭');
+        createdRoom = undefined;
         return { success: false, error: startResult.error || '自动开局失败' };
       }
 
       this.wireGameStateAndAi(room);
 
       const initialState = room.game.getState();
-      humanPlayers.forEach(p => {
-        const s = this.io.sockets.sockets.get(p.socketId!);
-        s?.emit('game:started', initialState);
+      // 与 game:start 一致：按房间内玩家 id（真人即 socketId）投递，避免确认列表与 room.players 不一致时漏发
+      room.players.forEach((rp) => {
+        const s = this.io.sockets.sockets.get(rp.id);
+        if (!s) return;
+        s.emit('game:started', initialState);
       });
 
       room.game.start();
 
       if (matchMeta?.sessionId) {
-        humanPlayers.forEach(p => {
-          const s = this.io.sockets.sockets.get(p.socketId!);
-          s?.emit('match:ready' as any, { sessionId: matchMeta.sessionId, roomId: room.id });
+        room.players.forEach((rp) => {
+          const s = this.io.sockets.sockets.get(rp.id);
+          if (!s) return;
+          s.emit('match:ready' as any, { sessionId: matchMeta.sessionId, roomId: room.id });
         });
       }
 
       // 开局成功后再通知匹配完成
-      humanPlayers.forEach(p => {
-        const s = this.io.sockets.sockets.get(p.socketId!);
-        s?.emit('match:found' as any, {
+      room.players.forEach((rp) => {
+        const s = this.io.sockets.sockets.get(rp.id);
+        if (!s) return;
+        s.emit('match:found' as any, {
           roomId: room.id,
           players: room.players,
           aiCount: aiPlayers.length,
@@ -408,9 +433,13 @@ export class SocketServer {
       });
 
       console.log(`[SocketServer] 匹配房间创建并自动开局成功: ${room.id}`);
+      createdRoom = undefined;
       return { success: true, roomId: room.id };
     } catch (error: any) {
       console.error('[SocketServer] 创建匹配房间失败:', error);
+      if (createdRoom) {
+        this.roomManager.deleteRoom(createdRoom.id, '匹配开局失败，房间已关闭');
+      }
       return { success: false, error: error.message || '创建房间失败' };
     }
   }
@@ -672,27 +701,45 @@ export class SocketServer {
   private bindGameEvents(socket: TypedSocket): void {
     // 开始游戏
     socket.on('game:start', (callback) => {
-      const room = this.roomManager.getPlayerRoom(socket.id);
-      if (!room) {
-        callback?.({ success: false, error: '不在房间中' });
-        return;
-      }
-      
-      const result = this.roomManager.startGame(room.id, socket.id);
-      
-      if (result.success && room.game) {
+      const ack = (payload: { success: boolean; error?: string }) => {
+        try {
+          callback?.(payload);
+        } catch {
+          // 客户端已断开等
+        }
+      };
+
+      try {
+        const room = this.roomManager.getPlayerRoom(socket.id);
+        if (!room) {
+          ack({ success: false, error: '不在房间中' });
+          return;
+        }
+
+        // 对局已在进行：常见于客户端漏收 game:started / 状态丢失，补发快照并视为成功，避免大厅一直卡住
+        if (room.status === 'playing' && room.game) {
+          console.log(`[SocketServer] 房间 ${room.id} 已在游戏中，向 ${socket.id} 补发 game:started`);
+          socket.emit('game:started', room.game.getState());
+          ack({ success: true });
+          return;
+        }
+
+        const result = this.roomManager.startGame(room.id, socket.id);
+
+        if (!result.success || !room.game) {
+          ack({ success: false, error: result.error || '开始游戏失败' });
+          return;
+        }
+
         this.wireGameStateAndAi(room);
-        
-        // 调试：检查房间成员
+
         const roomSockets = this.io.sockets.adapter.rooms.get(room.id);
         console.log(`[SocketServer] 房间 ${room.id} Socket.io 成员:`, roomSockets ? Array.from(roomSockets) : '无');
         console.log(`[SocketServer] 房间 ${room.id} Room 玩家:`, room.players.map(p => p.id));
-        
-        // 广播游戏开始（客户端根据自己的 playerIndex 取对应数据）
+
         const initialState = room.game.getState();
-        
-        // 使用逐个发送确保所有玩家收到
-        room.players.forEach(p => {
+
+        room.players.forEach((p) => {
           const playerSocket = this.io.sockets.sockets.get(p.id);
           if (playerSocket) {
             console.log(`[SocketServer] 向玩家 ${p.name} (${p.id}) 发送 game:started`);
@@ -701,14 +748,14 @@ export class SocketServer {
             console.warn(`[SocketServer] 玩家 ${p.name} (${p.id}) socket 不存在！`);
           }
         });
-        
-        // 启动游戏（触发式神选择倒计时等）
+
         room.game.start();
-        
-        callback?.({ success: true });
+
+        ack({ success: true });
         console.log(`[SocketServer] 房间 ${room.id} 游戏开始`);
-      } else {
-        callback?.({ success: false, error: result.error });
+      } catch (err: any) {
+        console.error('[SocketServer] game:start 异常:', err);
+        ack({ success: false, error: err?.message || '开局过程异常' });
       }
     });
 
@@ -1614,6 +1661,18 @@ export class SocketServer {
   }
 
   /**
+   * pendingChoice 自动提交时的策略层：L0 在合法集内均匀随机；L1 与策划 §6.2/§6.4 默认一致。
+   * L2+ 在未单独实现前与 L1 相同。
+   */
+  private aiPendingAutoLevel(
+    game: { getPlayer: (id: string) => { aiStrategy?: string } | undefined },
+    playerId: string
+  ): 'L0' | 'L1' {
+    const p = game.getPlayer(playerId);
+    return p?.aiStrategy === 'L0' ? 'L0' : 'L1';
+  }
+
+  /**
    * AI 一步：鬼火刷新选择 / 式神阶段确认 / 行动阶段出牌-击杀-结束
    */
   private async runAiTurnStep(roomId: string): Promise<void> {
@@ -1674,6 +1733,33 @@ export class SocketServer {
       }
     }
 
+    const pcWang = (state as any).pendingChoice;
+    if (pcWang?.type === 'wangliangChoice') {
+      const rid = pcWang.playerId as string;
+      if (this.aiManager.isAI(rid) || game.isOfflineHostedPlayer(rid)) {
+        this.aiTurnBusy.add(roomId);
+        try {
+          const validTargets = (pcWang.allTargets as any[]).filter((t: any) => t.card != null);
+          const level = this.aiPendingAutoLevel(game, rid);
+          const decisions = validTargets.map((t: any) => ({
+            playerId: t.playerId as string,
+            action:
+              level === 'L0'
+                ? ((Math.random() < 0.5 ? 'discard' : 'keep') as 'keep' | 'discard')
+                : ('keep' as const),
+          }));
+          const r = game.handleWangliangBatchResponse(rid, decisions);
+          if (r.success) {
+            this.broadcastGameState(roomId, game.getState());
+            this.scheduleAiTurn(roomId);
+          }
+        } finally {
+          this.aiTurnBusy.delete(roomId);
+        }
+        return;
+      }
+    }
+
     const cur = state.players[state.currentPlayerIndex];
     const isSeatAI = this.aiManager.isAI(cur.id);
     const isOfflineHosted = game.isOfflineHostedPlayer(cur.id);
@@ -1684,7 +1770,9 @@ export class SocketServer {
       const pc = (state as any).pendingChoice;
       if (pc && pc.playerId === cur.id) {
         if (pc.type === 'salvageChoice') {
-          const r = game.handleSalvageResponse(cur.id, false);
+          const level = this.aiPendingAutoLevel(game, cur.id);
+          const doSalvage = level === 'L0' ? Math.random() < 0.5 : false;
+          const r = game.handleSalvageResponse(cur.id, doSalvage);
           if (r.success) {
             this.broadcastGameState(roomId, game.getState());
             this.scheduleAiTurn(roomId);
@@ -1694,13 +1782,23 @@ export class SocketServer {
         if (pc.type === 'yokaiTarget') {
           const opts: string[] = pc.options || [];
           if (opts.length > 0) {
-            game.handleYokaiTargetResponse(cur.id, opts[0]);
+            const level = this.aiPendingAutoLevel(game, cur.id);
+            const pick =
+              level === 'L0'
+                ? opts[Math.floor(Math.random() * opts.length)]!
+                : opts[0];
+            game.handleYokaiTargetResponse(cur.id, pick);
           }
           return;
         }
         if (pc.type === 'yokaiChoice') {
-          // yohkai二选一：默认选第一个（抓牌+1）
-          const r = game.handleYokaiChoiceResponse(cur.id, 0);
+          const opts: string[] = pc.options || [];
+          const level = this.aiPendingAutoLevel(game, cur.id);
+          const idx =
+            level === 'L0' && opts.length > 0
+              ? Math.floor(Math.random() * opts.length)
+              : 0;
+          const r = game.handleYokaiChoiceResponse(cur.id, idx);
           if (r.success) {
             this.broadcastGameState(roomId, game.getState());
             this.scheduleAiTurn(roomId);

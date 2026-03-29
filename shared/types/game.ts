@@ -133,7 +133,7 @@ export interface PlayerState {
   /** 是否为 AI（匹配/机器人座位） */
   isAI?: boolean;
   /** AI 策略层级 */
-  aiStrategy?: 'L1' | 'L2' | 'L3' | 'L4';
+  aiStrategy?: 'L0' | 'L1' | 'L2' | 'L3' | 'L4';
   
   // 式神状态
   shikigamiState: ShikigamiState[];

@@ -1,8 +1,8 @@
 # AI玩家匹配机制设计文档
 
-> 版本：v1.1  
-> 日期：2026-03-25  
-> 状态：已确认；AI 策略分级规格已增补（§5.3–§5.5）
+> 版本：v1.2  
+> 日期：2026-03-29  
+> 状态：已确认；v1.2 增补 **§6.4 pendingChoice 通用规则与 L1 登记**（含魍魉之匣专项）
 
 ---
 
@@ -291,6 +291,58 @@
 |------|------|
 | 策略 | 自动确认，无需等待 |
 
+### 6.4 pendingChoice 通用规则与 L1 登记
+
+对局中出现 `GameState.pendingChoice` 时，**负责操作的座位**为字段 `playerId`。该座位为 **AI** 或 **离线托管** 时，须在短时延内自动给出**合法**响应，避免无限期挂起（与《游戏规则说明书》§5.4 一致）。
+
+#### 6.4.1 总则
+
+| 条目 | 说明 |
+|------|------|
+| **可文档化** | L1 默认须能写清、并能用单测或固定种子断言；L2+ 可在合法集内改偏好，见 §5.3。 |
+| **单一管线** | 实现目标为 §7.1：**所有** `pendingChoice` 的 AI 决策经同一策略入口（如 `AIDirector` / `AIStrategy`）；过渡期若仍在 `SocketServer` 等处特判，**须与本节及 §6.4.2 一致**，并逐步收口。 |
+| **类型源与维护** | 以 `shared/types/pendingChoice.ts` 中 `PendingChoice` 联合类型为主；服务端 `GameState` 若另有字面量扩充，须**双端同步**。**新增 `type` 必须**：更新类型 → 本节 **§6.4.4 类型索引** 补行 → 指定归入 **§6.4.2** 某一类或 **§6.4.3** 写专项。 |
+| **与人类 UI 初态对齐** | 若客户端对某交互有明确「未操作时的默认态」（如全未勾选），L1 **优先与该默认态一致**，便于对照验收、减少「AI 像乱点」的体感。 |
+
+#### 6.4.2 L1 归类兜底（表内未专项约定的 type）
+
+当某 `type` 在 §6.4.3 无单独行时，按下列顺序**自上而下命中即用**（只选一条路径，保证实现可一致）：
+
+1. **`options: string[]` 文案选项**：选 **索引 0**（与 §6.2「二选一选第一项」一致）。
+2. **单一合法目标**（妖怪位、玩家座、`instanceId` 等）：在合法集内 **均匀随机**（同 §6.2 `onSelectTarget`）。
+3. **须从手牌弃置恰好 N 张**：优先弃 **HP 最低** 的牌，直至凑满 N（同 §6.2 `onSelectCards`）；若允许少弃则取规则允许的最少张数。
+4. **超度 / exile 类、且允许 0 张**：**尽量不超度**（选 0 张）；`minCount > 0` 时在合法集内优先仍选 **HP 最低** 凑满 `minCount`。
+5. **数值输入 `min`～`max`**：**取 `min`**（保守、可预期）。
+6. **仍无法归类**：在卡牌策划文档或 `卡牌开发.md` 补一行 L1，**临时**可与程序约定「合法集首项」并在单测锁定；不得长期无文档。
+
+#### 6.4.3 专项约定（首张示例：魍魉之匣）
+
+**`wangliangChoice`（魍魉之匣 · 各玩家牌库顶保留/弃置）**
+
+| 项目 | L1 规则 |
+|------|---------|
+| **操作者** | 妨害发动者；即 `pendingChoice.playerId`（可与当前回合玩家不同；以状态为准）。 |
+| **决策形态** | 对每名有牌库顶可处置目标的玩家，各选 `keep` 或 `discard`；服务端一次性 `wangliangBatchResponse` 提交。 |
+| **L1 默认** | **全员保留（keep）**：与客户端弹层初态（未选中任何「弃置」）一致；**不按位随机弃置**，以免 L1 与「新手可预期」目标冲突。 |
+| **验收** | AI 为发动者时，对局不得停留在「等待确认各玩家牌库顶…」；提交后状态 `pendingChoice` 清除并继续结算。 |
+
+> **说明**：若将来为 L2+ 引入「偏弃置高威胁牌库顶」等启发式，须在 §5.3.2 另列一切面，且仍以合法为底线。
+
+#### 6.4.4 类型索引（与 shared 联合类型对齐，便于策划校对）
+
+下列 **`type`** 的 L1 **默认归入 §6.4.2**，除非已在 **§6.4.3** 专项列出或与 **§6.2「卡牌效果选择规则」** 表中某一类一一对应（如 `salvageChoice`、`yokaiChoice`）。
+
+| `type` | 备注 |
+|--------|------|
+| `salvageChoice` / `yokaiTarget` / `yokaiChoice` / `cardSelect` / `selectCardsMulti` / `selectCardPutTop` | 分别对齐 §6.2 表内同类语义；其中多选弃置叠 §6.4.2-③，多选超度叠 §6.4.2-④。 |
+| `meiYaoSelect` / `akajitaSelect` / `akajitaBatch` / `wheelMonkDiscard` / `naginataSoulDiscard` / `zhenMuShouTarget` / `youguXiangSelect` / `yinmoluoSelect` | 多选项或候选集合：优先 §6.4.2-①～③；`zhenMuShouTarget` 为合法目标随机见 §6.4.2-②。 |
+| `dizangConfirm` / `dizangSelectShikigami` / `dizangReplaceShikigami` | 确认/候选类：§6.4.2-①（索引 0）或取 `min`；二次确认以「取消误操作」优先须在实现与单测中与卡牌规则核对后固化。 |
+| `shikigamiTarget` / `shikigamiDiscard` / `shikigamiExile` / `shikigamiNumberInput` / `shikigamiConfirm` / `shikigamiOption` | 分别归入 §6.4.2-②～⑤ 或与 §6.2 弃牌/超度一致。 |
+| `harassmentResist` / `bossRaidDefense` / `shangHunNiaoExile` | 尽量少发动额外资源、`minCount` 允许则选 0；具体合法集以牌面为准。 |
+| `harassmentPipelineChoice` | **管线内多段二选一**：L1 可与现行 `SocketServer` 鲁棒规则对齐；**新分支须在 AIStrategy 登记**，避免继续堆叠 ad-hoc 条件。 |
+| `wangliangChoice` | **§6.4.3 专项**（非兜底）。 |
+| `tufoSelect` / `fanHunXiangChoice` 及服务端 `GameState` 中其他扩充字面量（如 `treeDemonDiscard`、`rinyuChoice`、`bangJingExile`、`diceGhostExile`、`diceGhostTarget` 等） | 上线前须补 **§6.4.4 一行** 或 §6.4.3 专项；在此之前适用 §6.4.2 整段兜底并与程序单测一致。 |
+
 ---
 
 ## 七、技术实现要点
@@ -304,7 +356,7 @@
 | `AIStrategy` | **策略引擎接口**：按 `PlayerState.aiStrategy`（`L0`～`L4`）由工厂注入实现类；各层仅替换「评分/搜索/随机源」 |
 | `AIStrategyFactory`（建议） | `create(strategy: AiStrategyLevel): AIStrategy`；超时降级时返回低阶策略实例 |
 
-**单一调度入口（约定）**：`allocateDamage`、`playCard`、`endTurn`、`handleRetireYokai` / 超度选择，以及所有 **`pendingChoice`**（`onChoice`、`onSelectTarget`、`onSelectCards`、`salvageChoice` 等）的 AI 响应，均应走 **同一决策管线**（例如 `AIDirector.decide(state, playerId, context)`），由当前玩家的 `AIStrategy` 产出动作；避免在 `SocketServer` / `MultiplayerGame` 内散落 if-else 硬编码各层逻辑。
+**单一调度入口（约定）**：`allocateDamage`、`playCard`、`endTurn`、`handleRetireYokai` / 超度选择，以及所有 **`pendingChoice`**（含 §6.2 所述 `onChoice` / `onSelectTarget` / `onSelectCards` / `salvageChoice`，以及 **`wangliangChoice`、`harassmentPipelineChoice`、式神技能系 type 等**）的 AI 响应，均应走 **同一决策管线**（例如 `AIDirector.decide(state, playerId, context)`），由 **`pendingChoice.playerId` 对应座位** 的 `AIStrategy` 产出动作；避免在 `SocketServer` / `MultiplayerGame` 内散落 if-else 硬编码各层逻辑（过渡特例须与 **§6.4** 对齐）。
 
 **匹配默认层级**：当前填充机器人的 **`aiStrategy` 固定为 `L1`**（与仓库实现一致）。Phase 2 可扩展：**段位/分数 → 默认 L2**、测试房指定 L0、高端房 L3 等。
 
@@ -377,6 +429,7 @@ interface PlayerState {
 - [ ] **AI L3（可选）**：有限深度搜索 + **时间盒**与 **L2→L1 降级链**；复杂度与超时监控
 - [ ] **AI L4**：独立立项（数据日志、自对弈管线、模型版本与在线推理接口）
 - [ ] 类型与配置 **统一 `AiStrategyLevel`（含 L0）**；`AIStrategy` 接口 + 工厂；`MultiplayerGame` 按 `aiStrategy` 分支（当前均为 L1）
+- [ ] **`pendingChoice` AI 收口**：补全 **`wangliangChoice` 等** L1 自动响应，与 **§6.4** 及《游戏规则说明书》§5.4 一致；逐步迁入 **§7.1** 单一管线
 - [ ] 断线重连与 AI 接管
 
 ---
@@ -388,4 +441,4 @@ interface PlayerState {
 
 ---
 
-> ✅ 文档 v1.1：匹配与 L1 行为仍可开发迭代；AI **分级规格**（§5.3–§5.5、§7.1）作为 L2+ 与类型统一的依据。
+> ✅ 文档 v1.2：在 v1.1 基础上增补 **§6.4**（`pendingChoice` 通用规则、L1 兜底、`wangliangChoice` 专项、类型索引）；匹配与 L1 行为仍可开发迭代；AI **分级规格**（§5.3–§5.5、§7.1）作为 L2+ 与类型统一的依据。

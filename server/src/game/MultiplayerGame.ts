@@ -3812,6 +3812,15 @@ export class MultiplayerGame {
         prompt: prompt ?? '',
         meta,
       } as any;
+      const toastMsg =
+        prompt && prompt.trim().length > 0
+          ? prompt.trim()
+          : `请选择：${options.join(' / ')}`;
+      this.state.settlementToast = {
+        message: toastMsg,
+        recipientPlayerIds: [playerId],
+        timestamp: Date.now(),
+      };
       this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
     });
   }
@@ -3919,7 +3928,7 @@ export class MultiplayerGame {
         case '唐纸伞妖':
           // 伤害+1，查看牌库顶牌，可选超度
           player.damage += 1;
-          this.addLog(`   ✨ 御魂：伤害+1`);
+          this.addLog(`   ✨ 御魂：伤害+1`, { settlementToastFor: [player.id] });
           
           // 如果牌库有牌，设置等待玩家选择是否超度
           if (player.deck.length > 0) {
@@ -3998,7 +4007,7 @@ export class MultiplayerGame {
         case '天邪鬼赤':
           // 伤害+1，弃置任意数量手牌，抓等量的牌
           player.damage += 1;
-          this.addLog(`   ✨ 御魂：伤害+1`);
+          this.addLog(`   ✨ 御魂：伤害+1`, { settlementToastFor: [player.id] });
           
           // 如果有手牌，让玩家选择要弃置的牌
           if (player.hand.length > 0) {
@@ -4017,7 +4026,7 @@ export class MultiplayerGame {
         case '天邪鬼黄':
           // 抓牌+2，然后将1张手牌置于牌库顶
           this.drawCards(player, 2);
-          this.addLog(`   ✨ 御魂：抓牌+2`);
+          this.addLog(`   ✨ 御魂：抓牌+2`, { settlementToastFor: [player.id] });
           // 如果有手牌，弹出选择界面让玩家选1张置顶
           if (player.hand.length > 0) {
             this.state.pendingChoice = {
@@ -4046,7 +4055,7 @@ export class MultiplayerGame {
         case '树妖':
           // 抓牌+2，弃置1张
           this.drawCards(player, 2);
-          this.addLog(`   ✨ 御魂：抓牌+2`);
+          this.addLog(`   ✨ 御魂：抓牌+2`, { settlementToastFor: [player.id] });
           // 如果有手牌，让玩家选择要弃置的牌
           if (player.hand.length > 0) {
             this.state.pendingChoice = {
@@ -7845,6 +7854,8 @@ export class MultiplayerGame {
       visibility?: 'public' | 'private';
       playerId?: string;
       refs?: Record<string, { type: 'card' | 'shikigami' | 'boss' | 'player'; id: string; name: string; data?: any }>;
+      /** §5.5：与本次日志同源的中部提示，仅列出的玩家客户端弹窗 */
+      settlementToastFor?: string[];
     }
   ): void {
     // 自动提取实体引用
@@ -7861,16 +7872,27 @@ export class MultiplayerGame {
       }
     }
     
+    const ts = Date.now();
+    const logSeq = this.nextLogSeq++;
     this.state.log.push({
       type: 'game_start',
       message: processedMessage,
-      timestamp: Date.now(),
-      logSeq: this.nextLogSeq++,
+      timestamp: ts,
+      logSeq,
       visibility: options?.visibility || 'public',
       playerId: options?.playerId,
       refs: Object.keys(finalRefs).length > 0 ? finalRefs : undefined,
     });
-    
+
+    if (options?.settlementToastFor && options.settlementToastFor.length > 0) {
+      this.state.settlementToast = {
+        message,
+        recipientPlayerIds: [...options.settlementToastFor],
+        logSeq,
+        timestamp: ts,
+      };
+    }
+
     // 保留最近100条日志
     if (this.state.log.length > 100) {
       this.state.log = this.state.log.slice(-100);

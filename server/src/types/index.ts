@@ -238,6 +238,10 @@ export interface GameState {
   turnPhase: TurnPhase | 'start';
   turnStartAt?: number;
   turnTimeoutMs?: number;
+  /** 多人：等待其他玩家回合外反馈时暂停行动阶段倒计时 */
+  turnTimerPaused?: boolean;
+  turnPausedRemainMs?: number;
+  outOfTurnFeedbackDeadlineAt?: number;
   field: FieldState;
   shikigamiDeck?: ShikigamiCard[];
   shikigamiOptions?: ShikigamiCard[];
@@ -257,7 +261,8 @@ export interface GameState {
     type: 'salvageChoice' | 'cardSelect' | 'yokaiTarget' | 'yokaiChoice' 
       | 'treeDemonDiscard' | 'rinyuChoice' | 'bangJingExile' | 'diceGhostExile' 
       | 'diceGhostTarget' | 'selectCardsMulti' | 'selectCardPutTop' | 'wheelMonkDiscard'
-      | 'wangliangChoice' | 'meiYaoSelect' | 'akajitaSelect' | 'fanHunXiangChoice'
+      | 'wangliangChoice' | 'meiYaoSelect' | 'akajitaSelect' | 'akajitaBatch'       | 'fanHunXiangChoice'
+      | 'harassmentPipelineChoice'
       | 'tufoSelect' | 'youguXiangSelect' | 'naginataSoulDiscard' | 'zhenMuShouTarget'
       | 'yinmoluoSelect'
       // 地藏像相关
@@ -274,6 +279,14 @@ export interface GameState {
   
   // 轮入道队列执行
   wheelMonkQueue?: WheelMonkQueue;
+
+  /** 与信息栏同源的中部提示（仅 recipient 含本机时由客户端展示） */
+  settlementToast?: {
+    message: string;
+    recipientPlayerIds: string[];
+    logSeq?: number;
+    timestamp: number;
+  };
   
   // 阴摩罗回合结束归还队列
   pendingEndOfTurnEffects?: EndOfTurnEffect[];

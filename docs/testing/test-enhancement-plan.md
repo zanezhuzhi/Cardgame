@@ -34,6 +34,8 @@
 
 **目标**: 确保 `MultiplayerGame` 核心流程可测试验证
 
+**进展（2026-03-30）**: 已新增 `server/src/game/__tests__/MultiplayerGame.action.test.ts`，覆盖「非当前玩家 / 非行动阶段不可 endTurn」与「当前玩家 endTurn 后轮转与补牌」。可继续在此文件补充 `playCard`、伤害分配、`attackBoss` 等用例。
+
 **范围**:
 ```
 server/src/game/MultiplayerGame.ts

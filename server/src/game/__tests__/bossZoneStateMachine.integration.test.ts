@@ -13,6 +13,10 @@ import {
 describe('bossZoneStateMachine（鬼王状态机）', () => {
   it('🟢 击杀鬼王 → pendingBossReveal；清理阶段后翻出下一只且标记清除', async () => {
     const game = createMultiplayerGameForTest({ playerCount: 2 });
+    const seenEvents: string[] = [];
+    game.setOnStateChange((_s, ev) => {
+      if (ev && 'type' in ev && ev.type === 'BOSS_ARRIVAL') seenEvents.push('BOSS_ARRIVAL');
+    });
     const st = getHarnessState(game);
     const first = st.field.bossDeck.shift()!;
     st.field.currentBoss = first;
@@ -40,5 +44,6 @@ describe('bossZoneStateMachine（鬼王状态机）', () => {
     expect(st.field.currentBoss).not.toBeNull();
     expect(st.field.currentBoss!.name).not.toBe(first.name);
     expect(st.bossDefeatedByPlayerId).toBeNull();
+    expect(seenEvents).toContain('BOSS_ARRIVAL');
   });
 });

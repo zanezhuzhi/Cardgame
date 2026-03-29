@@ -1781,6 +1781,12 @@ export class MultiplayerGame {
     
     // 11. 如果本回合击败了鬼王，翻出下一张鬼王并执行来袭效果（await，避免与 nextTurn 竞态）
     if (this.state.pendingBossReveal) {
+      const defeaterId = this.state.bossDefeatedByPlayerId;
+      if (defeaterId != null && defeaterId !== player.id) {
+        this.addLog(
+          `⚠️ [鬼王状态机] bossDefeatedByPlayerId 与清理玩家不一致（击败者=${defeaterId}，清理=${player.id}），来袭顺序仍按击败者 ID`
+        );
+      }
       this.state.pendingBossReveal = false;
       await this.revealBoss();
       // 若翻上的仍是地震鲶，再藏 1 张（如新鬼王登场当次清理）
@@ -3137,6 +3143,11 @@ export class MultiplayerGame {
     this.state.field.bossCurrentHp = boss.hp;
     
     this.addLog(`👹 鬼王 ${boss.name} 登场！（HP: ${boss.hp}）`);
+
+    this.notifyStateChange({
+      type: 'BOSS_ARRIVAL',
+      boss,
+    });
     
     if (boss.name !== '麒麟') {
       try {

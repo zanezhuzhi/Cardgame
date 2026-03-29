@@ -84,12 +84,15 @@
 
 ## 5. 已知实现债务（收敛目标）
 
-- `BossEffects` 内默认自动 `onChoice` / `onSelectCards` 应付正式多人待替换为真实 `pendingChoice` 回传。
+- **P1 — 来袭交互**：`BossEffects` 内仍用 `executeBossArrivalEffect` 传入的默认 `onChoice` / `onSelectCards`（自动选）；正式多人需改为挂起 `pendingChoice`、客户端回传后再续行（清理阶段内可多段 pending，需与 §5.4 计时一致）。**不动妖怪御魂 `YokaiEffects`，仅在鬼王管线扩展。**
+- **P2 — 青女房**：`onCheckBossRaidDefense` 当前默认自动展示免疫；后续应走 `bossRaidDefense` 等 pending，由玩家选择是否免疫。
 
 ---
 
 ## 6. 已落地（代码）
 
+- 翻出新鬼王后 **`notifyStateChange({ type: 'BOSS_ARRIVAL', boss })`**（含麒麟首张，便于客户端统一播放入场）。
+- 清理阶段若 `pendingBossReveal` 且 `bossDefeatedByPlayerId !==` 当前清理玩家：**打日志警告**（不按当前玩家覆盖击败者 ID，来袭顺序仍以 `arrivalStartPlayerId` 为准）。
 - `GameState`：`pendingBossReveal`、`pendingGameEnd`、`bossDefeatedByPlayerId`（服务端与 `shared/types/game` 同步）。
 - `PlayerState`：`cardsUnderOnmyoji`（地震鲶等）；`clearBossEffect` / `clearEarthquakeCatfishEffect` 与此字段及旧 `hiddenCards` 兼容。
 - 击杀鬼王：`defeatBoss` 统一语义；`handleAttackBoss` 击杀时走 `defeatBoss`；`handleRetireBoss` 翻下场改为清理阶段 `pendingBossReveal`。
@@ -106,3 +109,4 @@
 | 2026-03-30 | 初稿：状态机、来袭首名=当前清理玩家、地震鲶按人清理藏牌 |
 | 2026-03-30 | 说明书 §6.4 / 十二节链接；本节 §6 记录代码落地项 |
 | 2026-03-30 | §0：妖怪御魂（YokaiEffects）实现冻结边界，与客户端御魂实机验证对齐 |
+| 2026-03-30 | BOSS_ARRIVAL 事件；清理阶段击败者/清理人不一致时告警；§5 拆分 P1/P2 债务 |

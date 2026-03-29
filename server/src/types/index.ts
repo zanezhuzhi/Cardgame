@@ -75,6 +75,7 @@ export interface CardInstance {
   charm?: number;
   damage?: number;
   effect?: string;
+  keywords?: string[];
   image?: string;
 }
 
@@ -165,6 +166,8 @@ export interface PlayerState {
   discard: CardInstance[];
   played: CardInstance[];
   exiled: CardInstance[];
+  /** 地震鲶等：阴阳师下藏牌 */
+  cardsUnderOnmyoji?: CardInstance[];
   totalCharm: number;
   cardsPlayed: number;
   isConnected: boolean;
@@ -252,7 +255,10 @@ export interface GameState {
   lastPlayerKilledYokai?: boolean;
   pendingYokaiRefresh?: boolean;
   turnHadKill?: boolean;
-  
+  pendingBossReveal?: boolean;
+  pendingGameEnd?: boolean;
+  bossDefeatedByPlayerId?: string | null;
+
   /** 
    * 当前回合各来源累积的伤害池
    * 镜姬【妖】效果：只免疫 spell 部分，yokai/shikigami 伤害正常生效
@@ -310,6 +316,8 @@ export interface WheelMonkQueue {
   cardName: string;
   /** 被弃置的御魂卡牌ID */
   cardId: string;
+  /** 被弃置的御魂实例（executeYokaiEffectForWheelMonk 合成执行用） */
+  sourceCard?: CardInstance;
   /** 剩余执行次数（初始值2） */
   remainingExecutions: number;
   /** 执行玩家ID */

@@ -45,6 +45,7 @@ import { defaultHarassmentPipelineChoiceIndex } from '../../../shared/game/multi
 
 // 导入伤害系统（镜姬【妖】效果免疫判定）
 import { isDamageImmune, createDamageSource } from '../../../shared/game/DamageSystem';
+import { cardHasKeyword, resolveYokaiKeywords } from '../../../shared/game/cardKeywords';
 
 // ============ TempBuff 简化管理 ============
 // 临时buff类型定义（与shared/game/TempBuff.ts同步）
@@ -278,6 +279,9 @@ export class MultiplayerGame {
   /** 妨害管线 `onChoice` 挂起时的续行（单槽；与 `pendingChoice` 串行一致） */
   private harassmentPipelineChoiceResolve: ((choice: number) => void) | null = null;
 
+  /** 阴摩罗多选：首张牌产生 pending 后，依次执行剩余牌 */
+  private yinmoluoResume?: { playerId: string; remaining: CardInstance[] };
+
   constructor(roomId: string, players: PlayerInfo[]) {
     this.roomId = roomId;
     this.playerInfoMap = new Map(players.map(p => [p.id, p]));
@@ -496,6 +500,9 @@ export class MultiplayerGame {
       pendingDeathChoices: [],  // [已废弃] 击杀时直接退治，不再使用待选列表
       killedBossThisTurn: false,  // 本回合是否击杀了鬼王
       pendingBossDeath: false,  // [已废弃] 击杀时直接退治，不再使用
+      pendingBossReveal: false,
+      pendingGameEnd: false,
+      bossDefeatedByPlayerId: undefined,
       // 式神选择阶段的全局数据
       shikigamiOptions: allShikigamiOptions,  // 所有式神选项（玩家0的4个 + 玩家1的4个 + ...）
       shikigamiSelectTimeout: GAME_CONSTANTS.SHIKIGAMI_SELECT_TIMEOUT,  // 剩余时间（毫秒）
@@ -723,7 +730,7 @@ export class MultiplayerGame {
         image: card.image || '',
       };
     }
-    return {
+    const base: CardInstance = {
       instanceId: generateId(),
       cardId: card.id,
       cardType: type as any,
@@ -735,6 +742,13 @@ export class MultiplayerGame {
       effect: card.effect,
       image: card.image || '',
     };
+    if (type === 'yokai') {
+      base.keywords = resolveYokaiKeywords({
+        subtype: card.subtype,
+        keywords: card.keywords,
+      });
+    }
+    return base;
   }
 
   /**
@@ -983,7 +997,7 @@ export class MultiplayerGame {
     if (TEST2_3_ENABLED) this.addLog('🧪 [TEST2-3] 所有玩家添加测试卡牌：手牌(基础+中级)、弃牌堆(妖怪hp3+hp5)');
     
     // 翻出第一个鬼王
-    this.revealBoss();
+    void this.revealBoss().catch(e => console.error('[revealBoss]', e));
     
     // 填充战场
     this.fillYokaiSlots();
@@ -1308,7 +1322,11 @@ export class MultiplayerGame {
     }
     if (pc.type === 'yokaiTarget') {
       const opts: string[] = pc.options || [];
-      if (opts.length > 0) this.handleYokaiTargetResponse(playerId, opts[0]);
+      const p = this.getPlayer(playerId);
+      const allowed = p
+        ? opts.filter(oid => !this.isZhenMuShouProhibitedFor(p, oid))
+        : opts;
+      if (allowed.length > 0) this.handleYokaiTargetResponse(playerId, allowed[0]);
       else (this.state as any).pendingChoice = undefined;
       return;
     }
@@ -1661,9 +1679,22 @@ export class MultiplayerGame {
   }
 
   /**
+   * 地震鲶：当前清理玩家抽满手牌后，随机 1 张置于阴阳师下（见 spec 2026-03-30）
+   */
+  private maybeEarthquakeCatfishHideForCleaningPlayer(player: PlayerState): void {
+    if (this.state.field.currentBoss?.name !== '地震鲶') return;
+    if (player.hand.length === 0) return;
+    const idx = Math.floor(Math.random() * player.hand.length);
+    const [card] = player.hand.splice(idx, 1);
+    if (!player.cardsUnderOnmyoji) player.cardsUnderOnmyoji = [];
+    player.cardsUnderOnmyoji.push(card!);
+    this.addLog(`🌊 ${player.name} 因地震鲶将 1 张手牌置于阴阳师下`);
+  }
+
+  /**
    * 清理阶段
    */
-  private enterCleanupPhase(): void {
+  private async enterCleanupPhase(): Promise<void> {
     const player = this.getCurrentPlayer();
     this.state.turnPhase = 'cleanup';
     this.clearTurnTimer();
@@ -1741,20 +1772,24 @@ export class MultiplayerGame {
     
     // 9. 抓5张牌
     this.drawCards(player, GAME_CONSTANTS.STARTING_HAND_SIZE);
+
+    // 9.5 地震鲶存活：本清理玩家藏牌（先于补妖、翻牌）
+    this.maybeEarthquakeCatfishHideForCleaningPlayer(player);
     
     // 10. 补充妖怪
     this.fillYokaiSlots();
     
-    // 11. 如果本回合击败了鬼王，翻出下一张鬼王并执行来袭效果
-    if ((this.state as any).pendingBossReveal) {
-      (this.state as any).pendingBossReveal = false;
-      this.revealBoss();
-      // 来袭效果会影响已抽好的手牌
+    // 11. 如果本回合击败了鬼王，翻出下一张鬼王并执行来袭效果（await，避免与 nextTurn 竞态）
+    if (this.state.pendingBossReveal) {
+      this.state.pendingBossReveal = false;
+      await this.revealBoss();
+      // 若翻上的仍是地震鲶，再藏 1 张（如新鬼王登场当次清理）
+      this.maybeEarthquakeCatfishHideForCleaningPlayer(player);
     }
     
     // 12. 检查游戏是否结束（最后一个鬼王被击败）
-    if ((this.state as any).pendingGameEnd) {
-      (this.state as any).pendingGameEnd = false;
+    if (this.state.pendingGameEnd) {
+      this.state.pendingGameEnd = false;
       this.endGame();
       return;
     }
@@ -2111,7 +2146,7 @@ export class MultiplayerGame {
     }
     
     // 翻出第一个鬼王
-    this.revealBoss();
+    void this.revealBoss().catch(e => console.error('[revealBoss]', e));
     
     // 填充妖怪槽位
     this.fillYokaiSlots();
@@ -2171,6 +2206,10 @@ export class MultiplayerGame {
     if (!this.state.field.currentBoss) {
       return { success: false, error: '没有鬼王可以攻击' };
     }
+
+    if (this.isZhenMuShouProhibitedFor(player, this.state.field.currentBoss.id)) {
+      return { success: false, error: '镇墓兽效果：本回合不能退治该目标' };
+    }
     
     if (player.damage < damage) {
       return { success: false, error: '伤害不足' };
@@ -2190,27 +2229,10 @@ export class MultiplayerGame {
       this.addLog(`⚔️ ${player.name} 对鬼王造成 ${damage} 点伤害`);
     }
     
-    // 检查鬼王是否被击败 → 退治判定基于有效HP
+    // 检查鬼王是否被击败 → 退治判定基于有效HP（翻下一只仅在清理阶段）
     if (damage >= bossEffectiveHp) {
-      this.markTurnHadKill();
       (this.state as any).killedBossThisTurn = true;
-      
-      const boss = this.state.field.currentBoss!;
-      // 直接退治：鬼王进入弃牌堆
-      player.discard.push(boss as any);
-      
-      // 检查茨木「迁怒」buff
-      const exileBonus = TempBuffHelper.triggerExileKillBonus(player);
-      if (exileBonus > 0) {
-        player.damage += exileBonus;
-        this.addLog(`💀 ${player.name} 退治了鬼王 ${boss.name}（+${boss.charm || 0} 声誉，迁怒+${exileBonus}伤害）`);
-      } else {
-        this.addLog(`💀 ${player.name} 退治了鬼王 ${boss.name}（+${boss.charm || 0} 声誉）`);
-      }
-      
-      // 清除当前鬼王并翻出下一个
-      this.state.field.currentBoss = null;
-      this.revealBoss();
+      this.defeatBoss(player);
     }
     
     this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
@@ -2232,6 +2254,10 @@ export class MultiplayerGame {
     const yokai = this.state.field.yokaiSlots[slotIndex];
     if (!yokai) {
       return { success: false, error: '该位置没有妖怪' };
+    }
+
+    if (this.isZhenMuShouProhibitedFor(player, yokai.instanceId)) {
+      return { success: false, error: '镇墓兽效果：本回合不能对该目标造成伤害或退治' };
     }
     
     if (player.damage <= 0) {
@@ -2330,6 +2356,11 @@ export class MultiplayerGame {
     return { success: true };
   }
   
+  /** 镇墓兽：被限制玩家不能对该目标造成可致退治的击杀（分伤/一击与御魂直接退治等） */
+  private isZhenMuShouProhibitedFor(player: PlayerState, targetInstanceId: string): boolean {
+    return !!(player.prohibitedTargets?.includes(targetInstanceId));
+  }
+
   /**
    * 处理退治妖怪（放入弃牌堆）
    */
@@ -2392,6 +2423,10 @@ export class MultiplayerGame {
     if ((yokai.hp || 0) > 0) {
       return { success: false, error: '妖怪还没有被击杀' };
     }
+
+    if (this.isZhenMuShouProhibitedFor(player, yokai.instanceId)) {
+      return { success: false, error: '镇墓兽效果：本回合不能退治该目标' };
+    }
     
     // 移到超度区
     this.state.field.exileZone.push(yokai);
@@ -2450,10 +2485,17 @@ export class MultiplayerGame {
     
     // 清除鬼王死亡标记
     (this.state as any).pendingBossDeath = false;
-    
-    // 清除当前鬼王并翻出下一个
+
+    this.clearBossEffect(boss.name);
     this.state.field.currentBoss = null;
-    this.revealBoss();
+    this.state.field.bossCurrentHp = 0;
+    if (this.state.field.bossDeck.length === 0) {
+      this.state.pendingGameEnd = true;
+      this.state.bossDefeatedByPlayerId = null;
+    } else {
+      this.state.pendingBossReveal = true;
+      this.state.bossDefeatedByPlayerId = player.id;
+    }
     
     this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
     return { success: true };
@@ -2474,6 +2516,10 @@ export class MultiplayerGame {
     if (this.state.field.bossCurrentHp > 0) {
       return { success: false, error: '鬼王还没有被击杀' };
     }
+
+    if (this.isZhenMuShouProhibitedFor(player, boss.id)) {
+      return { success: false, error: '镇墓兽效果：本回合不能退治该目标' };
+    }
     
     // 鬼王进入超度区
     this.state.field.exileZone.push(boss as any);
@@ -2489,10 +2535,17 @@ export class MultiplayerGame {
     
     // 清除鬼王死亡标记
     (this.state as any).pendingBossDeath = false;
-    
-    // 清除当前鬼王并翻出下一个
+
+    this.clearBossEffect(boss.name);
     this.state.field.currentBoss = null;
-    this.revealBoss();
+    this.state.field.bossCurrentHp = 0;
+    if (this.state.field.bossDeck.length === 0) {
+      this.state.pendingGameEnd = true;
+      this.state.bossDefeatedByPlayerId = null;
+    } else {
+      this.state.pendingBossReveal = true;
+      this.state.bossDefeatedByPlayerId = player.id;
+    }
     
     this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
     return { success: true };
@@ -3057,29 +3110,18 @@ export class MultiplayerGame {
   }
   
   /**
-   * 处理鬼王被击败
+   * 处理鬼王被击败（遗留入口，与 defeatBoss 对齐）
    */
   private handleBossDefeated(playerId: string): void {
     const player = this.getPlayer(playerId);
-    const boss = this.state.field.currentBoss;
-    if (!player || !boss) return;
-    
-    // 鬼王进入弃牌堆（声誉会在notifyStateChange时自动重新计算）
-    player.discard.push(boss as any);
-    
-    this.addLog(`👑 ${player.name} 击败了鬼王 ${boss.name}（+${boss.charm || 0} 声誉）`);
-    
-    // 清除当前鬼王
-    this.state.field.currentBoss = null;
-    
-    // 翻出下一个鬼王
-    this.revealBoss();
+    if (!player || !this.state.field.currentBoss) return;
+    this.defeatBoss(player);
   }
   
   /**
-   * 翻出鬼王
+   * 翻出鬼王并 await 来袭（清理阶段须等待完成后再 nextTurn）
    */
-  private revealBoss(): void {
+  private async revealBoss(): Promise<void> {
     if (this.state.field.bossDeck.length === 0) {
       this.addLog('所有鬼王都已被击败！游戏结束');
       this.state.phase = 'ended' as any;
@@ -3096,13 +3138,14 @@ export class MultiplayerGame {
     
     this.addLog(`👹 鬼王 ${boss.name} 登场！（HP: ${boss.hp}）`);
     
-    // 执行鬼王来袭效果（麒麟除外）
     if (boss.name !== '麒麟') {
-      // 异步执行来袭效果，不阻塞主流程
-      this.executeBossArrivalEffect(boss).catch(err => {
+      try {
+        await this.executeBossArrivalEffect(boss);
+      } catch (err) {
         this.addLog(`   ⚠️ 来袭效果执行失败: ${err}`);
-      });
+      }
     }
+    this.state.bossDefeatedByPlayerId = null;
   }
   
   /**
@@ -3119,6 +3162,7 @@ export class MultiplayerGame {
     const context = {
       gameState: this.state,
       bossCard: boss as CardInstance,
+      arrivalStartPlayerId: this.state.bossDefeatedByPlayerId ?? undefined,
       // 选择卡牌回调（用于需要玩家选择的效果）
       onSelectCards: async (cards: CardInstance[], count: number): Promise<string[]> => {
         // 默认自动选择：按HP从低到高选
@@ -3317,7 +3361,11 @@ export class MultiplayerGame {
     // 天邪鬼绿：场上需要有HP≤4的游荡妖怪
     if (card.name === '天邪鬼绿' || card.cardId === 'yokai_003') {
       const hasTarget = this.state.field.yokaiSlots.some(
-        (y): y is CardInstance => y !== null && (y.hp || 0) <= 4 && (y.hp || 0) > 0
+        (y): y is CardInstance =>
+          y !== null &&
+          (y.hp || 0) <= 4 &&
+          (y.hp || 0) > 0 &&
+          !this.isZhenMuShouProhibitedFor(player, y.instanceId)
       );
       if (!hasTarget) {
         return '场上没有生命≤4的游荡妖怪，无法使用天邪鬼绿';
@@ -3937,10 +3985,29 @@ export class MultiplayerGame {
     } as T;
   }
 
+  /** 从 fromPlayerId 起顺时针，除自己外所有玩家 id（与回合行动顺序一致，不含自机） */
+  private getOpponentIdsInTurnOrder(fromPlayerId: string): string[] {
+    const idx = this.state.players.findIndex(p => p.id === fromPlayerId);
+    if (idx === -1) return [];
+    const n = this.state.players.length;
+    const out: string[] = [];
+    for (let k = 1; k < n; k++) {
+      out.push(this.state.players[(idx + k) % n]!.id);
+    }
+    return out;
+  }
+
   /**
    * 执行御魂效果（完整版）
+   * @param _pendingAttachCard 预留：链式结算历史参数（嵌套效果的 pending 外壳现统一用当前结算的 `card`）
    */
-  private executeYokaiEffect(player: PlayerState, card: CardInstance, multiplier: number = 1): void {
+  private executeYokaiEffect(
+    player: PlayerState,
+    card: CardInstance,
+    multiplier: number = 1,
+    _pendingAttachCard?: CardInstance,
+  ): void {
+    void _pendingAttachCard;
     const yokaiName = card.name;
     // 天邪鬼青以 cardId 为准，避免名称字段异常时误入 default 或其它分支
     const effectKey = card.cardId === 'yokai_004' ? '天邪鬼青' : (yokaiName || '');
@@ -3989,7 +4056,13 @@ export class MultiplayerGame {
           // 退治1个生命≤4的游荡妖怪 - 让玩家选择目标
           {
             const validTargets = this.state.field.yokaiSlots
-              .filter((y): y is CardInstance => y !== null && (y.hp || 0) <= 4 && (y.hp || 0) > 0);
+              .filter(
+                (y): y is CardInstance =>
+                  y !== null &&
+                  (y.hp || 0) <= 4 &&
+                  (y.hp || 0) > 0 &&
+                  !this.isZhenMuShouProhibitedFor(player, y.instanceId),
+              );
             
             if (validTargets.length === 0) {
               // 打出前已校验，不应到达；兜底避免静默消耗手牌
@@ -4169,81 +4242,127 @@ export class MultiplayerGame {
           break;
           
         case '魅妖': {
-          // [妨害] 每名对手展示牌库顶牌，选择其中1张生命<5的可用牌，使用其效果，置入弃牌区
-          // 1. 收集所有对手的牌库顶牌
-          const meiYaoCandidates: { ownerId: string; ownerName: string; card: CardInstance; usable: boolean }[] = [];
-          for (const opponent of this.state.players) {
-            if (opponent.id === player.id) continue;
-            if (opponent.deck.length > 0) {
-              // 添加展示状态：当前玩家查看对手牌库顶
-              const topCard = DeckRevealHelper.revealTopCard(opponent, player.id);
-              if (!topCard) continue;
-              
-              // 筛选生命<5的牌（策划：生命低于5）
-              if (topCard.hp !== undefined && topCard.hp < 5) {
-                // 判断是否可用（令牌和恶评不能"使用其效果"）
-                const isUsable = topCard.cardType !== 'token' && topCard.cardType !== 'penalty';
-                meiYaoCandidates.push({
-                  ownerId: opponent.id,
-                  ownerName: opponent.name,
-                  card: topCard,
-                  usable: isUsable
-                });
-              }
-              this.addLog(`   👁️ ${opponent.name} 牌库顶: ${topCard.name} (HP:${topCard.hp ?? '?'})`);
+          // [妨害] 每名对手一个槽位（按行动顺序），展示牌库顶；空库、HP≥5、令牌/恶评为不可选
+          type MeiYaoSlot = {
+            instanceId: string;
+            ownerId: string;
+            ownerName: string;
+            turnStep: number;
+            card?: CardInstance;
+            usable: boolean;
+            isEmptyDeck?: boolean;
+            unusableReason?: 'empty_deck' | 'hp_ge_5' | 'token_or_penalty';
+          };
+          const slots: MeiYaoSlot[] = [];
+          let turnStep = 0;
+          for (const oppId of this.getOpponentIdsInTurnOrder(player.id)) {
+            turnStep++;
+            const opponent = this.getPlayer(oppId);
+            if (!opponent) continue;
+            if (opponent.deck.length === 0) {
+              slots.push({
+                instanceId: `mei-yao-empty-${oppId}`,
+                ownerId: oppId,
+                ownerName: opponent.name,
+                turnStep,
+                usable: false,
+                isEmptyDeck: true,
+                unusableReason: 'empty_deck',
+              });
+              this.addLog(`   👁️ ${opponent.name} 牌库为空`);
+              continue;
             }
+            const topCard = DeckRevealHelper.revealTopCard(opponent, player.id);
+            if (!topCard) {
+              slots.push({
+                instanceId: `mei-yao-empty-${oppId}`,
+                ownerId: oppId,
+                ownerName: opponent.name,
+                turnStep,
+                usable: false,
+                isEmptyDeck: true,
+                unusableReason: 'empty_deck',
+              });
+              continue;
+            }
+            this.addLog(`   👁️ ${opponent.name} 牌库顶: ${topCard.name} (HP:${topCard.hp ?? '?'})`);
+            const hpOk = topCard.hp !== undefined && topCard.hp < 5;
+            if (!hpOk) {
+              slots.push({
+                instanceId: topCard.instanceId,
+                ownerId: oppId,
+                ownerName: opponent.name,
+                turnStep,
+                card: topCard,
+                usable: false,
+                unusableReason: 'hp_ge_5',
+              });
+              continue;
+            }
+            const isUsable = topCard.cardType !== 'token' && topCard.cardType !== 'penalty';
+            slots.push({
+              instanceId: topCard.instanceId,
+              ownerId: oppId,
+              ownerName: opponent.name,
+              turnStep,
+              card: topCard,
+              usable: isUsable,
+              unusableReason: isUsable ? undefined : 'token_or_penalty',
+            });
           }
 
-          // 统计可用牌数量
-          const usableCount = meiYaoCandidates.filter(c => c.usable).length;
+          const payloadFromSlot = (s: MeiYaoSlot) => {
+            const c = s.card;
+            return {
+              instanceId: s.instanceId,
+              ownerId: s.ownerId,
+              ownerName: s.ownerName,
+              turnStep: s.turnStep,
+              cardId: c?.cardId ?? '',
+              cardType: c?.cardType ?? (s.isEmptyDeck ? 'token' : 'yokai'),
+              name: c?.name ?? (s.isEmptyDeck ? '牌库为空' : ''),
+              hp: c?.hp,
+              usable: s.usable,
+              isEmptyDeck: s.isEmptyDeck === true,
+              unusableReason: s.unusableReason,
+            };
+          };
 
-          if (meiYaoCandidates.length === 0) {
-            // 没有HP<5的牌
-            this.addLog(`   ✨ 御魂：无可选牌（对手牌库空或无HP<5的牌）`);
+          const usableCount = slots.filter(s => s.usable).length;
+
+          if (slots.length === 0) {
+            this.addLog(`   ✨ 御魂：没有其他玩家，效果跳过`);
           } else if (usableCount === 0) {
-            // 有候选牌但全是令牌/恶评，显示给玩家看（展示有价值），但需要取消按钮
             this.state.pendingChoice = this.withPlayedYokaiSource(
               {
                 type: 'meiYaoSelect',
                 playerId: player.id,
-                prompt: `对手牌库顶均为不可用牌`,
+                prompt: `无可用牌库顶（空库、HP≥5、令牌/恶评等），可跳过`,
                 hasUsable: false,
-                candidates: meiYaoCandidates.map(c => ({
-                  instanceId: c.card.instanceId,
-                  cardId: c.card.cardId,
-                  cardType: c.card.cardType,
-                  name: c.card.name,
-                  hp: c.card.hp,
-                  ownerName: c.ownerName,
-                  ownerId: c.ownerId,
-                  usable: c.usable,
-                })),
+                candidates: slots.map(payloadFromSlot),
               },
               card
             ) as any;
-            this.addLog(`   ⏳ 对手牌库顶均为不可用牌...`);
-          } else if (usableCount === 1 && meiYaoCandidates.length === 1) {
-            // 只有一张可用牌且总共就一张，自动选择
-            const target = meiYaoCandidates[0];
-            this.executeMeiYaoEffect(player, target);
+            this.addLog(`   ⏳ 魅妖：当前无可用目标...`);
+          } else if (usableCount === 1) {
+            const only = slots.find(s => s.usable)!;
+            const owner = this.getPlayer(only.ownerId);
+            const card = only.card && owner ? owner.deck.find(c => c.instanceId === only.card!.instanceId) : undefined;
+            if (owner && card) {
+              this.executeMeiYaoEffect(player, {
+                ownerId: only.ownerId,
+                ownerName: only.ownerName,
+                card,
+              });
+            }
           } else {
-            // 多张候选牌，需要玩家选择（传递所有牌，包括不可用的用于展示）
             this.state.pendingChoice = this.withPlayedYokaiSource(
               {
                 type: 'meiYaoSelect',
                 playerId: player.id,
                 prompt: `选择1张对手牌库顶牌使用其效果（HP<5）`,
                 hasUsable: true,
-                candidates: meiYaoCandidates.map(c => ({
-                  instanceId: c.card.instanceId,
-                  cardId: c.card.cardId,
-                  cardType: c.card.cardType,
-                  name: c.card.name,
-                  hp: c.card.hp,
-                  ownerName: c.ownerName,
-                  ownerId: c.ownerId,
-                  usable: c.usable,
-                })),
+                candidates: slots.map(payloadFromSlot),
               },
               card
             ) as any;
@@ -4537,16 +4656,23 @@ export class MultiplayerGame {
           }
           this.addLog(`   🙏 御魂：地藏像被超度`);
           
-          // 2. 检查式神牌库
-          const shikigamiDeck = this.state.shikigamiDeck ?? [];
-          if (shikigamiDeck.length === 0) {
+          // 2. 式神供应堆（与「获得式神」handleGetShikigamiCandidates 同源：field.shikigamiSupply，从末尾 pop）
+          if (!this.state.field.shikigamiSupply) {
+            this.state.field.shikigamiSupply = [];
+          }
+          const shikigamiSupply = this.state.field.shikigamiSupply;
+          if (shikigamiSupply.length === 0) {
             this.addLog(`   ⚠️ 式神牌库为空，无法获取式神`);
             break;
           }
           
-          // 3. 从式神牌库顶部抽取最多2张
-          const drawCount = Math.min(2, shikigamiDeck.length);
-          const drawnShikigami = shikigamiDeck.splice(0, drawCount);
+          // 3. 从供应堆顶抽取最多2张（与 getShikigami 一致：pop，先 pop 的进入候选数组第1项）
+          const drawCount = Math.min(2, shikigamiSupply.length);
+          const drawnShikigami: ShikigamiCard[] = [];
+          for (let di = 0; di < drawCount; di++) {
+            const s = shikigamiSupply.pop();
+            if (s) drawnShikigami.push(s);
+          }
           
           // 4. 存储抽取的式神到临时状态，供后续选择使用
           (this.state as any).dizangDrawnShikigami = drawnShikigami;
@@ -4559,13 +4685,13 @@ export class MultiplayerGame {
             const selectedShikigami = drawnShikigami[0];
             const unselected = drawnShikigami.slice(1);
             
-            // 未选中的放回牌库底部
-            shikigamiDeck.push(...unselected);
+            // 未选中的放回供应堆底
+            shikigamiSupply.push(...unselected);
             
             if (player.shikigami.length >= 3) {
               // 式神已满：AI 选择替换价值最低的（简化为第一个）
               const replacedShikigami = player.shikigami.shift()!;
-              shikigamiDeck.push(replacedShikigami);
+              shikigamiSupply.push(replacedShikigami);
               this.addLog(`   🔄 AI 替换式神：${replacedShikigami.name} → ${selectedShikigami.name}`);
             }
             
@@ -4697,9 +4823,10 @@ export class MultiplayerGame {
         }
           
         case '破势': {
-          // 伤害+3，若为本回合第一张牌则伤害+5
-          // cardsPlayed 在打出卡牌后才递增，执行效果时当前牌尚未计入
-          const isFirstCard = player.cardsPlayed === 0;
+          // 伤害+3，若为本回合第一张打出的牌则伤害+5
+          // handlePlayCard / handleDizangConfirmResponse 在调用本函数前已对本次打牌执行 cardsPlayed++
+          // 故首张牌到达此处时 cardsPlayed === 1
+          const isFirstCard = player.cardsPlayed === 1;
           const damage = isFirstCard ? 5 : 3;
           player.damage += damage;
           this.addLog(`   ✨ 御魂：伤害+${damage}${isFirstCard ? '（首张）' : ''}`);
@@ -4754,31 +4881,123 @@ export class MultiplayerGame {
           
         // ============ 生命7 ============
         case '幽谷响': {
-          // [妨害] 展示所有对手牌库顶牌，选择最多3张非鬼王执行效果
-          const opponents = this.state.players.filter(p => p.id !== player.id);
-          
-          // 收集所有对手牌库顶牌
+          // [妨害] 每名对手一个槽位（按行动顺序），展示牌库顶；空库与顶牌为鬼王不可选（与魅妖 UI 一致）
+          type YouguSlot = {
+            instanceId: string;
+            ownerId: string;
+            ownerName: string;
+            turnStep: number;
+            card?: CardInstance;
+            usable: boolean;
+            isEmptyDeck?: boolean;
+            unusableReason?: 'empty_deck' | 'boss';
+          };
+          const slots: YouguSlot[] = [];
+          let turnStep = 0;
           const revealedCards: Array<{ card: CardInstance; ownerId: string; ownerName: string }> = [];
-          for (const opp of opponents) {
-            if (opp.deck.length > 0) {
-              const topCard = opp.deck[0];
-              revealedCards.push({
-                card: topCard,
-                ownerId: opp.id,
-                ownerName: opp.name
+
+          for (const oppId of this.getOpponentIdsInTurnOrder(player.id)) {
+            turnStep++;
+            const opponent = this.getPlayer(oppId);
+            if (!opponent) continue;
+            if (opponent.deck.length === 0) {
+              slots.push({
+                instanceId: `yougu-empty-${oppId}`,
+                ownerId: oppId,
+                ownerName: opponent.name,
+                turnStep,
+                usable: false,
+                isEmptyDeck: true,
+                unusableReason: 'empty_deck',
               });
-              this.addLog(`   👁️ 幽谷响：展示 ${opp.name} 牌库顶牌 ${topCard.name}`, { visibility: 'public' });
+              this.addLog(`   ⚠️ ${opponent.name} 牌库为空`);
+              continue;
+            }
+            const topCard = DeckRevealHelper.revealTopCard(opponent, player.id);
+            if (!topCard) {
+              slots.push({
+                instanceId: `yougu-empty-${oppId}`,
+                ownerId: oppId,
+                ownerName: opponent.name,
+                turnStep,
+                usable: false,
+                isEmptyDeck: true,
+                unusableReason: 'empty_deck',
+              });
+              continue;
+            }
+            revealedCards.push({
+              card: topCard,
+              ownerId: opponent.id,
+              ownerName: opponent.name,
+            });
+            this.addLog(`   👁️ 幽谷响：展示 ${opponent.name} 牌库顶牌 ${topCard.name}`, { visibility: 'public' });
+
+            if (topCard.cardType === 'boss') {
+              slots.push({
+                instanceId: topCard.instanceId,
+                ownerId: oppId,
+                ownerName: opponent.name,
+                turnStep,
+                card: topCard,
+                usable: false,
+                unusableReason: 'boss',
+              });
             } else {
-              this.addLog(`   ⚠️ ${opp.name} 牌库为空`);
+              slots.push({
+                instanceId: topCard.instanceId,
+                ownerId: oppId,
+                ownerName: opponent.name,
+                turnStep,
+                card: topCard,
+                usable: true,
+              });
             }
           }
-          
-          // 筛选非鬼王卡牌
+
+          const payloadFromSlot = (s: YouguSlot) => {
+            const c = s.card;
+            return {
+              instanceId: s.instanceId,
+              ownerId: s.ownerId,
+              ownerName: s.ownerName,
+              turnStep: s.turnStep,
+              cardId: c?.cardId ?? '',
+              cardType: c?.cardType ?? (s.isEmptyDeck ? 'token' : 'yokai'),
+              name: c?.name ?? (s.isEmptyDeck ? '牌库为空' : ''),
+              hp: c?.hp,
+              usable: s.usable,
+              isEmptyDeck: s.isEmptyDeck === true,
+              unusableReason: s.unusableReason,
+            };
+          };
+
+          const displayCandidates = slots.map(payloadFromSlot);
           const selectableCards = revealedCards.filter(r => r.card.cardType !== 'boss');
-          
-          if (selectableCards.length === 0) {
-            this.addLog(`   ✨ 幽谷响：无可选卡牌执行效果`);
+          const selectableIds = selectableCards.map(r => r.card.instanceId);
+
+          if (slots.length === 0) {
+            this.addLog(`   ✨ 幽谷响：没有其他玩家，效果跳过`);
             void this.runYouguXiangHarassmentAfterSelect(player, revealedCards, [], card);
+          } else if (selectableCards.length === 0) {
+            this.addLog(`   ✨ 幽谷响：无可选卡牌执行效果`);
+            if (player.isAI) {
+              void this.runYouguXiangHarassmentAfterSelect(player, revealedCards, [], card);
+            } else {
+              this.state.pendingChoice = this.withPlayedYokaiSource(
+                {
+                  type: 'youguXiangSelect',
+                  playerId: player.id,
+                  revealedCards,
+                  selectableCandidates: [],
+                  maxSelect: 3,
+                  displayCandidates,
+                  prompt: `无可执行效果的御魂（空库或鬼王顶牌），可直接确认（${slots.length} 个槽位）`,
+                },
+                card,
+              );
+              this.addLog(`   ⏳ 幽谷响：等待确认...`);
+            }
           } else if (player.isAI) {
             const scored = selectableCards.map(r => {
               const c = r.card;
@@ -4801,27 +5020,53 @@ export class MultiplayerGame {
             }
             void this.runYouguXiangHarassmentAfterSelect(player, revealedCards, selectedIds, card);
           } else {
-            // 真人玩家：设置pendingChoice等待选择
             this.state.pendingChoice = this.withPlayedYokaiSource(
               {
                 type: 'youguXiangSelect',
                 playerId: player.id,
-                revealedCards: revealedCards,
-                selectableCandidates: selectableCards.map(r => r.card.instanceId),
+                revealedCards,
+                selectableCandidates: selectableIds,
                 maxSelect: 3,
-                prompt: `选择最多3张御魂执行其效果（${selectableCards.length}张可选）`,
+                displayCandidates,
+                prompt: `选择最多3张御魂执行其效果（${selectableIds.length} 张可选，共 ${slots.length} 槽）`,
               },
-              card
+              card,
             );
             this.addLog(`   ⏳ 幽谷响：等待选择要执行效果的御魂...`);
           }
           break;
         }
 
-        case '阴摩罗':
-          player.damage += 3;
-          this.addLog(`   ✨ 御魂：伤害+3`);
+        case '阴摩罗': {
+          const yinmoluoCandidates = player.discard.filter(
+            c =>
+              (c.hp ?? 0) < 6 &&
+              c.cardType !== 'token' &&
+              c.cardType !== 'penalty',
+          );
+          if (yinmoluoCandidates.length === 0) {
+            this.addLog(`   ✨ 阴摩罗：弃牌区没有HP<6的牌，效果跳过`);
+          } else {
+            const selectCount = Math.min(2, yinmoluoCandidates.length);
+            this.state.pendingChoice = this.withPlayedYokaiSource(
+              {
+                type: 'yinmoluoSelect',
+                playerId: player.id,
+                candidates: yinmoluoCandidates.map(c => ({
+                  instanceId: c.instanceId,
+                  name: c.name,
+                  hp: c.hp ?? 0,
+                  cardType: c.cardType,
+                })),
+                selectCount,
+                prompt: `选择${selectCount}张弃牌区的牌使用其效果（HP<6）`,
+              },
+              card,
+            );
+            this.addLog(`   ⏳ 阴摩罗：等待选择弃牌区的牌...`);
+          }
           break;
+        }
 
         case '镰鼬':
           player.damage += 4;
@@ -4837,7 +5082,7 @@ export class MultiplayerGame {
           break;
           
         case '三味': {
-          // 统计本回合已使用的「鬼火」牌和阴阳术数量
+          // 统计本回合已使用的「鬼火」御魂（keywords 含鬼火）与阴阳术数量
           const played = player.played || [];
           let ghostFireCount = 0;
           
@@ -4846,13 +5091,8 @@ export class MultiplayerGame {
             if (card.cardType === 'spell') {
               ghostFireCount++;
             }
-            // 「鬼火」牌 (subtype包含"鬼火"的御魂)
-            else if (card.cardType === 'yokai') {
-              const tags = (card as any).tags || [];
-              const subtype = (card as any).subtype || '';
-              if (tags.includes('鬼火') || subtype.includes('鬼火')) {
-                ghostFireCount++;
-              }
+            else if (cardHasKeyword(card, '鬼火')) {
+              ghostFireCount++;
             }
           }
           
@@ -5454,7 +5694,7 @@ export class MultiplayerGame {
         const action = createHarassmentAction(source.id, '幽谷响', async (target, _c) => {
           if (shouldExec) {
             this.addLog(`   ⚡ 幽谷响：执行 ${snapshot.name} 的效果`);
-            this.executeSimpleCardEffect(source, snapshot);
+            this.executeYokaiEffect(source, snapshot, 1);
           }
           const idx = target.deck.findIndex(c => c.instanceId === snapshot.instanceId);
           if (idx !== -1) {
@@ -5515,6 +5755,10 @@ export class MultiplayerGame {
     if (!this.state.field.currentBoss) {
       return { success: false, error: '没有鬼王' };
     }
+
+    if (this.isZhenMuShouProhibitedFor(player, this.state.field.currentBoss.id)) {
+      return { success: false, error: '镇墓兽效果：本回合不能退治该目标' };
+    }
     
     // 计算网切修正后的鬼王有效HP（网切: 鬼王HP-2，最低1）
     const bossBaseHp = this.state.field.bossCurrentHp;
@@ -5560,6 +5804,10 @@ export class MultiplayerGame {
     }
     
     const yokai = this.state.field.yokaiSlots[slotIndex]!;
+
+    if (this.isZhenMuShouProhibitedFor(player, yokai.instanceId)) {
+      return { success: false, error: '镇墓兽效果：本回合不能退治该目标' };
+    }
     
     // 检查伤害是否足够（考虑网切修正：妖怪HP-1，最低1）
     const yokaiBaseHp = yokai.hp || 1;
@@ -5602,19 +5850,25 @@ export class MultiplayerGame {
 
     // 鬼王进入弃牌堆（声誉会在notifyStateChange时自动重新计算）
     player.discard.push(boss as any);
-    
-    this.addLog(`👹 ${player.name} 击败鬼王 ${boss.name}！获得 ${boss.charm || 0} 声誉`);
+
+    const exileBonus = TempBuffHelper.triggerExileKillBonus(player);
+    if (exileBonus > 0) {
+      player.damage += exileBonus;
+      this.addLog(`👹 ${player.name} 击败鬼王 ${boss.name}！获得 ${boss.charm || 0} 声誉，迁怒+${exileBonus}伤害`);
+    } else {
+      this.addLog(`👹 ${player.name} 击败鬼王 ${boss.name}！获得 ${boss.charm || 0} 声誉`);
+    }
     
     // 清理鬼王特殊效果
     this.clearBossEffect(boss.name);
     
     // 检查游戏是否结束
     if (this.state.field.bossDeck.length === 0) {
-      // 标记游戏将在清理阶段结束
-      (this.state as any).pendingGameEnd = true;
+      this.state.pendingGameEnd = true;
+      this.state.bossDefeatedByPlayerId = null;
     } else {
-      // 标记需要在清理阶段翻出新鬼王（抽牌后、清空伤害前）
-      (this.state as any).pendingBossReveal = true;
+      this.state.pendingBossReveal = true;
+      this.state.bossDefeatedByPlayerId = player.id;
     }
     
     // 清空当前鬼王（已被击败）
@@ -5659,7 +5913,14 @@ export class MultiplayerGame {
             player.tempBuffs.splice(buffIdx, 1);
           }
           
-          // 将隐藏牌弃置（如果有实现hiddenCards字段）
+          const under = player.cardsUnderOnmyoji;
+          if (under && under.length > 0) {
+            for (const card of under) {
+              player.discard.push(card);
+              this.addLog(`      ${player.name} 的阴阳师下 ${card.name} 被弃置`);
+            }
+            player.cardsUnderOnmyoji = [];
+          }
           if ((player as any).hiddenCards && (player as any).hiddenCards.length > 0) {
             for (const card of (player as any).hiddenCards) {
               player.discard.push(card);
@@ -5770,6 +6031,10 @@ export class MultiplayerGame {
       this.state.pendingChoice = undefined;
       this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
       return { success: false, error: '非法的目标选择' };
+    }
+
+    if (this.isZhenMuShouProhibitedFor(player, targetId)) {
+      return { success: false, error: '镇墓兽效果：本回合不能退治该目标' };
     }
     
     // 找到并退治目标妖怪
@@ -6075,9 +6340,10 @@ export class MultiplayerGame {
     const selectedShikigami = drawnShikigami[idx];
     const unselected = drawnShikigami.filter((_, i) => i !== idx);
 
-    // 未选中的放回牌库底部
-    const shikigamiDeck = this.state.shikigamiDeck ?? [];
-    shikigamiDeck.push(...unselected);
+    if (!this.state.field.shikigamiSupply) {
+      this.state.field.shikigamiSupply = [];
+    }
+    this.state.field.shikigamiSupply.push(...unselected);
 
     // 存储选中的式神
     (this.state as any).dizangSelectedShikigami = selectedShikigami;
@@ -6135,21 +6401,24 @@ export class MultiplayerGame {
     if (!player) return { success: false, error: '玩家不存在' };
 
     const selectedShikigami = (this.state as any).dizangSelectedShikigami;
-    const shikigamiDeck = this.state.shikigamiDeck ?? [];
+    if (!this.state.field.shikigamiSupply) {
+      this.state.field.shikigamiSupply = [];
+    }
+    const supply = this.state.field.shikigamiSupply;
 
     // 清除等待状态
     this.state.pendingChoice = undefined;
 
     if (replaceIndex === null || replaceIndex < 0 || replaceIndex >= player.shikigami.length) {
-      // 放弃获取：选中的式神放回牌库底部
+      // 放弃获取：选中的式神放回供应堆底
       if (selectedShikigami) {
-        shikigamiDeck.push(selectedShikigami);
+        supply.push(selectedShikigami);
       }
       this.addLog(`   ❌ ${player.name} 放弃获取式神`);
     } else {
       // 执行替换
       const replacedShikigami = player.shikigami.splice(replaceIndex, 1)[0];
-      shikigamiDeck.push(replacedShikigami);
+      supply.push(replacedShikigami);
       player.shikigami.push(selectedShikigami);
       this.addLog(`   🔄 替换式神：${replacedShikigami.name} → ${selectedShikigami.name}`);
     }
@@ -6321,9 +6590,33 @@ export class MultiplayerGame {
   }
   
   /**
+   * 阴摩罗多选：前一张牌交互结束后继续执行余下牌
+   */
+  private drainYinmoluoStack(): void {
+    const r = this.yinmoluoResume;
+    if (!r || this.state.pendingChoice) return;
+    const player = this.getPlayer(r.playerId);
+    if (!player) {
+      this.yinmoluoResume = undefined;
+      return;
+    }
+    while (r.remaining.length > 0 && !this.state.pendingChoice) {
+      const c = r.remaining.shift()!;
+      if (c.cardType === 'yokai' || c.cardType === 'spell') {
+        this.addLog(`   → 阴摩罗续行：执行 ${c.name} 效果`);
+        this.executeYokaiEffect(player, c, 1);
+      }
+    }
+    if (r.remaining.length === 0) this.yinmoluoResume = undefined;
+  }
+
+  /**
    * 检查并继续轮入道队列（在交互响应处理完成后调用）
    */
   private checkAndContinueWheelMonkQueue(): void {
+    this.drainYinmoluoStack();
+    if (this.state.pendingChoice) return;
+
     const queue = this.state.wheelMonkQueue;
     if (!queue) return;
     
@@ -6349,537 +6642,35 @@ export class MultiplayerGame {
   }
   
   /**
-   * 为轮入道执行完整御魂效果（复用executeYokaiEffect的switch-case逻辑）
+   * 为轮入道执行完整御魂效果（与打出御魂共用 executeYokaiEffect）
    */
-  private executeYokaiEffectForWheelMonk(player: PlayerState, effectKey: string): void {
+  private executeYokaiEffectForWheelMonk(player: PlayerState, _effectKey: string): void {
     const q = this.state.wheelMonkQueue;
-    this.executeYokaiEffectByName(player, effectKey, q?.sourceCard);
-  }
-  
-  /**
-   * 根据御魂名称执行完整效果（含交互）
-   * 用于轮入道队列执行
-   */
-  private executeYokaiEffectByName(
-    player: PlayerState,
-    effectKey: string,
-    sourceYokai?: CardInstance,
-  ): void {
-    const attach = <T extends Record<string, unknown>>(p: T) =>
-      (sourceYokai ? this.withPlayedYokaiSource(p, sourceYokai) : p) as T;
-    // 复用executeYokaiEffect中的switch-case逻辑（跳过轮入道本身避免递归）
-    switch (effectKey) {
-      // ============ 树妖 ============
-      case '树妖':
-        // 抓牌+2，弃置1张
-        this.drawCards(player, 2);
-        if (player.hand.length > 0) {
-          this.state.pendingChoice = attach({
-            type: 'treeDemonDiscard',
-            playerId: player.id,
-            prompt: '选择1张手牌弃置（树妖效果）',
-          });
-          this.addLog(`   🌳 树妖：抓牌+2，请选择弃置1张手牌`);
-        } else {
-          this.addLog(`   🌳 树妖：抓牌+2（无手牌可弃）`);
-        }
-        break;
-        
-      // ============ 唐纸伞妖 ============
-      case '唐纸伞妖':
-        // 伤害+1，查看牌库顶牌，可选超度
-        player.damage += 1;
-        this.addLog(`   ✨ 唐纸伞妖：伤害+1`);
-        if (player.deck.length > 0) {
-          const topCard = DeckRevealHelper.revealTopCard(player, player.id);
-          if (topCard) {
-            this.state.pendingChoice = attach({
-              type: 'salvageChoice',
-              playerId: player.id,
-              card: topCard,
-              prompt: `查看牌库顶牌【${topCard.name}】，是否超度？`,
-            });
-            this.addLog(`   👁️ 查看牌库顶牌：${topCard.name}`, { visibility: 'private', playerId: player.id });
-          }
-        } else {
-          this.addLog(`   ⚠️ 牌库为空，无法查看`, { visibility: 'private', playerId: player.id });
-        }
-        break;
-        
-      // ============ 天邪鬼绿 ============
-      case '天邪鬼绿': {
-        // 退治1个生命≤4的游荡妖怪
-        const validTargets = this.state.field.yokaiSlots
-          .filter((y): y is CardInstance => y !== null && (y.hp || 0) <= 4 && (y.hp || 0) > 0);
-        
-        if (validTargets.length === 0) {
-          this.addLog(`   ⚠️ 天邪鬼绿：场上没有符合条件的妖怪`);
-        } else if (validTargets.length === 1) {
-          // 只有一个目标时自动选择
-          const target = validTargets[0];
-          const idx = this.state.field.yokaiSlots.findIndex(y => y?.instanceId === target.instanceId);
-          if (idx !== -1) {
-            this.state.field.yokaiSlots[idx] = null;
-            this.ensureYokaiDiscardFaceStats(target);
-            player.discard.push(target);
-            this.addLog(`   ✨ 天邪鬼绿：退治${target.name}`);
-          }
-        } else {
-          // 多个目标时让玩家选择
-          this.state.pendingChoice = attach({
-            type: 'yokaiTarget',
-            playerId: player.id,
-            prompt: '选择要退治的妖怪（生命≤4）',
-            options: validTargets.map(y => y.instanceId),
-          });
-          this.addLog(`   🎯 天邪鬼绿：选择退治目标...`);
-        }
-        break;
-      }
-        
-      // ============ 天邪鬼青 ============
-      case '天邪鬼青': {
-        // 选择：抓牌+1 或 伤害+1
-        const canDraw = this.canDrawOneFromPiles(player);
-        if (!canDraw) {
-          player.damage += 1;
-          this.addLog(`   ✨ 天邪鬼青：伤害+1（无法抓牌）`);
-        } else {
-          this.state.pendingChoice = attach({
-            type: 'yokaiChoice',
-            playerId: player.id,
-            options: ['抓牌+1', '伤害+1'],
-            prompt: '选择一个效果',
-          });
-          this.addLog(`   🎯 天邪鬼青：选择抓牌+1 或 伤害+1`);
-        }
-        break;
-      }
-        
-      // ============ 天邪鬼赤 ============
-      case '天邪鬼赤':
-        // 伤害+1，弃置任意数量手牌，抓等量的牌
-        player.damage += 1;
-        this.addLog(`   ✨ 天邪鬼赤：伤害+1`);
-        if (player.hand.length > 0) {
-          this.state.pendingChoice = attach({
-            type: 'selectCardsMulti',
-            playerId: player.id,
-            cards: player.hand.map(c => c.instanceId),
-            maxCount: player.hand.length,
-            minCount: 0,
-            prompt: '选择要弃置的手牌（可不选）',
-          });
-          this.addLog(`   🎯 天邪鬼赤：选择要弃置的手牌...`);
-        }
-        break;
-        
-      // ============ 天邪鬼黄 ============
-      case '天邪鬼黄':
-        // 抓牌+2，然后将1张手牌置于牌库顶
-        this.drawCards(player, 2);
-        this.addLog(`   ✨ 天邪鬼黄：抓牌+2`);
-        if (player.hand.length > 0) {
-          this.state.pendingChoice = attach({
-            type: 'selectCardPutTop',
-            playerId: player.id,
-            prompt: '选择1张手牌置于牌库顶',
-            count: 1,
-          });
-          this.addLog(`   ⏳ 天邪鬼黄：等待选择1张手牌置于牌库顶...`);
-        }
-        break;
-        
-      // ============ 日女巳时 ============
-      case '日女巳时':
-        // 选择：鬼火+1 / 抓牌+2 / 伤害+2
-        this.state.pendingChoice = attach({
-          type: 'rinyuChoice',
-          playerId: player.id,
-          prompt: '选择一项效果',
-          options: ['ghostFire', 'draw', 'damage'],
-        });
-        this.addLog(`   ⏳ 日女巳时：等待选择鬼火+1 / 抓牌+2 / 伤害+2`);
-        break;
-        
-      // ============ 蚌精 ============
-      case '蚌精':
-        // 超度1张手牌，抓牌+2
-        if (player.hand.length > 0) {
-          this.state.pendingChoice = attach({
-            type: 'bangJingExile',
-            playerId: player.id,
-            prompt: '选择1张手牌超度',
-          });
-          this.addLog(`   ⏳ 蚌精：等待选择1张手牌超度...`);
-        } else {
-          this.drawCards(player, 2);
-          this.addLog(`   ✨ 蚌精：无手牌可超度，抓牌+2`);
-        }
-        break;
-        
-      // ============ 骰子鬼 ============
-      case '骰子鬼':
-        // 超度1张手牌，退治生命不高于超度牌+2的妖怪
-        if (player.hand.length === 0) {
-          this.addLog(`   ✨ 骰子鬼：没有手牌可超度`);
-        } else {
-          this.state.pendingChoice = attach({
-            type: 'diceGhostExile',
-            playerId: player.id,
-            prompt: '选择1张手牌超度',
-            options: player.hand.map(c => ({
-              instanceId: c.instanceId,
-              name: c.name,
-              hp: c.hp ?? 0,
-              charm: (c as any).charm ?? 0,
-            })),
-          });
-          this.addLog(`   ⏳ 骰子鬼：等待选择超度手牌...`);
-        }
-        break;
-        
-      // ============ 赤舌（妨害，对手选择）============
-      case '赤舌': {
-        this.startAkajitaHarassment(player, sourceYokai);
-        break;
-      }
-        
-      // ============ 魅妖（选择对手牌库顶牌）============
-      case '魅妖': {
-        // [妨害] 展示所有对手牌库顶牌，选择1张使用其效果并置入其弃牌堆
-        // 完整执行：让轮入道玩家选择，超时时自动AI策略
-        const opponents = this.state.players.filter(p => p.id !== player.id);
-        const meiYaoCandidates: {
-          ownerId: string;
-          ownerName: string;
-          card: CardInstance;
-          instanceId: string;
-          usable: boolean;
-        }[] = [];
-        
-        for (const opp of opponents) {
-          if (opp.deck.length > 0) {
-            const topCard = DeckRevealHelper.revealTopCard(opp, player.id);
-            if (topCard) {
-              // 令牌和恶评不可用
-              const isUsable = topCard.cardType !== 'token' && topCard.cardType !== 'penalty';
-              meiYaoCandidates.push({
-                ownerId: opp.id,
-                ownerName: opp.name,
-                card: topCard,
-                instanceId: topCard.instanceId,
-                usable: isUsable
-              });
-            }
-          }
-        }
-        
-        if (meiYaoCandidates.length === 0) {
-          this.addLog(`   ✨ 魅妖：所有对手牌库为空`);
-        } else {
-          // 检查是否有可用的牌
-          const usableCandidates = meiYaoCandidates.filter(c => c.usable);
-          if (usableCandidates.length === 0) {
-            this.addLog(`   ✨ 魅妖：对手牌库顶牌均不可用（令牌/恶评）`);
-          } else {
-            // 设置选择
-            this.state.pendingChoice = attach(
-              {
-                type: 'meiYaoSelect',
-                playerId: player.id,
-                prompt: '魅妖：选择1张对手牌库顶牌使用其效果',
-                candidates: meiYaoCandidates,
-              } as any,
-            ) as any;
-            this.addLog(`   ⏳ 魅妖：等待选择对手牌库顶牌...`);
-          }
-        }
-        break;
-      }
-      
-      // ============ 镇墓兽（左手边玩家选择禁止退治目标）============
-      case '镇墓兽': {
-        // 鬼火+1，抓牌+1，伤害+2
-        player.ghostFire = Math.min(player.ghostFire + 1, GAME_CONSTANTS.MAX_GHOST_FIRE);
-        this.drawCards(player, 1);
-        player.damage += 2;
-        this.addLog(`   ✨ 镇墓兽：鬼火+1，抓牌+1，伤害+2`);
-        
-        // 收集所有可选目标（游荡妖怪 + 鬼王）
-        const zmsValidTargets: { instanceId: string; name: string; hp: number }[] = [];
-        
-        // 添加游荡区妖怪
-        for (const yokai of this.state.field.yokaiSlots) {
-          if (yokai && yokai.instanceId) {
-            zmsValidTargets.push({
-              instanceId: yokai.instanceId,
-              name: yokai.name || '未知妖怪',
-              hp: yokai.hp || 0
-            });
-          }
-        }
-        
-        // 添加鬼王
-        if (this.state.field.currentBoss && this.state.field.currentBoss.id) {
-          zmsValidTargets.push({
-            instanceId: this.state.field.currentBoss.id,
-            name: this.state.field.currentBoss.name || '鬼王',
-            hp: this.state.field.bossCurrentHp || 0
-          });
-        }
-        
-        if (zmsValidTargets.length === 0) {
-          this.addLog(`   ⚠️ 镇墓兽：场上没有可选目标`);
-        } else {
-          // 找到左手边玩家（顺时针下一位）
-          const currentPlayerIndex = this.state.players.findIndex(p => p.id === player.id);
-          const leftPlayerIndex = (currentPlayerIndex + 1) % this.state.players.length;
-          const leftPlayer = this.state.players[leftPlayerIndex];
-          
-          if (leftPlayer.id === player.id) {
-            // 只有自己一个玩家，AI 代选
-            const sortedTargets = [...zmsValidTargets].sort((a, b) => a.hp - b.hp);
-            const selectedTarget = sortedTargets[0];
-            if (!player.prohibitedTargets) {
-              player.prohibitedTargets = [];
-            }
-            player.prohibitedTargets.push(selectedTarget.instanceId);
-            this.addLog(`   🚫 镇墓兽：AI 指定 ${selectedTarget.name} 为禁止退治目标`);
-          } else if (leftPlayer.isAI || leftPlayer.isOfflineHosted || !leftPlayer.isConnected) {
-            // 左手边玩家是 AI 或离线，自动选择 HP 最低的目标
-            const sortedTargets = [...zmsValidTargets].sort((a, b) => a.hp - b.hp);
-            const selectedTarget = sortedTargets[0];
-            if (!player.prohibitedTargets) {
-              player.prohibitedTargets = [];
-            }
-            player.prohibitedTargets.push(selectedTarget.instanceId);
-            this.addLog(`   🚫 镇墓兽：${leftPlayer.name} 指定 ${selectedTarget.name} 为禁止退治目标`);
-          } else {
-            // 设置 pendingChoice，等待左手边玩家选择
-            this.state.pendingChoice = attach({
-              type: 'zhenMuShouTarget',
-              playerId: leftPlayer.id,
-              candidates: zmsValidTargets.map(t => t.instanceId),
-              restrictedPlayerId: player.id,
-              prompt: `镇墓兽：选择一个目标，本回合 ${player.name} 不能将其退治`,
-            } as any);
-            this.addLog(`   ⏳ 镇墓兽：等待 ${leftPlayer.name} 选择禁止退治目标...`);
-          }
-        }
-        break;
-      }
-        
-      // ============ 幽谷响（选择对手牌库顶牌执行效果）============
-      case '幽谷响': {
-        // [妨害] 展示所有对手牌库顶牌，选择最多3张非鬼王执行效果
-        const youguOpponents = this.state.players.filter(p => p.id !== player.id);
-        
-        // 收集所有对手牌库顶牌
-        const youguRevealedCards: Array<{ card: CardInstance; ownerId: string; ownerName: string }> = [];
-        for (const opp of youguOpponents) {
-          if (opp.deck.length > 0) {
-            const topCard = opp.deck[0];
-            youguRevealedCards.push({
-              card: topCard,
-              ownerId: opp.id,
-              ownerName: opp.name
-            });
-            this.addLog(`   👁️ 幽谷响：展示 ${opp.name} 牌库顶牌 ${topCard.name}`, { visibility: 'public' });
-          } else {
-            this.addLog(`   ⚠️ ${opp.name} 牌库为空`);
-          }
-        }
-        
-        // 筛选非鬼王卡牌
-        const youguSelectableCards = youguRevealedCards.filter(r => r.card.cardType !== 'boss');
-        
-        if (youguSelectableCards.length === 0) {
-          this.addLog(`   ✨ 幽谷响：无可选卡牌执行效果`);
-          void this.runYouguXiangHarassmentAfterSelect(player, youguRevealedCards, [], sourceYokai);
-        } else {
-          // 设置pendingChoice等待玩家选择
-          this.state.pendingChoice = attach({
-            type: 'youguXiangSelect',
-            playerId: player.id,
-            revealedCards: youguRevealedCards,
-            selectableCandidates: youguSelectableCards.map(r => r.card.instanceId),
-            maxSelect: 3,
-            prompt: `选择最多3张御魂执行其效果（${youguSelectableCards.length}张可选）`,
-          });
-          this.addLog(`   ⏳ 幽谷响：等待选择要执行效果的御魂...`);
-        }
-        break;
-      }
-        
-      // ============ 阴摩罗（选择弃牌区2张HP<6的牌使用效果）============
-      case '阴摩罗': {
-        // 筛选弃牌区 HP < 6 的牌
-        const yinmoluoCandidates = player.discard.filter(c => (c.hp ?? 0) < 6);
-        
-        if (yinmoluoCandidates.length === 0) {
-          this.addLog(`   ✨ 阴摩罗：弃牌区没有HP<6的牌，效果跳过`);
-        } else {
-          const selectCount = Math.min(2, yinmoluoCandidates.length);
-          
-          // 设置pendingChoice等待玩家选择
-          this.state.pendingChoice = attach({
-            type: 'yinmoluoSelect',
-            playerId: player.id,
-            candidates: yinmoluoCandidates.map(c => ({
-              instanceId: c.instanceId,
-              name: c.name,
-              hp: c.hp ?? 0,
-              cardType: c.cardType,
-            })),
-            selectCount,
-            prompt: `选择${selectCount}张弃牌区的牌使用其效果（HP<6）`,
-          });
-          this.addLog(`   ⏳ 阴摩罗：等待选择弃牌区的牌...`);
-        }
-        break;
-      }
-        
-      // ============ 其他无交互御魂 ============
-      default:
-        this.executeYokaiEffectSimple(player, { name: effectKey } as any, sourceYokai);
-        break;
+    if (!q) return;
+    const src = q.sourceCard;
+    let synthetic: CardInstance;
+    if (src) {
+      let cardId = src.cardId || q.cardId || '';
+      if (!cardId && (src.name || q.cardName) === '天邪鬼青') cardId = 'yokai_004';
+      synthetic = {
+        ...src,
+        cardId: cardId || src.cardId,
+        instanceId: `wheel-monk-exec-${cardId || src.cardId || 'id'}-${Date.now()}`,
+      };
+    } else {
+      let cardId = q.cardId || '';
+      if (!cardId && q.cardName === '天邪鬼青') cardId = 'yokai_004';
+      synthetic = {
+        instanceId: `wheel-monk-exec-${cardId || 'id'}-${Date.now()}`,
+        cardId,
+        cardType: 'yokai',
+        name: q.cardName,
+        hp: 1,
+        maxHp: 1,
+        charm: 0,
+      };
     }
-    
-    // 🔑 关键：如果效果执行后没有产生交互(pendingChoice)，需要立即继续轮入道队列
-    // 这样可以处理：牌库为空、无目标、自动选择等情况
-    if (!this.state.pendingChoice && this.state.wheelMonkQueue) {
-      this.checkAndContinueWheelMonkQueue();
-    }
-  }
-
-  /**
-   * 简化版御魂效果执行（用于无交互效果的快速执行）
-   * 仅执行数值效果，不触发交互选择
-   * @param player 玩家
-   * @param card 御魂卡牌
-   */
-  private executeYokaiEffectSimple(
-    player: PlayerState,
-    card: CardInstance,
-    harassmentSource?: CardInstance,
-  ): void {
-    const effectKey = card.name || '';
-    
-    switch (effectKey) {
-      case '招福达摩':
-        // 无效果
-        break;
-        
-      case '心眼':
-        // 伤害+3
-        player.damage += 3;
-        this.addLog(`   ✨ ${effectKey}：伤害+3`);
-        break;
-        
-      case '涅槃之火':
-        // 本回合式神技能鬼火消耗-1
-        TempBuffHelper.addBuff(player, { type: 'SKILL_COST_REDUCTION', value: 1, source: '涅槃之火' });
-        this.addLog(`   ✨ ${effectKey}：技能消耗-1`);
-        break;
-        
-      case '兵主部':
-        // 伤害+2
-        player.damage += 2;
-        this.addLog(`   ✨ ${effectKey}：伤害+2`);
-        break;
-        
-      case '蝠翼':
-        // 抓牌+1，伤害+1
-        this.drawCards(player, 1);
-        player.damage += 1;
-        this.addLog(`   ✨ ${effectKey}：抓牌+1，伤害+1`);
-        break;
-        
-      case '灯笼鬼':
-        // 鬼火+1，抓牌+1
-        player.ghostFire = Math.min(player.ghostFire + 1, player.maxGhostFire);
-        this.drawCards(player, 1);
-        this.addLog(`   ✨ ${effectKey}：鬼火+1，抓牌+1`);
-        break;
-        
-      case '镜姬':
-        // 鬼火+1，抓牌+2，伤害+1
-        player.ghostFire = Math.min(player.ghostFire + 1, player.maxGhostFire);
-        this.drawCards(player, 2);
-        player.damage += 1;
-        this.addLog(`   ✨ ${effectKey}：鬼火+1，抓牌+2，伤害+1`);
-        break;
-        
-      case '返魂香': {
-        // [妨害] 抓牌+1，伤害+1，每名对手选择：弃置1张手牌或获得1张恶评
-        this.drawCards(player, 1);
-        player.damage += 1;
-        this.addLog(`   ✨ ${effectKey}：抓牌+1，伤害+1`);
-        
-        // 收集需要选择的对手
-        const opponents = this.state.players.filter(p => p.id !== player.id);
-        if (opponents.length > 0) {
-          this.startFanHunXiangHarassment(player.id, opponents, harassmentSource);
-        }
-        break;
-      }
-        
-      case '铮':
-        // 抓牌+1，伤害+2
-        this.drawCards(player, 1);
-        player.damage += 2;
-        this.addLog(`   ✨ ${effectKey}：抓牌+1，伤害+2`);
-        break;
-        
-      case '狂骨': {
-        // 抓牌+1，伤害+X（X=打出瞬间鬼火；先于抓牌锁定）
-        const dmg = player.ghostFire;
-        this.drawCards(player, 1);
-        player.damage += dmg;
-        this.addLog(`   ✨ ${effectKey}：抓牌+1，伤害+${dmg}`);
-        break;
-      }
-        
-      case '雪幽魂': {
-        this.drawCards(player, 1);
-        this.addLog(`   ✨ ${effectKey}：抓牌+1`);
-        const xyOpponents = this.state.players.filter(p => p.id !== player.id);
-        if (xyOpponents.length > 0) {
-          this.startXueYouHunHarassment(player.id, xyOpponents, harassmentSource);
-        }
-        break;
-      }
-
-      case '魍魉之匣': {
-        this.drawCards(player, 1);
-        player.damage += 1;
-        this.addLog(`   ✨ ${effectKey}：抓牌+1，伤害+1`);
-        this.startWangliangHarassment(player, harassmentSource);
-        break;
-      }
-        
-      case '网切':
-        // 本回合所有妖怪HP-1，鬼王HP-2（全局 field 级别，覆盖不叠加）
-        TempBuffHelper.applyNetCutterToField(this.state.field);
-        this.addLog(`   ✨ ${effectKey}：本回合妖怪HP-1，鬼王HP-2`);
-        break;
-        
-      case '针女':
-        // 伤害+1，后续技能伤害+2
-        player.damage += 1;
-        TempBuffHelper.addBuff(player, { type: 'SKILL_DAMAGE_BONUS', value: 2 });
-        this.addLog(`   ✨ ${effectKey}：伤害+1，技能伤害+2`);
-        break;
-        
-      default:
-        // 其他御魂：只结算基础伤害
-        if (card.damage) {
-          player.damage += card.damage;
-          this.addLog(`   ✨ ${effectKey}：伤害+${card.damage}`);
-        }
-        break;
-    }
+    this.executeYokaiEffect(player, synthetic, 1);
   }
 
   /**
@@ -7183,6 +6974,13 @@ export class MultiplayerGame {
       return { success: false, error: '包含无效的卡牌选择' };
     }
 
+    for (const id of selectedIds) {
+      const meta = pendingChoice.candidates.find((c: any) => c.instanceId === id);
+      if (meta?.cardType === 'token' || meta?.cardType === 'penalty') {
+        return { success: false, error: '不可选择令牌或恶评牌' };
+      }
+    }
+
     // 从弃牌区移出所选牌并执行效果
     const usedCards: CardInstance[] = [];
     for (const id of selectedIds) {
@@ -7197,15 +6995,6 @@ export class MultiplayerGame {
     const cardNames = usedCards.map(c => c.name).join('、');
     this.addLog(`   🌙 阴摩罗：选择使用 [${cardNames}]`);
 
-    // 依次执行效果
-    for (const card of usedCards) {
-      if (card.cardType === 'yokai' || card.cardType === 'spell') {
-        this.addLog(`   → 执行 ${card.name} 效果`);
-        this.executeYokaiEffectSimple(player, card);
-      }
-    }
-
-    // 注册回合结束归还效果
     if (!this.state.pendingEndOfTurnEffects) {
       this.state.pendingEndOfTurnEffects = [];
     }
@@ -7216,10 +7005,28 @@ export class MultiplayerGame {
     });
     this.addLog(`   📝 ${cardNames} 将在回合结束时归还牌库底`);
 
-    // 清除等待状态
     this.state.pendingChoice = undefined;
-    
-    // 检查是否需要继续轮入道队列
+    this.yinmoluoResume = undefined;
+
+    for (let i = 0; i < usedCards.length; i++) {
+      const card = usedCards[i];
+      if (card.cardType === 'yokai' || card.cardType === 'spell') {
+        this.addLog(`   → 执行 ${card.name} 效果`);
+        this.executeYokaiEffect(player, card, 1);
+        if (this.state.pendingChoice) {
+          const rest = usedCards
+            .slice(i + 1)
+            .filter(c => c.cardType === 'yokai' || c.cardType === 'spell');
+          if (rest.length > 0) {
+            this.yinmoluoResume = { playerId: player.id, remaining: rest };
+          }
+          this.checkAndContinueWheelMonkQueue();
+          this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+          return { success: true };
+        }
+      }
+    }
+
     this.checkAndContinueWheelMonkQueue();
 
     this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
@@ -7370,7 +7177,10 @@ export class MultiplayerGame {
    * @param player 当前玩家
    * @param target 目标牌信息
    */
-  private executeMeiYaoEffect(player: PlayerState, target: { ownerId: string; ownerName: string; card: CardInstance }) {
+  private executeMeiYaoEffect(
+    player: PlayerState,
+    target: { ownerId: string; ownerName: string; card: CardInstance },
+  ) {
     const owner = this.getPlayer(target.ownerId);
     if (!owner) return;
 
@@ -7384,179 +7194,11 @@ export class MultiplayerGame {
 
     this.addLog(`   🎭 使用 ${target.ownerName} 的 ${card.name} 效果`);
 
-    // 与轮入道一致：走完整御魂效果（含 pendingChoice）；勿再用 executeSimpleCardEffect 跳过交互
-    const effectKey = card.cardId === 'yokai_004' ? '天邪鬼青' : (card.name || '');
-    this.executeYokaiEffectByName(player, effectKey, card);
+    this.executeYokaiEffect(player, card, 1);
 
     // 将该牌置入拥有者的弃牌堆（主动弃置，触发【触】）
     this.discard(owner, card, 'active');
     this.addLog(`   📥 ${card.name} 置入 ${target.ownerName} 弃牌堆`);
-  }
-
-  /**
-   * 执行简化版卡牌效果（当前用于幽谷响多选结算等仍需弱交互路径）
-   * 魅妖借用牌库顶牌请走 executeYokaiEffectByName，与轮入道一致。
-   */
-  private executeSimpleCardEffect(player: PlayerState, card: CardInstance) {
-    const cardName = card.name;
-    const hp = card.hp ?? 0;
-
-    // 基于卡牌名称执行简化效果
-    switch (cardName) {
-      // HP1
-      case '招福达摩':
-        // 令牌不能打出，声誉+1已在charm中
-        break;
-      
-      // HP2
-      case '唐纸伞妖':
-        player.damage += 1;
-        this.addLog(`      → 伤害+1`);
-        break;
-      case '天邪鬼青':
-        player.damage += 1;
-        this.addLog(`      → 伤害+1（默认选择）`);
-        break;
-      case '天邪鬼赤':
-        player.damage += 1;
-        this.addLog(`      → 伤害+1`);
-        break;
-      case '天邪鬼黄':
-        this.drawCards(player, 2);
-        this.addLog(`      → 抓牌+2`);
-        break;
-      case '天邪鬼绿':
-        // 退治效果需要选择，简化跳过
-        this.addLog(`      → 效果跳过（需要选择目标）`);
-        break;
-      case '赤舌':
-        // 妨害效果已在对手执行
-        break;
-
-      // HP3
-      case '灯笼鬼':
-        player.ghostFire = Math.min(player.ghostFire + 1, GAME_CONSTANTS.MAX_GHOST_FIRE);
-        this.drawCards(player, 1);
-        this.addLog(`      → 鬼火+1，抓牌+1`);
-        break;
-      case '树妖':
-        this.drawCards(player, 2);
-        this.addLog(`      → 抓牌+2`);
-        break;
-      case '日女巳时':
-        player.damage += 2;
-        this.addLog(`      → 伤害+2（默认选择）`);
-        break;
-      case '蚌精':
-        // AI托管：选择价值最低的手牌超度（HP升序，同HP声誉升序）
-        if (player.hand.length > 0) {
-          const sortedHand = [...player.hand].sort((a, b) => {
-            if ((a.hp ?? 0) !== (b.hp ?? 0)) return (a.hp ?? 0) - (b.hp ?? 0);
-            return (a.charm ?? 0) - (b.charm ?? 0);
-          });
-          const cardToExile = sortedHand[0]!;
-          const idx = player.hand.findIndex(c => c.instanceId === cardToExile.instanceId);
-          if (idx !== -1) {
-            const card = player.hand.splice(idx, 1)[0]!;
-            player.exiled.push(card);
-            this.addLog(`      → 超度 ${card.name}`);
-          }
-        }
-        this.drawCards(player, 2);
-        this.addLog(`      → 抓牌+2`);
-        break;
-      case '鸣屋':
-        const dmg = player.discard.length === 0 ? 4 : 2;
-        player.damage += dmg;
-        this.addLog(`      → 伤害+${dmg}`);
-        break;
-      case '蝠翼':
-        this.drawCards(player, 1);
-        player.damage += 1;
-        this.addLog(`      → 抓牌+1，伤害+1`);
-        break;
-      case '兵主部':
-        player.damage += 2;
-        this.addLog(`      → 伤害+2`);
-        break;
-
-      // HP4
-      case '骰子鬼':
-        // 需要超度+退治，简化跳过
-        this.addLog(`      → 效果跳过（需要选择目标）`);
-        break;
-      case '涅槃之火':
-        TempBuffHelper.addBuff(player, { type: 'SKILL_COST_REDUCTION' as any, value: 1 });
-        this.addLog(`      → 式神技能费用-1`);
-        break;
-      case '雪幽魂':
-        this.drawCards(player, 1);
-        this.addLog(`      → 抓牌+1`);
-        {
-          const xyOpponents = this.state.players.filter(p => p.id !== player.id);
-          if (xyOpponents.length > 0) {
-            this.startXueYouHunHarassment(player.id, xyOpponents, card);
-          }
-        }
-        break;
-      case '网切':
-        TempBuffHelper.applyNetCutterToField(this.state.field);
-        this.addLog(`      → 本回合妖怪HP-1，鬼王HP-2`);
-        break;
-      case '铮':
-        this.drawCards(player, 1);
-        player.damage += 2;
-        this.addLog(`      → 抓牌+1，伤害+2`);
-        break;
-      case '薙魂':
-        // 抓牌+1，弃置1张手牌。本回合打出≥3张御魂时鬼火+2
-        this.drawCards(player, 1);
-        this.addLog(`      → 抓牌+1`);
-        // 如果有手牌，让玩家选择要弃置的牌
-        if (player.hand.length > 0) {
-          this.state.pendingChoice = this.withPlayedYokaiSource(
-            {
-              type: 'naginataSoulDiscard',
-              playerId: player.id,
-              prompt: '选择1张手牌弃置',
-            },
-            card,
-          );
-          this.addLog(`      ⏳ 等待选择1张手牌弃置...`);
-        } else {
-          // 无手牌可弃置时，直接检查御魂计数
-          this.checkNaginataSoulGhostFire(player);
-        }
-        break;
-      case '轮入道':
-        // 需要选择另一张御魂，简化跳过
-        this.addLog(`      → 效果跳过（需要选择另一张御魂）`);
-        break;
-      case '魍魉之匣':
-        // 完整效果（含妨害选择）在 handlePlayCard switch-case 中处理
-        // 这里仅执行基础效果（用于轮入道等触发的简化执行）
-        this.drawCards(player, 1);
-        player.damage += 1;
-        this.addLog(`      → 抓牌+1，伤害+1（简化）`);
-        break;
-
-      // HP7
-      case '幽谷响':
-        // [妨害] 完整效果需要交互选择，简化版仅输出日志
-        // 幽谷响的简化效果：当被其他效果（如轮入道）触发时，跳过交互
-        this.addLog(`      → 效果跳过（需要玩家交互选择）`);
-        break;
-
-      default:
-        // 其他卡牌或阴阳术
-        if (card.cardType === 'spell') {
-          player.damage += (card.damage ?? 1);
-          this.addLog(`      → 伤害+${card.damage ?? 1}（阴阳术）`);
-        } else {
-          this.addLog(`      → 效果未实现`);
-        }
-        break;
-    }
   }
 
   /**
@@ -7594,10 +7236,21 @@ export class MultiplayerGame {
     if (!selected) {
       return { success: false, error: '无效的选择' };
     }
-    
+
+    if (selected.isEmptyDeck) {
+      return { success: false, error: '该对手牌库为空' };
+    }
+
     // 检查选中的牌是否可用
     if (selected.usable === false) {
-      return { success: false, error: '该牌不可用（令牌/恶评）' };
+      const reason = selected.unusableReason as string | undefined;
+      const msg =
+        reason === 'hp_ge_5'
+          ? '该牌生命≥5，不可选择'
+          : reason === 'token_or_penalty'
+            ? '该牌不可用（令牌/恶评）'
+            : '该牌不可选择';
+      return { success: false, error: msg };
     }
 
     // 找到拥有者和该牌
@@ -7954,7 +7607,10 @@ export class MultiplayerGame {
     
     // 注：妖怪/鬼王HP降为0时已直接退治，无需在此额外处理
     
-    this.enterCleanupPhase();
+    void this.enterCleanupPhase().catch(err => {
+      console.error('[enterCleanupPhase]', err);
+      this.addLog(`⚠️ 清理阶段异常: ${err}`);
+    });
     
     return { success: true };
   }

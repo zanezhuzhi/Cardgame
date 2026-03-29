@@ -16,7 +16,7 @@ describe('gameFlow.multiplayer（MultiplayerGame 真实例）', () => {
     // 依赖构造器完整 field / boss；仅改阶段与玩家区
   });
 
-  it('🟢 回合末规则弃置手牌时三味不触发【触】（牌库仅少补牌 5 张）', () => {
+  it('🟢 回合末规则弃置手牌时三味不触发【触】（牌库仅少补牌 5 张）', async () => {
     const game = createMultiplayerGameForTest({ playerCount: 2 });
     const p = getHarnessPlayer(game, 0);
     p.hand = [
@@ -31,7 +31,7 @@ describe('gameFlow.multiplayer（MultiplayerGame 真实例）', () => {
     );
     p.discard = [];
 
-    (game as any).enterCleanupPhase();
+    await (game as any).enterCleanupPhase();
 
     const sanmiInDiscard = p.discard.some(c => c.name === '三味');
     expect(sanmiInDiscard).toBe(true);

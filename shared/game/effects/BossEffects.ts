@@ -19,6 +19,16 @@ interface BossEffectContext {
   onChoice?: (options: string[]) => Promise<number>;
   /** 检查玩家是否用青女房防御来袭效果，返回true表示免疫 */
   onCheckBossRaidDefense?: (player: PlayerState, bossName: string) => Promise<boolean>;
+  /** 来袭从该玩家起顺时针；缺省为 seats 数组顺序 */
+  arrivalStartPlayerId?: string | null;
+}
+
+/** 《状态机 spec》：从击败上一鬼王者起顺时针遍历 */
+function arrivalPlayerOrder(players: PlayerState[], startId?: string | null): PlayerState[] {
+  if (startId == null || startId === '' || players.length === 0) return players;
+  const i = players.findIndex(p => p.id === startId);
+  if (i <= 0) return players;
+  return [...players.slice(i), ...players.slice(0, i)];
 }
 
 // 来袭效果处理器
@@ -145,7 +155,7 @@ registerArrival('石距', async (ctx) => {
   const { gameState } = ctx;
   const immunePlayers = await getImmunePlayers(ctx, '石距');
   
-  for (const player of gameState.players) {
+  for (const player of arrivalPlayerOrder(gameState.players, ctx.arrivalStartPlayerId)) {
     // 检查青女房免疫
     if (immunePlayers.has(player.id)) {
       continue;
@@ -184,7 +194,7 @@ registerArrival('鬼灵歌伎', async (ctx) => {
   const { gameState } = ctx;
   const immunePlayers = await getImmunePlayers(ctx, '鬼灵歌伎');
   
-  for (const player of gameState.players) {
+  for (const player of arrivalPlayerOrder(gameState.players, ctx.arrivalStartPlayerId)) {
     // 检查青女房免疫
     if (immunePlayers.has(player.id)) {
       continue;
@@ -238,7 +248,7 @@ registerArrival('土蜘蛛', async (ctx) => {
   const { gameState } = ctx;
   const immunePlayers = await getImmunePlayers(ctx, '土蜘蛛');
   
-  for (const player of gameState.players) {
+  for (const player of arrivalPlayerOrder(gameState.players, ctx.arrivalStartPlayerId)) {
     // 检查青女房免疫
     if (immunePlayers.has(player.id)) {
       continue;
@@ -274,7 +284,7 @@ registerArrival('胧车', async (ctx) => {
   const { gameState, onSelectCards } = ctx;
   const immunePlayers = await getImmunePlayers(ctx, '胧车');
   
-  for (const player of gameState.players) {
+  for (const player of arrivalPlayerOrder(gameState.players, ctx.arrivalStartPlayerId)) {
     // 检查青女房免疫
     if (immunePlayers.has(player.id)) {
       continue;
@@ -318,7 +328,7 @@ registerArrival('蜃气楼', async (ctx) => {
   const { gameState } = ctx;
   const immunePlayers = await getImmunePlayers(ctx, '蜃气楼');
   
-  for (const player of gameState.players) {
+  for (const player of arrivalPlayerOrder(gameState.players, ctx.arrivalStartPlayerId)) {
     // 检查青女房免疫
     if (immunePlayers.has(player.id)) {
       continue;
@@ -351,7 +361,7 @@ registerArrival('荒骷髅', async (ctx) => {
   const { gameState, onSelectCards } = ctx;
   const immunePlayers = await getImmunePlayers(ctx, '荒骷髅');
   
-  for (const player of gameState.players) {
+  for (const player of arrivalPlayerOrder(gameState.players, ctx.arrivalStartPlayerId)) {
     // 检查青女房免疫
     if (immunePlayers.has(player.id)) {
       continue;
@@ -423,7 +433,7 @@ registerArrival('地震鲶', async (ctx) => {
   const immunePlayers = await getImmunePlayers(ctx, '地震鲶');
   
   // 标记地震鲶效果生效（仅对未免疫的玩家）
-  for (const player of gameState.players) {
+  for (const player of arrivalPlayerOrder(gameState.players, ctx.arrivalStartPlayerId)) {
     // 检查青女房免疫
     if (immunePlayers.has(player.id)) {
       continue;
@@ -486,7 +496,7 @@ registerArrival('八岐大蛇', async (ctx) => {
   const { gameState } = ctx;
   const immunePlayers = await getImmunePlayers(ctx, '八岐大蛇');
   
-  for (const player of gameState.players) {
+  for (const player of arrivalPlayerOrder(gameState.players, ctx.arrivalStartPlayerId)) {
     // 检查青女房免疫
     if (immunePlayers.has(player.id)) {
       continue;
@@ -536,7 +546,7 @@ registerArrival('贪嗔痴', async (ctx) => {
   let maxHp = -1;
   let maxPlayers: PlayerState[] = [];
   
-  for (const player of gameState.players) {
+  for (const player of arrivalPlayerOrder(gameState.players, ctx.arrivalStartPlayerId)) {
     // 检查青女房免疫
     if (immunePlayers.has(player.id)) {
       continue;
@@ -666,8 +676,20 @@ export function clearEarthquakeCatfishEffect(gameState: GameState): void {
       player.tempBuffs.splice(buffIdx, 1);
     }
     
-    // 弃置阴阳师下的牌（如果有实现的话）
-    // 这需要在PlayerState中添加hiddenCards字段
+    const hidden = (player as any).cardsUnderOnmyoji as CardInstance[] | undefined;
+    if (hidden && hidden.length > 0) {
+      for (const c of hidden) {
+        player.discard.push(c);
+      }
+      (player as any).cardsUnderOnmyoji = [];
+    }
+    const legacy = (player as any).hiddenCards as CardInstance[] | undefined;
+    if (legacy && legacy.length > 0) {
+      for (const c of legacy) {
+        player.discard.push(c);
+      }
+      (player as any).hiddenCards = [];
+    }
   }
 }
 

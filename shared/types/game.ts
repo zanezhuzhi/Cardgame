@@ -119,6 +119,8 @@ export interface PlayerState {
   discard: CardInstance[];        // 弃牌堆
   played: CardInstance[];         // 本回合已打出的牌（旁置）
   exiled: CardInstance[];         // 超度区（移出游戏）
+  /** 地震鲶等：置于阴阳师下的牌（对他人隐藏展示） */
+  cardsUnderOnmyoji?: CardInstance[];
   
   // 统计
   totalCharm: number;         // 声誉总计（胜利点数）
@@ -270,6 +272,13 @@ export interface GameState {
   pendingYokaiRefresh?: boolean;
   /** 当前回合是否已达成「击杀」（游荡妖怪或鬼王生命曾扣至0；用于结算上一回合击杀判定） */
   turnHadKill?: boolean;
+
+  /** 清理阶段：本回合曾击杀鬼王后，在抽 5 张与补满游荡妖之后翻下一只并执行来袭 */
+  pendingBossReveal?: boolean;
+  /** 清理阶段：击败的是最后一只鬼王后结束对局 */
+  pendingGameEnd?: boolean;
+  /** 击杀上一只鬼王的玩家 ID；来袭从该玩家起顺时针，翻牌后用完清空 */
+  bossDefeatedByPlayerId?: string | null;
   
   // ====== 伤害来源追踪 ======
   /** 

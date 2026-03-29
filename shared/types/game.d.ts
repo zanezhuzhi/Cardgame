@@ -76,6 +76,8 @@ export interface PlayerState {
     discard: CardInstance[];
     played: CardInstance[];
     exiled: CardInstance[];
+    /** 地震鲶等：阴阳师下藏牌 */
+    cardsUnderOnmyoji?: CardInstance[];
     totalCharm: number;
     cardsPlayed: number;
     isConnected: boolean;
@@ -172,6 +174,9 @@ export interface GameState {
     pendingYokaiRefresh?: boolean;
     /** 当前回合是否已达成「击杀」（游荡妖怪或鬼王生命曾扣至0；用于结算上一回合击杀判定） */
     turnHadKill?: boolean;
+    pendingBossReveal?: boolean;
+    pendingGameEnd?: boolean;
+    bossDefeatedByPlayerId?: string | null;
     /**
      * 当前回合各来源累积的伤害池
      * 镜姬【妖】效果：只免疫 spell 部分，yokai/shikigami 伤害正常生效
@@ -226,7 +231,9 @@ export interface GameLogEntry {
         senderName: string;
         rawContent: string;
     };
+    /** §5.5：与信息栏同源的中部提示（可读文案，不含占位符）；与 settlementToastRecipients 成对 */
     settlementToastText?: string;
+    /** 应显示上述中部提示的玩家 ID 列表 */
     settlementToastRecipients?: string[];
 }
 export type GameAction = {

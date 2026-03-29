@@ -18,7 +18,9 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': '/shared'
-    }
-  }
+      '@': '/shared',
+    },
+    // 源码旁遗留的 tsc 产物 *.js（CommonJS）会与 *.ts 并存；须先解析 .ts，否则 ESM 下报 exports is not defined
+    extensions: ['.ts', '.mts', '.cts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json'],
+  },
 });

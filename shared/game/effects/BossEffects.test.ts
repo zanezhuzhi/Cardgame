@@ -107,7 +107,7 @@ describe('麒麟', () => {
       expect(result).toBe(true);
       expect(player.discard.length).toBe(0);
       expect(player.deck.length).toBe(1);
-      expect(player.deck[0]!.name).toBe('麒麟');
+      expect(player.deck[player.deck.length - 1]!.name).toBe('麒麟');
     });
   });
 });
@@ -141,8 +141,8 @@ describe('石距', () => {
 
       await executeBossArrival('石距', { gameState, bossCard: createTestCard('boss') });
 
-      expect(player.hand.length).toBe(2);
-      expect(player.hand.some(c => c.name === '恶评')).toBe(true);
+      expect(player.hand.length).toBe(1);
+      expect(player.discard.some(c => c.cardType === 'penalty' || c.name === '恶评')).toBe(true);
     });
   });
 

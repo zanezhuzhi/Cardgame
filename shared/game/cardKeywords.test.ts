@@ -22,13 +22,20 @@ describe('cardKeywords', () => {
     expect(resolveYokaiKeywords({ subtype: '御魂' })).toEqual(['御魂']);
   });
 
-  it('cardHasKeyword 仅 yokai 且含关键词', () => {
+  it('cardHasKeyword 仅 yokai 且含关键词（显式 keywords 或 subtype）', () => {
     const y: Pick<CardInstance, 'cardType' | 'keywords'> = {
       cardType: 'yokai',
       keywords: ['御魂', '鬼火'],
     };
     expect(cardHasKeyword(y, '鬼火')).toBe(true);
     expect(cardHasKeyword(y, '妨害')).toBe(false);
+
+    const fromSubtype: Pick<CardInstance, 'cardType' | 'keywords' | 'subtype'> = {
+      cardType: 'yokai',
+      keywords: [],
+      subtype: '御魂/妨害',
+    };
+    expect(cardHasKeyword(fromSubtype, '妨害')).toBe(true);
 
     const s: Pick<CardInstance, 'cardType' | 'keywords'> = {
       cardType: 'spell',

@@ -14,6 +14,10 @@ interface BossEffectContext {
     onChoice?: (options: string[]) => Promise<number>;
     /** 检查玩家是否用青女房防御来袭效果，返回true表示免疫 */
     onCheckBossRaidDefense?: (player: PlayerState, bossName: string) => Promise<boolean>;
+    arrivalStartPlayerId?: string | null;
+    raidActiveDiscardSpell?: (player: PlayerState, card: CardInstance) => void;
+    givePenaltyFromRaid?: (player: PlayerState) => void;
+    onShijuRaidDetail?: (playerId: string, spellsDiscarded: number, gotPenalty: boolean) => void;
 }
 type ArrivalHandler = (ctx: BossEffectContext) => Promise<BossEffectResult>;
 type SoulHandler = (ctx: BossEffectContext & {

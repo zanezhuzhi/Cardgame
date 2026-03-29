@@ -21,6 +21,15 @@ interface BossEffectContext {
   onCheckBossRaidDefense?: (player: PlayerState, bossName: string) => Promise<boolean>;
   /** 来袭从该玩家起顺时针；缺省为 seats 数组顺序 */
   arrivalStartPlayerId?: string | null;
+  /**
+   * 石距等：已从手牌移除的阴阳术，按「主动弃置」结算（触发弃牌【触】）。
+   * 未提供时退化为直接置入弃牌堆（单元测试等）。
+   */
+  raidActiveDiscardSpell?: (player: PlayerState, card: CardInstance) => void;
+  /** 石距等：从公共恶评堆获得并入弃牌堆；未提供时用占位恶评直接进入弃牌堆 */
+  givePenaltyFromRaid?: (player: PlayerState) => void;
+  /** 石距来袭逐人明细日志（服务端） */
+  onShijuRaidDetail?: (playerId: string, spellsDiscarded: number, gotPenalty: boolean) => void;
 }
 
 /** 《状态机 spec》：从击败上一鬼王者起顺时针遍历 */
@@ -164,27 +173,39 @@ registerArrival('石距', async (ctx) => {
     const spells = player.hand.filter(c => c.cardType === 'spell');
     
     if (spells.length > 0) {
-      // 弃掉所有阴阳术
+      let discarded = 0;
       for (const spell of spells) {
         const idx = player.hand.findIndex(c => c.instanceId === spell.instanceId);
-        if (idx !== -1) {
-          player.discard.push(player.hand.splice(idx, 1)[0]!);
+        if (idx === -1) continue;
+        const [card] = player.hand.splice(idx, 1);
+        if (ctx.raidActiveDiscardSpell) {
+          ctx.raidActiveDiscardSpell(player, card);
+        } else {
+          player.discard.push(card);
         }
+        discarded++;
       }
+      ctx.onShijuRaidDetail?.(player.id, discarded, false);
     } else {
-      // 无阴阳术，获得恶评
-      player.hand.push(createPenaltyCard());
+      if (ctx.givePenaltyFromRaid) {
+        ctx.givePenaltyFromRaid(player);
+      } else {
+        player.discard.push(createPenaltyCard());
+      }
+      ctx.onShijuRaidDetail?.(player.id, 0, true);
     }
   }
   
   return { success: true, message: '石距来袭：所有玩家弃掉阴阳术' };
 });
 
-// 石距御魂 - 鬼火+1，抓牌+1，伤害+2
+// 石距御魂 - 鬼火+1，抓牌+1，伤害+2（抽牌与服务端一致：牌库顶 = deck[0]，用 shift）
 registerSoul('石距', async (ctx) => {
   const { player } = ctx;
   player.ghostFire = Math.min(player.ghostFire + 1, player.maxGhostFire);
-  drawCards(player, 1);
+  if (player.deck.length > 0) {
+    player.hand.push(player.deck.shift()!);
+  }
   player.damage += 2;
   return { success: true, message: '石距：鬼火+1，抓牌+1，伤害+2' };
 });
@@ -643,7 +664,8 @@ export function recoverBossToHand(player: PlayerState, card: CardInstance): bool
 export function checkKirinEndOfTurn(player: PlayerState): boolean {
   const kirinIdx = player.discard.findIndex(c => c.name === '麒麟');
   if (kirinIdx !== -1) {
-    player.deck.unshift(player.discard.splice(kirinIdx, 1)[0]!);
+    // 牌库底：与抽牌 deck.shift()（顶在索引 0）一致，底在数组末尾
+    player.deck.push(player.discard.splice(kirinIdx, 1)[0]!);
     return true;
   }
   return false;

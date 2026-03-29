@@ -41,6 +41,7 @@ import {
 } from '../../../shared/game/netCutterField';
 import type { SkillContext } from '../../../shared/types/shikigami';
 import { resolveHarassment, createHarassmentAction } from '../../../shared/game/effects/HarassmentPipeline';
+import { checkKirinEndOfTurn as applyKirinTouchToDeckBottom } from '../../../shared/game/effects/BossEffects';
 import { defaultHarassmentPipelineChoiceIndex } from '../../../shared/game/multiplayer/defaultHarassmentPipelineChoice';
 
 // 导入伤害系统（镜姬【妖】效果免疫判定）
@@ -1549,17 +1550,11 @@ export class MultiplayerGame {
   
   /**
    * 回合结束时检查麒麟【触】效果
-   * 麒麟：若在弃牌堆则归牌库底
+   * 麒麟：若在弃牌堆则归牌库底（与 shared/game/effects/BossEffects 一致）
    */
   private checkKirinEndOfTurn(player: PlayerState): void {
-    const kirinIdx = player.discard.findIndex(c => 
-      c.cardType === 'boss' && c.name === '麒麟'
-    );
-    
-    if (kirinIdx !== -1) {
-      const kirinCard = player.discard.splice(kirinIdx, 1)[0]!;
-      player.deck.unshift(kirinCard); // 放到牌库底（unshift放到数组开头=牌库底）
-      this.addLog(`🔄 【触】${player.name} 的麒麟归入牌库底`);
+    if (applyKirinTouchToDeckBottom(player)) {
+      this.addLog(`🎴 麒麟【触】：${player.name} 的麒麟归入牌库底`);
     }
   }
   
@@ -3174,6 +3169,21 @@ export class MultiplayerGame {
       gameState: this.state,
       bossCard: boss as CardInstance,
       arrivalStartPlayerId: this.state.bossDefeatedByPlayerId ?? undefined,
+      raidActiveDiscardSpell: (p: PlayerState, card: CardInstance) => {
+        this.discard(p, card, 'active');
+      },
+      givePenaltyFromRaid: (p: PlayerState) => {
+        this.givePenaltyCard(p);
+      },
+      onShijuRaidDetail: (playerId: string, spellsDiscarded: number, gotPenalty: boolean) => {
+        const p = this.getPlayer(playerId);
+        if (!p) return;
+        if (spellsDiscarded > 0) {
+          this.addLog(`      ${p.name} 弃置了 ${spellsDiscarded} 张阴阳术`);
+        } else if (gotPenalty) {
+          this.addLog(`      ${p.name} 无阴阳术，获得1张恶评`);
+        }
+      },
       // 选择卡牌回调（用于需要玩家选择的效果）
       onSelectCards: async (cards: CardInstance[], count: number): Promise<string[]> => {
         // 默认自动选择：按HP从低到高选
@@ -3254,14 +3264,7 @@ export class MultiplayerGame {
   private logBossArrivalDetails(bossName: string): void {
     switch (bossName) {
       case '石距':
-        for (const player of this.state.players) {
-          const spellCount = player.discard.filter(c => c.cardType === 'spell').length;
-          if (spellCount > 0) {
-            this.addLog(`      ${player.name} 弃置了 ${spellCount} 张阴阳术`);
-          } else {
-            this.addLog(`      ${player.name} 无阴阳术，获得1张恶评`);
-          }
-        }
+        // 逐人明细已由 executeBossArrivalEffect.onShijuRaidDetail 打出
         break;
         
       case '鬼灵歌伎':
@@ -4358,13 +4361,21 @@ export class MultiplayerGame {
           } else if (usableCount === 1) {
             const only = slots.find(s => s.usable)!;
             const owner = this.getPlayer(only.ownerId);
-            const card = only.card && owner ? owner.deck.find(c => c.instanceId === only.card!.instanceId) : undefined;
-            if (owner && card) {
-              this.executeMeiYaoEffect(player, {
-                ownerId: only.ownerId,
-                ownerName: only.ownerName,
+            const stolen =
+              only.card && owner
+                ? owner.deck.find(c => c.instanceId === only.card!.instanceId)
+                : undefined;
+            // 与 meiYaoSelect 一致：必须经过 HarassmentPipeline（铮/青女房等），禁止单目标捷径绕过妨害抵抗
+            if (owner && stolen) {
+              void this.runMeiYaoHarassmentAfterSelect(
+                player,
+                {
+                  ownerId: only.ownerId,
+                  ownerName: only.ownerName,
+                  instanceId: stolen.instanceId,
+                },
                 card,
-              });
+              );
             }
           } else {
             this.state.pendingChoice = this.withPlayedYokaiSource(
@@ -5127,9 +5138,10 @@ export class MultiplayerGame {
           break;
           
         case '石距':
-          // 伤害+4
-          player.damage += 4;
-          this.addLog(`   ✨ 御魂：伤害+4`);
+          player.ghostFire = Math.min(player.ghostFire + 1, player.maxGhostFire);
+          this.drawCards(player, 1);
+          player.damage += 2;
+          this.addLog(`   ✨ 御魂：鬼火+1，抓牌+1，伤害+2`);
           break;
           
         case '鬼灵歌伎':

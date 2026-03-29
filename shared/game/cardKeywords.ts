@@ -21,7 +21,13 @@ export function resolveYokaiKeywords(card: { subtype?: string; keywords?: string
 }
 
 /** 策划定义：『鬼火』牌仅指 yokai 且 keywords 含该串；阴阳术单独统计。 */
-export function cardHasKeyword(card: Pick<CardInstance, 'cardType' | 'keywords'>, keyword: string): boolean {
+export function cardHasKeyword(
+  card: Pick<CardInstance, 'cardType' | 'keywords'> & { subtype?: string },
+  keyword: string,
+): boolean {
   if (card.cardType !== 'yokai') return false;
-  return (card.keywords ?? []).includes(keyword);
+  return resolveYokaiKeywords({
+    subtype: card.subtype,
+    keywords: card.keywords,
+  }).includes(keyword);
 }

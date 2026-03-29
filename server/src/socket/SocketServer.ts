@@ -1805,6 +1805,20 @@ export class SocketServer {
           }
           return;
         }
+        if (pc.type === 'rinyuChoice') {
+          const opts = (pc.options as string[]) || ['ghostFire', 'draw', 'damage'];
+          const level = this.aiPendingAutoLevel(game, cur.id);
+          const choice =
+            level === 'L0' && opts.length > 0
+              ? opts[Math.floor(Math.random() * opts.length)]!
+              : 'damage';
+          const r = game.handleRinyuChoiceResponse(cur.id, choice);
+          if (r.success) {
+            this.broadcastGameState(roomId, game.getState());
+            this.scheduleAiTurn(roomId);
+          }
+          return;
+        }
       }
 
       if (state.turnPhase === 'shikigami') {

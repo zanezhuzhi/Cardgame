@@ -9,9 +9,32 @@ import {
   actionPlayCard,
   createYokaiTestCard,
 } from './multiplayerTestHarness';
+import type { CardInstance } from '../../types';
+
+function zhengCard(instanceId: string): CardInstance {
+  return {
+    instanceId,
+    cardId: 'yokai_021',
+    cardType: 'yokai',
+    name: '铮',
+    hp: 4,
+    maxHp: 4,
+    damage: 0,
+    charm: 0,
+  };
+}
+
+async function drainMicrotasksUntil(
+  cond: () => boolean,
+  max = 80,
+): Promise<void> {
+  for (let i = 0; i < max && !cond(); i++) {
+    await new Promise<void>(r => queueMicrotask(r));
+  }
+}
 
 describe('魅妖借用御魂：完整效果', () => {
-  it('选中对手天邪鬼绿且场上有多个≤4HP妖怪时，应保留 yokaiTarget 待选', () => {
+  it('选中对手天邪鬼绿且场上有多个≤4HP妖怪时，应保留 yokaiTarget 待选', async () => {
     const game = createMultiplayerGameForTest({ playerCount: 2 });
     const p0 = getHarnessPlayer(game, 0);
     const p1 = getHarnessPlayer(game, 1);
@@ -37,10 +60,38 @@ describe('魅妖借用御魂：完整效果', () => {
 
     const play = actionPlayCard(game, p0.id, mei.instanceId);
     expect(play.success).toBe(true);
-    // 仅 1 名对手且仅 1 张可用牌时，魅妖在打出结算内会直接 executeMeiYaoEffect，不经过 meiYaoSelect
+    await drainMicrotasksUntil(() => game.getState().pendingChoice?.type === 'yokaiTarget');
     const st = game.getState();
     expect(st.pendingChoice?.type).toBe('yokaiTarget');
     const opts = (st.pendingChoice as { options?: string[] }).options;
     expect(opts?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('仅 1 名对手且仅 1 张可用牌时仍先走妨害管线：对手有铮时弹出 harassmentPipelineChoice', async () => {
+    const game = createMultiplayerGameForTest({ playerCount: 2 });
+    const p0 = getHarnessPlayer(game, 0);
+    const p1 = getHarnessPlayer(game, 1);
+    const green = createYokaiTestCard('天邪鬼绿', 3, { instanceId: 'opp_deck_green_1' });
+    p1.deck = [
+      green,
+      ...Array.from({ length: 4 }, (_, i) =>
+        createYokaiTestCard('灯笼鬼', 3, { instanceId: `opp_deck_fill_${i}` }),
+      ),
+    ];
+    p1.hand = [zhengCard('z_mei_single')];
+    const mei = createYokaiTestCard('魅妖', 5, { instanceId: 'hand_mei_2' });
+    p0.hand = [mei];
+
+    const play = actionPlayCard(game, p0.id, mei.instanceId);
+    expect(play.success).toBe(true);
+    await drainMicrotasksUntil(
+      () => game.getState().pendingChoice?.type === 'harassmentPipelineChoice',
+    );
+    const st = game.getState();
+    expect(st.pendingChoice?.type).toBe('harassmentPipelineChoice');
+    expect(st.pendingChoice?.playerId).toBe(p1.id);
+    expect(String((st.pendingChoice as { options?: string[] }).options?.[0] || '')).toContain(
+      '铮',
+    );
   });
 });

@@ -339,7 +339,8 @@ describe('handleTufoSelectResponse 服务端测试', () => {
     state.wheelMonkQueue = {
       playerId: player.id,
       remainingExecutions: 1,
-      cardName: '涂佛'
+      cardName: '涂佛',
+      cardId: '',
     };
     
     // 执行
@@ -576,7 +577,8 @@ describe('简单御魂效果 服务端集成测试', () => {
     const card = createYokaiCard('破势', 6);
     player.hand = [card];
     player.damage = 0;
-    (player as any).cardsPlayed = 0; // 首张牌
+    // 与 handlePlayCard 一致：打出流水在调用 executeYokaiEffect 前已对本次牌 cardsPlayed++
+    (player as any).cardsPlayed = 1;
     
     (game as any).executeYokaiEffect(player, card);
     
@@ -587,7 +589,7 @@ describe('简单御魂效果 服务端集成测试', () => {
     const card = createYokaiCard('破势', 6);
     player.hand = [card];
     player.damage = 0;
-    (player as any).cardsPlayed = 2; // 已打出过牌
+    (player as any).cardsPlayed = 2; // 本回合已打出过至少一张
     
     (game as any).executeYokaiEffect(player, card);
     

@@ -242,7 +242,18 @@
         </div>
       </div>
       
-      <!-- 房间等待界面 -->
+      <!-- 匹配系统房间：仅供服务端调度，不向玩家展示座位/开始游戏；确认后直接进入式神选择 -->
+      <div v-else-if="isMatchmadeLobbyRoom" class="room-panel match-flow-entering">
+        <div class="match-entering-inner">
+          <h2>正在进入对局</h2>
+          <p class="match-entering-hint">
+            已确认参战，正在同步棋盘…<br />即将进入式神选择界面，请稍候。
+          </p>
+          <button type="button" class="btn secondary" @click="leaveRoom">取消并返回大厅</button>
+        </div>
+      </div>
+
+      <!-- 自建房 / 手动加入：完整房间等待界面 -->
       <div v-else class="room-panel">
         <div class="room-header">
           <h2>{{ currentRoom.name }}</h2>
@@ -327,7 +338,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { socketClient, type RoomInfo } from '../network/SocketClient';
 
@@ -436,6 +447,12 @@ const emptySlots = computed(() => {
   const max = currentRoom.value.maxPlayers || currentRoom.value.config?.maxPlayers || 6;
   const current = currentRoom.value.players?.length || 0;
   return Math.max(0, max - current);
+});
+
+/** 匹配队列创建的房间（与 SocketServer startMatchedGame 命名一致），不在大厅展示「系统房间」详情 */
+const isMatchmadeLobbyRoom = computed(() => {
+  const n = currentRoom.value?.name || '';
+  return typeof n === 'string' && n.startsWith('匹配房间');
 });
 
 // 辅助函数：获取房主名称
@@ -560,12 +577,32 @@ async function toggleReady() {
   }
 }
 
+function tryEnterMultiGame(): boolean {
+  if (!socketClient.gameState.value) return false;
+  router.push({ path: '/game', query: buildGameRouteQuery('multi') });
+  return true;
+}
+
 async function startGame() {
   try {
     await socketClient.startGame();
   } catch (e: any) {
-    error.value = e.message || '开始游戏失败';
+    const msg = e.message || '开始游戏失败';
+    if (typeof msg === 'string' && msg.includes('游戏已开始')) {
+      router.push({ path: '/game', query: buildGameRouteQuery('multi') });
+      return;
+    }
+    error.value = msg;
+    return;
   }
+
+  if (tryEnterMultiGame()) return;
+  await nextTick();
+  if (tryEnterMultiGame()) return;
+  await new Promise((r) => setTimeout(r, 200));
+  if (tryEnterMultiGame()) return;
+
+  error.value = '服务端已接受开局，但未收到棋盘状态，请再点一次「开始游戏」';
 }
 
 function copyRoomCode() {
@@ -675,6 +712,27 @@ function stopConfirmPhase() {
   hasConfirmed.value = false;
 }
 
+// 收到匹配房 room:updated 时会先写入 currentRoom；关掉确认遮罩，改由「正在进入对局」承接
+watch(
+  () => currentRoom.value?.name,
+  (name) => {
+    if (name && String(name).startsWith('匹配房间')) {
+      stopConfirmPhase();
+    }
+  }
+);
+
+/** 任一途径写入 gameState 后兜底进入棋盘（弥补 gameStarted 与 router 时序、或监听器遗漏） */
+watch(
+  () => socketClient.gameState.value,
+  (gs) => {
+    if (!gs || route.path !== '/') return;
+    const ph = (gs as { phase?: string }).phase;
+    if (ph !== 'shikigamiSelect' && ph !== 'playing') return;
+    router.push({ path: '/game', query: buildGameRouteQuery('multi') });
+  }
+);
+
 function confirmMatch() {
   if (hasConfirmed.value) return;
   
@@ -773,6 +831,9 @@ onMounted(() => {
   // 匹配成功（所有人确认后）- 进入游戏
   socketClient.on('match:found', (data: { roomId: string; players: any[] }) => {
     console.log('[Lobby] 匹配成功，进入游戏:', data);
+    // #region agent log
+    fetch('http://127.0.0.1:7249/ingest/fe374947-e9d9-43de-b23c-53a6c75d96c3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'698d09'},body:JSON.stringify({sessionId:'698d09',runId:'pre-fix',hypothesisId:'H3_H4',location:'Lobby.vue:match:found',message:'client match:found',data:{roomId:(data as any).roomId},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     stopConfirmPhase();
     stopMatchingTimer();
     router.push({ path: '/game', query: buildGameRouteQuery('multi') });
@@ -781,6 +842,9 @@ onMounted(() => {
   // 匹配失败
   socketClient.on('match:failed', (data: { reason: string }) => {
     console.log('[Lobby] 匹配失败:', data);
+    // #region agent log
+    fetch('http://127.0.0.1:7249/ingest/fe374947-e9d9-43de-b23c-53a6c75d96c3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'698d09'},body:JSON.stringify({sessionId:'698d09',runId:'pre-fix',hypothesisId:'H1_H3',location:'Lobby.vue:match:failed',message:'client match:failed',data:{reason:String((data as any).reason||'').slice(0,80)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     stopMatchingTimer();
     stopConfirmPhase();
     error.value = data.reason || '匹配失败';
@@ -1155,6 +1219,26 @@ onUnmounted(() => {
   border: 2px solid #d4a574;
   border-radius: 12px;
   padding: 20px;
+}
+
+.match-flow-entering .match-entering-inner {
+  text-align: center;
+  padding: 28px 20px 12px;
+  max-width: 440px;
+  margin: 0 auto;
+}
+
+.match-flow-entering h2 {
+  margin: 0 0 14px;
+  color: #f0e6d3;
+  font-size: 1.35rem;
+}
+
+.match-flow-entering .match-entering-hint {
+  margin: 0 0 24px;
+  color: #b8a88c;
+  font-size: 14px;
+  line-height: 1.65;
 }
 
 .room-header {

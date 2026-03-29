@@ -13,6 +13,8 @@ yarn-error.log*
 dist/
 build/
 *.local
+# Vite 偶发写入仓库根 client/ 下的临时垫片
+client/vite.config.ts.timestamp-*.mjs
 
 # ===========================
 # TypeScript build artifacts (repo-local)

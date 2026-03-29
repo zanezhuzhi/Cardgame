@@ -25,6 +25,7 @@ import cardsData from '../../../shared/data/cards.json';
 // 导入御魂效果执行器及弃置触发辅助函数
 import { executeYokaiEffect as executeYokaiEffectHandler } from '../../../shared/game/effects/YokaiEffects';
 import { clearFieldNetCutter, getNetCutterEffectiveHp } from '../../../shared/game/netCutterField';
+import { resolveYokaiKeywords } from '../../../shared/game/cardKeywords';
 
 // 导入式神技能执行器
 import { executeSkill as executeShikigamiSkill } from '../../../shared/game/effects/ShikigamiSkills';
@@ -234,7 +235,7 @@ export class SinglePlayerGame {
   }
 
   private createCardInstance(card: any, type: string): CardInstance {
-    return {
+    const inst: CardInstance = {
       instanceId: generateId(),
       cardId: card.id,
       cardType: type as CardType,
@@ -246,6 +247,13 @@ export class SinglePlayerGame {
       effect: card.effect,
       image: card.image || ''
     };
+    if (type === 'yokai') {
+      inst.keywords = resolveYokaiKeywords({
+        subtype: card.subtype,
+        keywords: card.keywords,
+      });
+    }
+    return inst;
   }
 
   // ============ 游戏流程 ============
@@ -1165,6 +1173,12 @@ export class SinglePlayerGame {
       return false;
     }
 
+    if (player.prohibitedTargets?.includes(yokai.instanceId)) {
+      this.addLog(`🚫 镇墓兽：本回合不能对该目标造成伤害或退治`);
+      this.notifyChange();
+      return false;
+    }
+
     // 已击杀的妖怪不能再分配伤害
     if (yokai.currentHp !== undefined && yokai.currentHp <= 0) {
       this.addLog(`⚠️ 【${yokai.name}】已被退治`);
@@ -1228,9 +1242,15 @@ export class SinglePlayerGame {
    * 超度已击杀的妖怪（移出游戏）
    */
   banishYokai(slotIndex: number): boolean {
+    const player = this.getPlayer();
     const yokai = this.state.field.yokaiSlots[slotIndex];
     if (!yokai || (yokai.currentHp !== undefined && yokai.currentHp > 0)) {
       this.addLog(`❌ 该妖怪尚未被击杀`);
+      return false;
+    }
+
+    if (player.prohibitedTargets?.includes(yokai.instanceId)) {
+      this.addLog(`🚫 镇墓兽：本回合不能退治该目标`);
       return false;
     }
     
@@ -1256,6 +1276,12 @@ export class SinglePlayerGame {
     
     if (!boss) {
       this.addLog(`❌ 当前没有鬼王`);
+      this.notifyChange();
+      return false;
+    }
+
+    if (player.prohibitedTargets?.includes(boss.id)) {
+      this.addLog(`🚫 镇墓兽：本回合不能退治该目标`);
       this.notifyChange();
       return false;
     }
@@ -1396,6 +1422,11 @@ export class SinglePlayerGame {
     const boss = this.state.field.currentBoss;
     if (!boss) return;
 
+    if (player.prohibitedTargets?.includes(boss.id)) {
+      this.addLog(`🚫 镇墓兽：本回合不能退治该目标`);
+      return;
+    }
+
     const bossInstance = this.createCardInstance(boss, 'boss');
 
     // 鲤鱼精被动：首次退治可放牌库顶
@@ -1440,6 +1471,11 @@ export class SinglePlayerGame {
     const player = this.getPlayer();
     const boss = this.state.field.currentBoss;
     if (!boss) return;
+
+    if (player.prohibitedTargets?.includes(boss.id)) {
+      this.addLog(`🚫 镇墓兽：本回合不能将该鬼王超度离场`);
+      return;
+    }
 
     // 超度移出游戏，不计入声誉
     this.addLog(`✨ 超度鬼王【${boss.name}】！移出游戏（不计入声誉）`);

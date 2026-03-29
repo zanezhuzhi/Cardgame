@@ -119,9 +119,10 @@ export interface YokaiCard {
     type: 'yokai';
     hp: number;
     charm: number;
-    keywords: string[];
+    subtype?: string;
+    keywords?: string[];
     effect: string;
-    effectType: EffectType;
+    effectType?: EffectType;
     fieldEffect?: string;
     multiPlayer?: boolean;
     gender?: CardGender;

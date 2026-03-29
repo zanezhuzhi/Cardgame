@@ -308,9 +308,9 @@ describe('三味', () => {
   });
   
   it('本回合已使用鬼火牌时，也计入伤害加成', async () => {
-    // 设置已打出区有1张鬼火牌（灯笼鬼）
+    // 设置已打出区有1张鬼火牌（灯笼鬼，以 keywords 为准）
     (player as any).played = [
-      { ...createTestCard('yokai', '灯笼鬼'), cardType: 'yokai', tags: ['鬼火'] },
+      { ...createTestCard('yokai', '灯笼鬼'), cardType: 'yokai', keywords: ['御魂', '鬼火'] },
     ];
     player.damage = 0;
     
@@ -326,7 +326,7 @@ describe('三味', () => {
     // 设置已打出区：1张阴阳术 + 1张鬼火牌
     (player as any).played = [
       { ...createTestCard('spell', '基础术式'), cardType: 'spell' },
-      { ...createTestCard('yokai', '涅槃之火'), cardType: 'yokai', subtype: '御魂/鬼火' },
+      { ...createTestCard('yokai', '涅槃之火'), cardType: 'yokai', keywords: ['御魂', '鬼火'] },
     ];
     player.damage = 0;
     

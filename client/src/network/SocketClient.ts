@@ -325,8 +325,18 @@ class SocketClient {
         reject(new Error('未连接到服务器'));
         return;
       }
-      
+
+      const ms = 25000;
+      const timer = window.setTimeout(() => {
+        reject(new Error('开局请求超时，请检查服务端或重试'));
+      }, ms);
+
       this.socket.emit('game:start', (response: { success: boolean; error?: string }) => {
+        clearTimeout(timer);
+        if (response == null) {
+          reject(new Error('服务器未返回开局结果'));
+          return;
+        }
         if (response.success) {
           resolve();
         } else {
@@ -460,6 +470,12 @@ class SocketClient {
     this.socket.on('room:updated', (roomInfo: RoomInfo) => {
       this.currentRoom.value = roomInfo;
       this.emit('roomUpdated', roomInfo);
+      // #region agent log
+      if (String(roomInfo.name || '').includes('匹配')) {
+        const pl = roomInfo.players || [];
+        fetch('http://127.0.0.1:7249/ingest/fe374947-e9d9-43de-b23c-53a6c75d96c3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'698d09'},body:JSON.stringify({sessionId:'698d09',runId:'pre-fix',hypothesisId:'H3',location:'SocketClient.ts:room:updated',message:'match room snapshot',data:{status:roomInfo.status,pc:pl.length,readyN:pl.filter((p:any)=>p.isReady).length,hostN:pl.filter((p:any)=>p.isHost).length},timestamp:Date.now()})}).catch(()=>{});
+      }
+      // #endregion
     });
     
     // 玩家加入

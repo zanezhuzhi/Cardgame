@@ -303,4 +303,63 @@ describe('式神获取/置换', () => {
       expect(hasOld).toBe(true);
     });
   });
+
+  describe('地藏像', () => {
+    it('从 field.shikigamiSupply 抽 2 张候选（不使用未初始化的 state.shikigamiDeck）', () => {
+      game = new MultiplayerGame('test-room', mockPlayers as any);
+      (game as any).state.phase = 'playing';
+      (game as any).state.turnPhase = 'action';
+      (game as any).state.currentPlayerIndex = 0;
+      player1 = (game as any).state.players[0];
+      (game as any).state.field.shikigamiSupply = [
+        createShikigamiCard('d1', '候选甲'),
+        createShikigamiCard('d2', '候选乙'),
+      ];
+      const dizang = {
+        instanceId: 'dizang_inst',
+        cardId: 'yokai_029',
+        cardType: 'yokai' as const,
+        name: '地藏像',
+        hp: 5,
+        maxHp: 5,
+        charm: 2,
+        damage: 0,
+      };
+      player1.played = [dizang];
+      (game as any).executeYokaiEffect(player1, dizang, 1);
+      const st = (game as any).state;
+      expect(st.pendingChoice?.type).toBe('dizangSelectShikigami');
+      expect(st.field.shikigamiSupply.length).toBe(0);
+      const logText = st.log.map((e: any) => e.message || '').join('\n');
+      expect(logText).not.toMatch(/式神牌库为空/);
+    });
+
+    it('供应堆仅 1 张时：直接获取，不报牌库为空', () => {
+      game = new MultiplayerGame('test-room', mockPlayers as any);
+      (game as any).state.phase = 'playing';
+      (game as any).state.turnPhase = 'action';
+      (game as any).state.currentPlayerIndex = 0;
+      player1 = (game as any).state.players[0];
+      player1.shikigami = [];
+      (game as any).state.field.shikigamiSupply = [createShikigamiCard('only', '独苗式神')];
+      const dizang = {
+        instanceId: 'dizang_inst2',
+        cardId: 'yokai_029',
+        cardType: 'yokai' as const,
+        name: '地藏像',
+        hp: 5,
+        maxHp: 5,
+        charm: 2,
+        damage: 0,
+      };
+      player1.played = [dizang];
+      (game as any).executeYokaiEffect(player1, dizang, 1);
+      const st = (game as any).state;
+      expect(player1.shikigami.length).toBe(1);
+      expect(player1.shikigami[0].id).toBe('only');
+      expect(st.field.shikigamiSupply.length).toBe(0);
+      const logText = st.log.map((e: any) => e.message || '').join('\n');
+      expect(logText).not.toMatch(/式神牌库为空/);
+    });
+  });
 });

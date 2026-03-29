@@ -1,5 +1,5 @@
 /**
- * 魅妖：借用对手牌库顶牌时应走完整御魂效果（同轮入道），而非 executeSimpleCardEffect 跳过交互。
+ * 魅妖：借用对手牌库顶牌时应走完整御魂效果（executeYokaiEffect，与轮入道一致）。
  */
 import { describe, it, expect } from 'vitest';
 import {

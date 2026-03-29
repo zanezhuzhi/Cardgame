@@ -5,6 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import cardsData from './cards.json';
+import { parseSubtypeToKeywords } from '../game/cardKeywords';
 
 // ===========================================
 // 一、阴阳术卡一致性测试
@@ -412,6 +413,15 @@ describe('妖怪卡数据一致性验证 (基于文档 v0.3.0)', () => {
       for (const card of yokaiData) {
         expect(card.effect).toBeDefined();
         expect(card.effect.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('每张游荡妖怪都有非空 subtype，且可解析出至少一个关键词', () => {
+      for (const card of yokaiData) {
+        expect(card.subtype, card.name).toBeTruthy();
+        expect(String(card.subtype).trim().length).toBeGreaterThan(0);
+        const kw = parseSubtypeToKeywords(card.subtype);
+        expect(kw.length, `${card.name} subtype=${card.subtype}`).toBeGreaterThan(0);
       }
     });
   });

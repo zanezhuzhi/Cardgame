@@ -107,6 +107,20 @@ export interface ZhenMuShouTargetChoice extends BasePendingChoice {
     /** 当前回合玩家的 ID（被限制的玩家） */
     restrictedPlayerId: string;
 }
+/** 幽谷响弹窗槽位（与魅妖 candidates 项结构一致，便于同一套 UI） */
+export interface YouguXiangDisplaySlotPayload {
+    instanceId: string;
+    ownerId: string;
+    ownerName: string;
+    turnStep: number;
+    cardId: string;
+    cardType: CardInstance['cardType'];
+    name: string;
+    hp?: number;
+    usable: boolean;
+    isEmptyDeck: boolean;
+    unusableReason?: 'empty_deck' | 'boss';
+}
 /** 幽谷响选择（从所有对手牌库顶展示的卡牌中选择最多3张非鬼王卡执行效果） */
 export interface YouguXiangSelectChoice extends BasePendingChoice {
     type: 'youguXiangSelect';
@@ -120,6 +134,11 @@ export interface YouguXiangSelectChoice extends BasePendingChoice {
     selectableCandidates: string[];
     /** 最多可选数量（默认3） */
     maxSelect: number;
+    /**
+     * 按行动顺序的槽位（含空库、鬼王顶牌）；用于与魅妖一致的网格与玩家信息展示。
+     * 新版服务端会发送；缺省时前端回退为仅展示可选牌。
+     */
+    displayCandidates?: YouguXiangDisplaySlotPayload[];
 }
 /** 地藏像打出确认（二次确认：防止误操作） */
 export interface DizangConfirmChoice extends BasePendingChoice {

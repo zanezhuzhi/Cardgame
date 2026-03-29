@@ -95,23 +95,20 @@ export class ConfirmSession {
    * 玩家确认
    */
   confirm(playerId: string): { success: boolean; error?: string } {
-    const player = this.players.find(p => p.id === playerId);
-    if (!player) {
+    const matches = this.players.filter(p => p.id === playerId);
+    if (matches.length === 0) {
       return { success: false, error: '玩家不存在' };
     }
-    
-    if (player.confirmed) {
-      return { success: true }; // 已确认
+    for (const player of matches) {
+      if (!player.isAI) {
+        player.confirmed = true;
+      }
     }
-    
-    player.confirmed = true;
-    console.log(`[ConfirmSession] 玩家 ${player.name} 已确认`);
-    
-    // 检查是否全员确认
+    const named = matches[0];
+    console.log(`[ConfirmSession] 玩家 ${named.name} 已确认`);
     if (this.checkAllConfirmed()) {
       this.complete('success');
     }
-    
     return { success: true };
   }
   

@@ -5,6 +5,9 @@ import { resolve } from 'path'
 export default defineConfig({
   plugins: [vue()],
   resolve: {
+    // shared/ 下常有 tsc 生成的 CommonJS *.js 与源码 *.ts 同名；默认先匹配 .js 会导致
+    // 「does not provide an export named …」且 /game 路由加载失败。优先解析 .ts。
+    extensions: ['.mjs', '.mts', '.ts', '.tsx', '.jsx', '.js', '.json'],
     alias: {
       '@': resolve(__dirname, 'src'),
       '@shared': resolve(__dirname, '../shared')

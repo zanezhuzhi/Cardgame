@@ -160,9 +160,12 @@ export interface YokaiCard {
   type: 'yokai';
   hp: number;              // 生命值
   charm: number;           // 声誉值
-  keywords: string[];      // 关键词标签 [御魂, 妨害, 持续...]
+  /** cards.json：如「御魂/鬼火」，解析为运行时 CardInstance.keywords */
+  subtype?: string;
+  /** 若数据中显式给出则优先生效；否则由 subtype 解析 */
+  keywords?: string[];
   effect: string;          // 效果描述
-  effectType: EffectType;  // 效果类型
+  effectType?: EffectType;  // 效果类型（数据以 name 分支为主，此字段可选）
   fieldEffect?: string;    // 【妖】作为游荡妖怪时的效果
   multiPlayer?: boolean;   // 是否为多人游戏卡（纸人符号）
   gender?: CardGender;     // 性别 (0=无, 1=男, 2=女, 3=双)

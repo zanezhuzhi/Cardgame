@@ -125,12 +125,18 @@
                :class="{
                  'boss-attackable': canAttackBoss,
                  'boss-defeated': isBossDefeated,
-                 'boss-hint': allYokaiCleared && !isBossDefeated && state?.turnPhase === 'action'
+                 'boss-hint': allYokaiCleared && !isBossDefeated && state?.turnPhase === 'action',
+                 zhenmuBlockedMe: isZhenMuBlockedForBoss
                }"
                @click="hitBoss"
                @mouseenter="showBossTooltip($event, boss)"
                @mouseleave="hideTooltip">
             <img v-if="getCardImage(boss)" :src="getCardImage(boss)" class="card-art boss-art" />
+            <div
+              v-if="isZhenMuShouShieldVisibleForBoss && !isBossDefeated"
+              class="zhenmu-shield-badge zhenmu-shield-badge--boss"
+              title="镇墓兽：本回合内有玩家不能将该目标击杀/退治"
+            >🛡️</div>
             <!-- 鬼王被击败（已自动退治） -->
             <div v-if="isBossDefeated" class="boss-defeated-overlay">💀 已击败</div>
             <!-- 鬼王信息（顶部渐变） -->
@@ -184,13 +190,19 @@
                    wounded: y && isWounded(y) && !isKilled(y),
                    canKill: y && canKillYokai(y),
                    killed: y && isKilled(y),
-                   selecting: selectingTarget && y
+                   selecting: selectingTarget && y,
+                   zhenmuBlockedMe: y && isZhenMuBlockedForMe(y.instanceId)
                  }"
                  @click="y && handleYokaiClick(i, y)"
                  @mouseenter="y && showTooltip($event, y)"
                  @mouseleave="hideTooltip">
               <template v-if="y">
                 <img v-if="getCardImage(y)" :src="getCardImage(y)" class="card-art yokai-art" />
+                <div
+                  v-if="isZhenMuShouShieldOnYokai(y)"
+                  class="zhenmu-shield-badge"
+                  title="镇墓兽：本回合内有玩家不能将该目标击杀/退治"
+                >🛡️</div>
                 <div class="yokai-info">
                   <div class="y-name">{{y.name}}</div>
                   <div class="y-stat">
@@ -524,7 +536,7 @@
             <div v-for="(s, idx) in dizangSelectModal.candidates" :key="s.id"
                  class="dizang-shikigami-card"
                  @click="handleDizangSelectShikigami(idx)">
-              <img v-if="s.image" :src="`/images/shikigami/${s.image}`" class="shikigami-img" />
+              <img v-if="getCardImage(s)" :src="getCardImage(s)" class="shikigami-img" alt="" />
               <div class="shikigami-info">
                 <div class="shikigami-name">{{ s.name }}</div>
                 <div class="shikigami-skill" v-if="s.skills?.[0]">技能: {{ s.skills[0].name }}</div>
@@ -544,9 +556,9 @@
           <div class="dizang-new-shikigami" v-if="dizangReplaceModal.newShikigami">
             <p class="new-shikigami-label">新式神：</p>
             <div class="dizang-shikigami-card highlight">
-              <img v-if="dizangReplaceModal.newShikigami.image" 
-                   :src="`/images/shikigami/${dizangReplaceModal.newShikigami.image}`" 
-                   class="shikigami-img" />
+              <img v-if="getCardImage(dizangReplaceModal.newShikigami)" 
+                   :src="getCardImage(dizangReplaceModal.newShikigami)" 
+                   class="shikigami-img" alt="" />
               <div class="shikigami-info">
                 <div class="shikigami-name">{{ dizangReplaceModal.newShikigami.name }}</div>
               </div>
@@ -557,7 +569,7 @@
             <div v-for="(s, idx) in dizangReplaceModal.currentShikigami" :key="s.id"
                  class="dizang-shikigami-card"
                  @click="handleDizangReplaceShikigami(idx)">
-              <img v-if="s.image" :src="`/images/shikigami/${s.image}`" class="shikigami-img" />
+              <img v-if="getCardImage(s)" :src="getCardImage(s)" class="shikigami-img" alt="" />
               <div class="shikigami-info">
                 <div class="shikigami-name">{{ s.name }}</div>
               </div>
@@ -635,24 +647,44 @@
           <div class="modal-box card-select-modal">
           <p class="modal-title">{{cardSelectModal.title}}</p>
           <p class="modal-hint">{{cardSelectModal.hint || `选择 ${cardSelectModal.count} 张牌`}}</p>
-          <div class="card-select-grid">
-            <div v-for="c in cardSelectModal.candidates" :key="c.instanceId"
-                 class="select-card-item" 
-                 :class="[c.cardType, {selected: cardSelectModal.selected.includes(c.instanceId), unusable: c._usable === false}]"
-                 @click="c._usable !== false && toggleCardSelect(c.instanceId)"
-                 @mouseenter="showTooltip($event, c)"
-                 @mouseleave="hideTooltip">
-              <img v-if="getCardImage(c)" :src="getCardImage(c)" class="card-art" />
-              <div class="card-info">
-                <div class="c-name">{{c.name}}<span v-if="c._ownerName" class="owner-tag">{{c._ownerName}}</span></div>
-                <div class="c-stat">
-                  <template v-if="c.cardType === 'spell'">⚔️{{c.damage||1}}</template>
-                  <template v-else-if="c.cardType === 'yokai' || c.cardType === 'token'">❤️{{ yokaiFaceOrPrintedHp(c) }}</template>
-                  <template v-else>❤️{{c.hp ?? 0}}</template>
+          <div class="card-select-grid" :class="{ 'mei-yao-select-grid': cardSelectModal.layoutVariant === 'meiYao' }">
+            <div
+              v-for="c in cardSelectModal.candidates"
+              :key="c.instanceId"
+              class="select-card-slot"
+              :class="{ 'mei-yao-slot': cardSelectModal.layoutVariant === 'meiYao' }"
+            >
+              <div
+                class="select-card-item"
+                :class="[c.cardType, {selected: cardSelectModal.selected.includes(c.instanceId), unusable: c._usable === false, 'mei-yao-card': cardSelectModal.layoutVariant === 'meiYao', 'empty-deck-slot': c._isEmptyDeck}]"
+                @click="c._usable !== false && toggleCardSelect(c.instanceId)"
+                @mouseenter="showTooltip($event, c)"
+                @mouseleave="hideTooltip"
+              >
+                <div v-if="c._isEmptyDeck && !getCardImage(c)" class="card-empty-deck-placeholder">
+                  <span class="empty-deck-icon">📭</span>
+                  <span class="empty-deck-text">无牌可展示</span>
                 </div>
+                <img v-else-if="getCardImage(c)" :src="getCardImage(c)" class="card-art" />
+                <div class="card-info">
+                  <div class="c-name">
+                    {{ c.name }}
+                    <span v-if="c._ownerName && cardSelectModal.layoutVariant !== 'meiYao'" class="owner-tag">{{ c._ownerName }}</span>
+                  </div>
+                  <div v-if="!c._isEmptyDeck" class="c-stat">
+                    <template v-if="c.cardType === 'spell'">⚔️{{c.damage||1}}</template>
+                    <template v-else-if="c.cardType === 'yokai' || c.cardType === 'token'">❤️{{ yokaiFaceOrPrintedHp(c) }}</template>
+                    <template v-else>❤️{{c.hp ?? 0}}</template>
+                  </div>
+                </div>
+                <div class="select-check" v-if="cardSelectModal.selected.includes(c.instanceId)">✓</div>
+                <div class="unusable-badge" v-if="c._usable === false">{{ meiYaoUnusableLabel(c) }}</div>
               </div>
-              <div class="select-check" v-if="cardSelectModal.selected.includes(c.instanceId)">✓</div>
-              <div class="unusable-badge" v-if="c._usable === false">不可用</div>
+              <div v-if="cardSelectModal.layoutVariant === 'meiYao' && (c._ownerName || c._turnStep != null || (c as any)._ownerId)" class="select-card-owner-below">
+                <span class="owner-below-name">{{ c._ownerName }}</span>
+                <span v-if="(c as any)._ownerId" class="owner-below-id" :title="String((c as any)._ownerId)">玩家 {{ shortPlayerIdDisplay((c as any)._ownerId) }}</span>
+                <span v-if="c._turnStep != null" class="owner-below-order">行动顺序 {{ c._turnStep }}</span>
+              </div>
             </div>
           </div>
           <div class="modal-actions">
@@ -1271,8 +1303,23 @@ watch(
 //   101-110 = 鬼王, 401-424 = 式神, 601-603 = 阴阳术, 701-702 = 恶评
 function getCardImage(card: CardInstance | any): string {
   const rawId = card?.cardId || card?.id
-  if (!rawId) return ''
+  if (!rawId || card?._isEmptyDeck) return ''
   return getCardImageById(rawId)
+}
+
+function meiYaoUnusableLabel(c: CardInstance | any): string {
+  if (c._isEmptyDeck) return '牌库为空'
+  if (c._unusableReason === 'hp_ge_5') return 'HP≥5'
+  if (c._unusableReason === 'token_or_penalty') return '不可用'
+  if (c._unusableReason === 'boss') return '鬼王'
+  return '不可用'
+}
+
+/** 魅妖槽位：简要展示座位 id（完整 id 用 title 悬停） */
+function shortPlayerIdDisplay(id: string): string {
+  if (!id) return ''
+  if (id.length <= 10) return id
+  return `${id.slice(0, 4)}…${id.slice(-4)}`
 }
 
 // 根据 cardId 直接获取卡牌图片路径
@@ -1393,8 +1440,10 @@ watch(() => socketClient.gameState.value, (newState) => {
     // 监听 pendingChoice：妖怪目标选择弹窗（天邪鬼绿等御魂效果）
     if (newState.pendingChoice?.type === 'yokaiTarget' && newState.pendingChoice.playerId === myPlayerId.value) {
       const targetIds = newState.pendingChoice.options || []
+      const me = newState.players.find(p => p.id === myPlayerId.value)
+      const blocked = new Set(me?.prohibitedTargets || [])
       const candidates = newState.field.yokaiSlots.filter(
-        (y): y is CardInstance => y !== null && targetIds.includes(y.instanceId)
+        (y): y is CardInstance => y !== null && targetIds.includes(y.instanceId) && !blocked.has(y.instanceId)
       )
       // 只有当 candidates 存在时才打开；否则确保不再残留旧弹窗
       if (candidates.length > 0) {
@@ -1473,6 +1522,7 @@ watch(() => socketClient.gameState.value, (newState) => {
       const pc = newState.pendingChoice as any
       const player = newState.players.find(p => p.id === myPlayerId.value)
       if (player) {
+        cardSelectModal.layoutVariant = ''
         cardSelectModal.isServerMultiSelect = true
         cardSelectModal.show = true
         cardSelectModal.title = '🎴 选择要弃置的手牌'
@@ -1491,6 +1541,7 @@ watch(() => socketClient.gameState.value, (newState) => {
       const pc = newState.pendingChoice as any
       const player = newState.players.find(p => p.id === myPlayerId.value)
       if (player && player.hand.length > 0) {
+        cardSelectModal.layoutVariant = ''
         cardSelectModal.isServerMultiSelect = true
         cardSelectModal.show = true
         cardSelectModal.title = '📥 选择1张手牌置于牌库顶'
@@ -1509,6 +1560,7 @@ watch(() => socketClient.gameState.value, (newState) => {
       const pc = newState.pendingChoice as any
       const player = newState.players.find(p => p.id === myPlayerId.value)
       if (player && player.hand.length > 0) {
+        cardSelectModal.layoutVariant = ''
         cardSelectModal.isServerMultiSelect = true
         cardSelectModal.show = true
         cardSelectModal.title = '🗑️ 树妖：选择1张手牌弃置'
@@ -1527,6 +1579,7 @@ watch(() => socketClient.gameState.value, (newState) => {
       const pc = newState.pendingChoice as any
       const player = newState.players.find(p => p.id === myPlayerId.value)
       if (player && player.hand.length > 0) {
+        cardSelectModal.layoutVariant = ''
         cardSelectModal.isServerMultiSelect = true
         cardSelectModal.show = true
         cardSelectModal.title = '⚔️ 薙魂：选择1张手牌弃置'
@@ -1547,6 +1600,7 @@ watch(() => socketClient.gameState.value, (newState) => {
       if (player) {
         // 只显示符合条件的御魂（HP≤6）
         const validCards = player.hand.filter((c: any) => pc.candidates?.includes(c.instanceId))
+        cardSelectModal.layoutVariant = ''
         cardSelectModal.isServerMultiSelect = true
         cardSelectModal.show = true
         cardSelectModal.title = '🔄 轮入道：选择1张御魂弃置'
@@ -1564,6 +1618,7 @@ watch(() => socketClient.gameState.value, (newState) => {
       // 监听 pendingChoice：涂佛选择弃牌区阴阳术
       const pc = newState.pendingChoice as any
       if (pc.cards && pc.cards.length > 0) {
+        cardSelectModal.layoutVariant = ''
         cardSelectModal.isServerMultiSelect = true
         cardSelectModal.show = true
         cardSelectModal.title = '📜 涂佛：选择阴阳术置入手牌'
@@ -1591,6 +1646,7 @@ watch(() => socketClient.gameState.value, (newState) => {
       const pc = newState.pendingChoice as any
       const player = newState.players.find(p => p.id === myPlayerId.value)
       if (player && player.hand.length > 0) {
+        cardSelectModal.layoutVariant = ''
         cardSelectModal.isServerMultiSelect = true
         cardSelectModal.show = true
         cardSelectModal.title = '☁️ 蚌精：选择1张手牌超度'
@@ -1609,6 +1665,7 @@ watch(() => socketClient.gameState.value, (newState) => {
       const pc = newState.pendingChoice as any
       const player = newState.players.find(p => p.id === myPlayerId.value)
       if (player && player.hand.length > 0) {
+        cardSelectModal.layoutVariant = ''
         cardSelectModal.isServerMultiSelect = true
         cardSelectModal.show = true
         cardSelectModal.title = '🎲 骰子鬼：选择1张手牌超度'
@@ -1638,6 +1695,7 @@ watch(() => socketClient.gameState.value, (newState) => {
           charm: o.charm ?? 0,
           _slotIndex: o.slotIndex
         }))
+        cardSelectModal.layoutVariant = ''
         cardSelectModal.isServerMultiSelect = true
         cardSelectModal.show = true
         cardSelectModal.title = `🎲 骰子鬼：选择退治目标（HP≤${pc.maxHp}）`
@@ -1653,16 +1711,41 @@ watch(() => socketClient.gameState.value, (newState) => {
       }
     } else if (newState.pendingChoice?.type === 'youguXiangSelect' && newState.pendingChoice.playerId === myPlayerId.value) {
       const pc = newState.pendingChoice as any
-      const revealed = pc.revealedCards || []
-      const selectable = new Set<string>((pc.selectableCandidates || []) as string[])
       const maxSel = Math.max(0, Number(pc.maxSelect) || 3)
-      const virtualCards: CardInstance[] = revealed
-        .filter((r: any) => r?.card && selectable.has(r.card.instanceId))
-        .map((r: any) => ({
-          ...r.card,
-          _ownerName: r.ownerName,
-        }))
+      const rawDisplay = (pc.displayCandidates || []) as any[]
+      const mapYouguSlot = (c: any): CardInstance => {
+        const isEmpty = c.isEmptyDeck === true
+        const usable = c.usable === true && !isEmpty
+        return {
+          instanceId: c.instanceId,
+          cardId: c.cardId || '',
+          cardType: (c.cardType || 'yokai') as CardInstance['cardType'],
+          name: c.name || (isEmpty ? '牌库为空' : ''),
+          hp: c.hp,
+          maxHp: c.hp,
+          _ownerName: c.ownerName,
+          _ownerId: c.ownerId as string | undefined,
+          _turnStep: typeof c.turnStep === 'number' ? c.turnStep : undefined,
+          _usable: usable,
+          _isEmptyDeck: isEmpty,
+          _unusableReason: c.unusableReason as string | undefined,
+        }
+      }
+      let virtualCards: CardInstance[]
+      if (rawDisplay.length > 0) {
+        virtualCards = rawDisplay.map(mapYouguSlot)
+      } else {
+        const revealed = pc.revealedCards || []
+        const selectable = new Set<string>((pc.selectableCandidates || []) as string[])
+        virtualCards = revealed
+          .filter((r: any) => r?.card && selectable.has(r.card.instanceId))
+          .map((r: any) => ({
+            ...r.card,
+            _ownerName: r.ownerName,
+          }))
+      }
       if (virtualCards.length > 0) {
+        cardSelectModal.layoutVariant = rawDisplay.length > 0 ? 'meiYao' : ''
         cardSelectModal.isServerMultiSelect = true
         cardSelectModal.show = true
         cardSelectModal.title = '🔔 幽谷响：选择要执行效果的御魂'
@@ -1683,6 +1766,7 @@ watch(() => socketClient.gameState.value, (newState) => {
       if (player && player.hand.length > 0) {
         const minC = Math.max(0, Number(pc.minCount) || 0)
         const maxC = Math.max(minC, Number(pc.maxCount) ?? player.hand.length)
+        cardSelectModal.layoutVariant = ''
         cardSelectModal.isServerMultiSelect = true
         cardSelectModal.show = true
         cardSelectModal.title = '🐦 伤魂鸟：选择要超度的手牌'
@@ -1704,6 +1788,7 @@ watch(() => socketClient.gameState.value, (newState) => {
       const idSet = new Set<string>((pc.candidates || []).map((c: any) => c.instanceId))
       const full = (player?.discard || []).filter(c => idSet.has(c.instanceId))
       if (player && full.length >= need) {
+        cardSelectModal.layoutVariant = ''
         cardSelectModal.isServerMultiSelect = true
         cardSelectModal.show = true
         cardSelectModal.title = '🌙 阴摩罗：选择弃牌区的牌'
@@ -1719,36 +1804,41 @@ watch(() => socketClient.gameState.value, (newState) => {
         }
       }
     } else if (newState.pendingChoice?.type === 'meiYaoSelect' && newState.pendingChoice.playerId === myPlayerId.value) {
-      // 监听 pendingChoice：魅妖选择对手牌库顶牌
+      // 监听 pendingChoice：魅妖选择对手牌库顶牌（服务端按行动顺序含空库与不可选顶牌）
       const pc = newState.pendingChoice as any
       const candidates = pc.candidates || []
       if (candidates.length > 0) {
-        // 构造虚拟卡牌对象用于显示
-        // 使用服务端传来的完整卡牌信息（包含cardId用于获取图片，usable标记可用性）
         const hasUsable = pc.hasUsable !== false
-        const virtualCards: CardInstance[] = candidates.map((c: any) => ({
-          instanceId: c.instanceId,
-          cardId: c.cardId,           // 真实cardId用于获取图片
-          cardType: c.cardType || 'yokai',
-          name: c.name,               // 原始卡牌名
-          hp: c.hp,
-          maxHp: c.hp,
-          // 额外信息用于显示和判断
-          _ownerName: c.ownerName,
-          _usable: c.usable !== false, // 是否可用（令牌/恶评不可用）
-        }))
+        const virtualCards: CardInstance[] = candidates.map((c: any) => {
+          const isEmpty = c.isEmptyDeck === true
+          const usable = c.usable === true && !isEmpty
+          return {
+            instanceId: c.instanceId,
+            cardId: c.cardId || '',
+            cardType: (c.cardType || 'yokai') as CardInstance['cardType'],
+            name: c.name || (isEmpty ? '牌库为空' : ''),
+            hp: c.hp,
+            maxHp: c.hp,
+            _ownerName: c.ownerName,
+            _ownerId: c.ownerId as string | undefined,
+            _turnStep: typeof c.turnStep === 'number' ? c.turnStep : undefined,
+            _usable: usable,
+            _isEmptyDeck: isEmpty,
+            _unusableReason: c.unusableReason as string | undefined,
+          }
+        })
         cardSelectModal.isServerMultiSelect = true
         cardSelectModal.show = true
+        cardSelectModal.layoutVariant = 'meiYao'
         cardSelectModal.title = '🎭 魅妖：选择对手牌库顶牌'
-        cardSelectModal.hint = hasUsable 
-          ? `选择1张牌使用其效果（来自对手牌库）` 
-          : `对手牌库顶均为不可用牌（令牌/恶评）`
+        cardSelectModal.hint = hasUsable
+          ? `选择1张可用牌（HP<5）；按行动顺序展示所有对手`
+          : `当前无可用牌库顶，可跳过`
         cardSelectModal.candidates = virtualCards
-        cardSelectModal.minCount = hasUsable ? 1 : 0  // 无可用牌时允许不选
+        cardSelectModal.minCount = hasUsable ? 1 : 0
         cardSelectModal.maxCount = 1
         cardSelectModal.count = hasUsable ? 1 : 0
         cardSelectModal.selected = []
-        // 添加取消按钮标记
         ;(cardSelectModal as any).allowCancel = !hasUsable
         cardSelectModal.resolve = (ids: string[]) => {
           socketClient.send('game:meiYaoSelectResponse', { selectedCardId: ids[0] || '' })
@@ -1840,6 +1930,7 @@ watch(() => socketClient.gameState.value, (newState) => {
         cardSelectModal.isServerMultiSelect = false
         cardSelectModal.selected = []
         cardSelectModal.resolve = null
+        cardSelectModal.layoutVariant = ''
       }
       if (choiceModal.show) {
         choiceModal.show = false
@@ -2254,6 +2345,8 @@ const cardSelectModal = reactive<{
   resolve: ((ids: string[]) => void) | null
   onConfirm: (() => void) | null
   isServerMultiSelect: boolean  // 是否为服务端多选（天邪鬼赤等）
+  /** 魅妖等专用布局：玩家标签在卡牌下方、多列适配 */
+  layoutVariant: '' | 'meiYao'
 }>({
   show: false,
   title: '选择卡牌',
@@ -2265,7 +2358,8 @@ const cardSelectModal = reactive<{
   selected: [],
   resolve: null,
   onConfirm: null,
-  isServerMultiSelect: false
+  isServerMultiSelect: false,
+  layoutVariant: '',
 })
 
 // 超度选择弹窗（唐纸伞妖等御魂效果）
@@ -2515,6 +2609,37 @@ const isMyTurn = computed(() => {
 })
 const yokai = computed(() => state.value?.field.yokaiSlots || [])
 const boss = computed(() => state.value?.field.currentBoss)
+
+/** 镇墓兽：任意座位 prohibitedTargets 中的目标 id（游荡妖怪 instanceId / 鬼王 id），用于全场盾标 */
+const zhenMuShouShieldTargetIds = computed(() => {
+  const ps = state.value?.players
+  if (!ps?.length) return new Set<string>()
+  const s = new Set<string>()
+  for (const p of ps) {
+    for (const id of p.prohibitedTargets || []) s.add(id)
+  }
+  return s
+})
+
+function isZhenMuShouShieldOnYokai(y: CardInstance): boolean {
+  return zhenMuShouShieldTargetIds.value.has(y.instanceId)
+}
+
+const isZhenMuShouShieldVisibleForBoss = computed(() => {
+  const b = boss.value
+  if (!b?.id) return false
+  return zhenMuShouShieldTargetIds.value.has(b.id)
+})
+
+function isZhenMuBlockedForMe(targetInstanceId: string): boolean {
+  return !!(player.value?.prohibitedTargets?.includes(targetInstanceId))
+}
+
+const isZhenMuBlockedForBoss = computed(() => {
+  const b = boss.value
+  if (!b?.id) return false
+  return isZhenMuBlockedForMe(b.id)
+})
 /** 场上鬼王：网切等 buff 下的展示 HP（与结算有效生命一致） */
 const displayBossMaxHp = computed(() => {
   const f = state.value?.field
@@ -3679,6 +3804,7 @@ function resolveCardSelect() {
     cardSelectModal.show = false
     cardSelectModal.resolve = null
     cardSelectModal.isServerMultiSelect = false
+    cardSelectModal.layoutVariant = ''
   }
 }
 
@@ -3839,6 +3965,8 @@ async function handleYokaiClick(i: number, y: CardInstance) {
   
   // 已击杀的妖怪已自动退治，无需操作
   if (isKilled(y)) return
+
+  if (player.value?.prohibitedTargets?.includes(y.instanceId)) return
   
   // 分配伤害（击杀时服务端/单人端会自动退治）
   if (isMultiMode.value) {
@@ -3861,6 +3989,8 @@ function play(id: string) {
 
 async function kill(i: number) {
   if (!isMyTurn.value) return
+  const y = state.value?.field.yokaiSlots[i]
+  if (y && player.value?.prohibitedTargets?.includes(y.instanceId)) return
   if (isMultiMode.value) {
     socketClient.sendAction({ type: 'allocateDamage', slotIndex: i })
   } else {
@@ -3929,6 +4059,7 @@ function isWounded(y: CardInstance): boolean {
   return currentHp < maxHp && currentHp > 0
 }
 function canKillYokai(y: CardInstance): boolean {
+  if (player.value?.prohibitedTargets?.includes(y.instanceId)) return false
   const need = yokaiRemainingNeededToDefeat(y)
   return need > 0 && (player.value?.damage || 0) >= need
 }
@@ -3958,10 +4089,12 @@ const isBossDefeated = computed(() => {
 // 鬼王是否可以被攻击
 const canAttackBoss = computed(() => {
   const p = player.value
+  const b = state.value?.field.currentBoss
   return state.value?.turnPhase === 'action'
-    && !!state.value?.field.currentBoss
+    && !!b
     && (p?.damage ?? 0) > 0
     && !isBossDefeated.value // 鬼王已被击败时不可再攻击
+    && !(p?.prohibitedTargets?.includes(b.id))
 })
 
 async function hitBoss() {
@@ -3969,6 +4102,9 @@ async function hitBoss() {
   
   // 鬼王被击败后已自动退治，无需额外操作
   if (isBossDefeated.value) return
+
+  const b = state.value?.field.currentBoss
+  if (b && player.value?.prohibitedTargets?.includes(b.id)) return
   
   // 正常攻击鬼王
   if (!canAttackBoss.value) return
@@ -4212,6 +4348,7 @@ function resetSpellExchangeState() {
   cardSelectModal.onConfirm = null
   cardSelectModal.candidates = []
   cardSelectModal.selected = []
+  cardSelectModal.layoutVariant = ''
 }
 
 function cancelCardSelect() {
@@ -4220,6 +4357,7 @@ function cancelCardSelect() {
     cardSelectModal.resolve([])
     cardSelectModal.show = false
     cardSelectModal.isServerMultiSelect = false
+    cardSelectModal.layoutVariant = ''
     ;(cardSelectModal as any).allowCancel = false
     cardSelectModal.selected = []
     cardSelectModal.resolve = null
@@ -5302,8 +5440,10 @@ async function confirmReplaceShikigami() {
   font-size:calc(var(--s) * 20);
   color:#fff;
   min-height:calc(var(--s) * 48);
-  display:flex;align-items:center;
-  word-break:break-all;
+  /* 勿用 flex：v-html 内联文本与 .log-link 会变成多个 flex 子项，导致词条被拆行、出现大空隙（木魅等多词条日志） */
+  display:block;
+  overflow-wrap: break-word;
+  word-break: normal;
   line-height:1.4;
   flex-shrink:0;
 }
@@ -5703,6 +5843,27 @@ async function confirmReplaceShikigami() {
   white-space:nowrap;font-weight:bold;
   border:calc(var(--s) * 1) solid rgba(233,30,99,.5);
   z-index:2;
+}
+/* 镇墓兽禁止目标：全场可见盾标（不拦截点击，避免误挡分配伤害） */
+.zhenmu-shield-badge{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  z-index:3;
+  font-size:calc(var(--s) * 44);
+  line-height:1;
+  filter:drop-shadow(0 2px 6px rgba(0,0,0,.85));
+  pointer-events:none;
+  user-select:none;
+}
+.zhenmu-shield-badge--boss{
+  font-size:42px;
+}
+.yokai-card.zhenmuBlockedMe:not(.empty):not(.killed){
+  opacity:.88;
+  cursor:not-allowed;
+}
+.boss-card.zhenmuBlockedMe:not(.boss-defeated){
+  opacity:.88;
+  cursor:not-allowed;
 }
 @keyframes canKillPulse{
   0%,100%{box-shadow:0 0 6px rgba(76,175,80,.4)}
@@ -6365,6 +6526,31 @@ async function confirmReplaceShikigami() {
 /* 卡牌选择弹窗 */
 .card-select-modal{min-width:320px}
 .card-select-grid{display:flex;flex-wrap:wrap;gap:15px;justify-content:center;max-height:300px;overflow-y:auto;padding:15px}
+.card-select-grid.mei-yao-select-grid{
+  max-height:min(70vh,560px);
+  justify-content:flex-start;
+  gap:10px 12px;
+  align-content:flex-start;
+}
+.select-card-slot{display:contents}
+.select-card-slot.mei-yao-slot{display:flex;flex-direction:column;align-items:center;gap:6px;width:calc(var(--s) * 108);flex:0 0 auto}
+.select-card-item.mei-yao-card{
+  width:calc(var(--s) * 100)!important;height:calc(var(--s) * 140)!important;
+}
+.select-card-item.empty-deck-slot{border-style:dashed;border-color:#666;background:linear-gradient(160deg,#252540,#1a1a30)}
+.card-empty-deck-placeholder{
+  position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+  padding:8px;text-align:center;background:rgba(0,0,0,.35);z-index:2;
+}
+.empty-deck-icon{font-size:calc(var(--s) * 28);opacity:.85}
+.empty-deck-text{font-size:11px;color:#b8b8c8;line-height:1.3}
+.select-card-owner-below{
+  display:flex;flex-direction:column;align-items:center;gap:2px;max-width:100%;
+  font-size:11px;color:#d4c4a8;text-align:center;line-height:1.25;
+}
+.owner-below-name{font-weight:600;color:#f0e6d3}
+.owner-below-id{font-size:10px;color:#8a9aab;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.owner-below-order{opacity:.85;font-size:10px;color:#a89f8c}
 .select-card-item{
   width:calc(var(--s) * 120);height:calc(var(--s) * 168);
   border-radius:calc(var(--s) * 6);overflow:hidden;

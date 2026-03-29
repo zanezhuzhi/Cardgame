@@ -19,7 +19,9 @@ import {
   createStartingDeck,
   getGameConfig,
   GAME_CONSTANTS,
-  DATA_SUMMARY
+  DATA_SUMMARY,
+  createYokaiInstance,
+  getYokaiById,
 } from './loader';
 
 describe('CardLoader 数据加载器', () => {
@@ -203,6 +205,15 @@ describe('CardLoader 数据加载器', () => {
       const config = getGameConfig(4);
       expect(config.playerCount).toBe(4);
       expect(config.maxGhostFire).toBe(5);
+    });
+  });
+
+  describe('🟢 妖怪实例 keywords', () => {
+    it('createYokaiInstance 从 subtype 解析 keywords（灯笼鬼）', () => {
+      const proto = getYokaiById('yokai_008');
+      expect(proto).toBeDefined();
+      const inst = createYokaiInstance(proto!);
+      expect(inst.keywords).toEqual(['御魂', '鬼火']);
     });
   });
 });

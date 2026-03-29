@@ -17,7 +17,7 @@ export class RoomManager {
   private _playerRooms: Map<string, string> = new Map();
   private _cleanupTimer: NodeJS.Timeout | null = null;
   private _onRoomUpdate?: (room: Room) => void;
-  private _onRoomDeleted?: (roomId: string) => void;
+  private _onRoomDeleted?: (roomId: string, disbandReason?: string) => void;
 
   private constructor() {
     this.startCleanup();
@@ -34,8 +34,14 @@ export class RoomManager {
     this._onRoomUpdate = callback;
   }
 
-  onRoomDeleted(callback: (roomId: string) => void): void {
+  onRoomDeleted(callback: (roomId: string, disbandReason?: string) => void): void {
     this._onRoomDeleted = callback;
+  }
+
+  /** 主动推送房间快照（用于 setPlayerReady 等不经过 joinRoom 的变更） */
+  notifyRoomUpdate(roomId: string): void {
+    const room = this.getRoom(roomId);
+    if (room) this._onRoomUpdate?.(room);
   }
 
   createRoom(hostId: string, hostName: string, config: Partial<RoomConfig> = {}): Room {
@@ -155,7 +161,7 @@ export class RoomManager {
     return { success: true, roomDeleted: false, newHostId: result.newHostId };
   }
 
-  deleteRoom(roomId: string): boolean {
+  deleteRoom(roomId: string, disbandReason?: string): boolean {
     const room = this._rooms.get(roomId);
     if (!room) return false;
     
@@ -167,7 +173,7 @@ export class RoomManager {
     
     this._rooms.delete(roomId);
     console.log(`[RoomManager] 房间已删除: ${roomId}`);
-    this._onRoomDeleted?.(roomId);
+    this._onRoomDeleted?.(roomId, disbandReason);
     
     return true;
   }
@@ -193,6 +199,8 @@ export class RoomManager {
     room.setStatus('playing');
     
     console.log(`[RoomManager] 游戏开始: 房间 ${roomId}, ${players.length} 名玩家`);
+
+    this.notifyRoomUpdate(roomId);
     
     return { success: true };
   }

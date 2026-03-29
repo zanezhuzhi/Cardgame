@@ -38,7 +38,7 @@
 ```
 server/src/game/MultiplayerGame.ts
 ├── handleAction()        # 玩家操作处理
-├── executeYokaiEffectByName() # 效果执行
+├── executeYokaiEffect() # 效果执行
 ├── handleXxxResponse()   # 各类交互响应
 ├── turnFlowControl()     # 回合流转
 └── notifyStateChange()   # 状态广播

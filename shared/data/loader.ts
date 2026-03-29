@@ -19,6 +19,8 @@ import type {
 
 import type { GameConfig } from '../types/game';
 
+import { resolveYokaiKeywords } from '../game/cardKeywords';
+
 import cardsData from './cards.json';
 
 // 类型断言
@@ -200,6 +202,7 @@ export function createYokaiInstance(card: YokaiCard): CardInstance {
     maxHp: card.hp,
     charm: card.charm || 0,
     effect: card.effect,
+    keywords: resolveYokaiKeywords(card),
     image: card.image,
   };
 }

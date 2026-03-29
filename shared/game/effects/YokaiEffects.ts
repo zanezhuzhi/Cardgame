@@ -4,6 +4,7 @@
  */
 
 import { applyNetCutterToField as applyNetCutterFieldBuff } from '../netCutterField';
+import { cardHasKeyword } from '../cardKeywords';
 
 // 直接定义需要的类型接口（避免模块解析问题）
 interface CardInstance {
@@ -1095,7 +1096,7 @@ function givePenaltyCard(player: PlayerState, gameState: GameState): void {
 }
 
 // 镇墓兽 - 鬼火+1，抓牌+1，伤害+2，左手边玩家指定禁止退治目标
-// 完整交互效果在 MultiplayerGame.executeYokaiEffectByName 中实现
+// 完整交互效果在 MultiplayerGame.executeYokaiEffect 中实现
 // 此处仅处理单人模式/测试的基础效果
 registerEffect('镇墓兽', async (ctx) => {
   const { player, gameState, onSelectTarget } = ctx;
@@ -1219,7 +1220,7 @@ registerEffect('地藏像', async (ctx) => {
   
   addLog?.(`🙏 地藏像被超度`);
   
-  // 式神获取的完整逻辑由 MultiplayerGame.executeYokaiEffectByName 处理
+  // 式神获取的完整逻辑由 MultiplayerGame.executeYokaiEffect 处理
   // 返回标记，告知服务端需要继续处理式神获取流程
   return { 
     success: true, 
@@ -1558,7 +1559,9 @@ registerEffect('伤魂鸟', async (ctx) => {
 // 注意：服务端实现中使用 pendingEndOfTurnEffects 队列在回合结束时归还
 registerEffect('阴摩罗', async (ctx) => {
   const { player, gameState, onSelectCards, onChoice, onSelectTarget } = ctx;
-  const validCards = player.discard.filter(c => (c.hp || 0) < 6);
+  const validCards = player.discard.filter(
+    c => (c.hp || 0) < 6 && c.cardType !== 'token' && c.cardType !== 'penalty',
+  );
   
   if (validCards.length === 0) {
     return { success: true, message: '阴摩罗：弃牌区没有符合条件的牌' };
@@ -1677,17 +1680,10 @@ registerEffect('三味', async (ctx) => {
   
   if (played) {
     for (const card of played) {
-      // 阴阳术 (spell)
       if (card.cardType === 'spell') {
         ghostFireCount++;
-      }
-      // 「鬼火」牌 (subtype包含"鬼火"的御魂)
-      else if (card.cardType === 'yokai') {
-        const tags = card.tags || [];
-        const subtype = (card as any).subtype || '';
-        if (tags.includes('鬼火') || subtype.includes('鬼火')) {
-          ghostFireCount++;
-        }
+      } else if (cardHasKeyword(card as any, '鬼火')) {
+        ghostFireCount++;
       }
     }
   }

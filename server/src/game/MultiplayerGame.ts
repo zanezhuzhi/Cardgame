@@ -33,7 +33,15 @@ import { DeckRevealHelper } from './DeckRevealHelper';
 // 导入式神技能引擎
 import { ShikigamiSkillEngine } from '../../../shared/game/effects/ShikigamiSkillEngine';
 import { SKILL_DEFS } from '../../../shared/game/effects/ShikigamiSkillDefs';
+import {
+  applyNetCutterToField as applyNetCutterFieldShared,
+  clearFieldNetCutter as clearFieldNetCutterShared,
+  fieldHasNetCutter as fieldHasNetCutterShared,
+  getNetCutterEffectiveHp as getNetCutterEffectiveHpShared,
+} from '../../../shared/game/netCutterField';
 import type { SkillContext } from '../../../shared/types/shikigami';
+import { resolveHarassment, createHarassmentAction } from '../../../shared/game/effects/HarassmentPipeline';
+import { defaultHarassmentPipelineChoiceIndex } from '../../../shared/game/multiplayer/defaultHarassmentPipelineChoice';
 
 // 导入伤害系统（镜姬【妖】效果免疫判定）
 import { isDamageImmune, createDamageSource } from '../../../shared/game/DamageSystem';
@@ -127,42 +135,22 @@ class TempBuffHelper {
   
   /** 应用网切效果到 field（覆盖不叠加） */
   static applyNetCutterToField(field: FieldState): void {
-    if (!(field as any).tempBuffs) (field as any).tempBuffs = [];
-    // 移除已有网切 buff（覆盖不叠加）
-    (field as any).tempBuffs = ((field as any).tempBuffs as any[]).filter(
-      (b: any) => b.type !== 'NET_CUTTER_HP_REDUCTION'
-    );
-    // 添加新的网切 buff
-    (field as any).tempBuffs.push({
-      type: 'NET_CUTTER_HP_REDUCTION',
-      yokaiHpModifier: -1,
-      bossHpModifier: -2,
-      minHp: 1,
-      expiresAt: 'endOfTurn',
-      source: '网切'
-    });
+    applyNetCutterFieldShared(field);
   }
 
   /** 检查 field 是否有网切效果 */
   static hasNetCutter(field: FieldState): boolean {
-    return ((field as any).tempBuffs || []).some(
-      (b: any) => b.type === 'NET_CUTTER_HP_REDUCTION'
-    );
+    return fieldHasNetCutterShared(field);
   }
 
   /** 获取网切后的妖怪有效HP（最低为1） */
   static getNetCutterEffectiveHp(field: FieldState, baseHp: number, cardType: 'yokai' | 'boss'): number {
-    if (!TempBuffHelper.hasNetCutter(field)) return baseHp;
-    const reduction = cardType === 'boss' ? 2 : 1;
-    return Math.max(1, baseHp - reduction);
+    return getNetCutterEffectiveHpShared(field, baseHp, cardType);
   }
 
   /** 清除 field 上的网切效果 */
   static clearFieldNetCutter(field: FieldState): void {
-    if (!(field as any).tempBuffs) return;
-    (field as any).tempBuffs = ((field as any).tempBuffs as any[]).filter(
-      (b: any) => b.type !== 'NET_CUTTER_HP_REDUCTION'
-    );
+    clearFieldNetCutterShared(field);
   }
 }
 
@@ -207,6 +195,9 @@ const GAME_CONSTANTS = {
   AFK_TIMEOUT_MS: 300000, // 无操作超时（5分钟）
   RECONNECT_GRACE_MS: 180000, // 掉线保护窗口（3分钟）
 };
+
+/** 多人：非当前回合玩家承担的回合内交互反馈限时（真人，毫秒） */
+const OUT_OF_TURN_FEEDBACK_MS = 5000;
 
 // ============ 工具函数 ============
 
@@ -272,12 +263,20 @@ export class MultiplayerGame {
   
   /** 赤舌选择超时计时器 */
   private akajitaTimer?: NodeJS.Timeout;
+
+  /** 回合外反馈限时（真人） */
+  private feedbackTimer?: NodeJS.Timeout;
+  /** 避免重复启动回合外反馈计时，格式 type:playerId */
+  private offTurnFeedbackKey: string | null = null;
   
   /** 是否已清理 */
   private cleaned: boolean = false;
 
   /** 式神技能引擎 */
   private readonly skillEngine: ShikigamiSkillEngine;
+
+  /** 妨害管线 `onChoice` 挂起时的续行（单槽；与 `pendingChoice` 串行一致） */
+  private harassmentPipelineChoiceResolve: ((choice: number) => void) | null = null;
 
   constructor(roomId: string, players: PlayerInfo[]) {
     this.roomId = roomId;
@@ -709,6 +708,21 @@ export class MultiplayerGame {
    * 创建卡牌实例
    */
   private createCardInstance(card: any, type: string): CardInstance {
+    if (type === 'penalty') {
+      const ch = card.charm;
+      return {
+        instanceId: generateId(),
+        cardId: card.id,
+        cardType: 'penalty',
+        name: card.name,
+        hp: 0,
+        maxHp: 0,
+        charm: typeof ch === 'number' ? ch : -1,
+        damage: 0,
+        effect: card.effect,
+        image: card.image || '',
+      };
+    }
     return {
       instanceId: generateId(),
       cardId: card.id,
@@ -1027,8 +1041,221 @@ export class MultiplayerGame {
     }
   }
 
+  private clearOffTurnFeedbackTimerOnly(): void {
+    if (this.feedbackTimer) {
+      clearTimeout(this.feedbackTimer);
+      this.feedbackTimer = undefined;
+    }
+  }
+
+  /** pendingChoice 需由非当前回合玩家操作时视为「回合外反馈」 */
+  private isOffTurnPending(): boolean {
+    const pc = this.state.pendingChoice as any;
+    if (!pc) return false;
+    const cur = this.getCurrentPlayer();
+    if (!cur) return false;
+    if (pc.type === 'akajitaBatch') {
+      const targets = (pc.targets || []) as Array<{ playerId: string }>;
+      return targets.some((t) => t.playerId !== cur.id);
+    }
+    return pc.playerId !== cur.id;
+  }
+
+  private pauseActionTurnTimerIfNeeded(): void {
+    if (this.state.phase !== 'playing' || this.state.turnPhase !== 'action') return;
+    if (!this.isOffTurnPending()) return;
+    const full = this.getTurnTimeoutMsByHumanCount();
+    if (full <= 0) return;
+    if (this.state.turnTimerPaused) return;
+    this.clearTurnTimer();
+    const startAt = this.state.turnStartAt ?? Date.now();
+    const budget = this.state.turnTimeoutMs ?? full;
+    const elapsed = Date.now() - startAt;
+    const remain = Math.max(0, budget - elapsed);
+    this.state.turnTimerPaused = true;
+    this.state.turnPausedRemainMs = remain;
+    this.state.turnStartAt = undefined;
+  }
+
+  private resumeActionTurnTimerIfNeeded(): void {
+    if (this.state.phase !== 'playing' || this.state.turnPhase !== 'action') return;
+    if (!this.state.turnTimerPaused) return;
+    if (this.isOffTurnPending()) return;
+    const remain = this.state.turnPausedRemainMs ?? 0;
+    this.state.turnTimerPaused = false;
+    this.state.turnPausedRemainMs = undefined;
+    const full = this.getTurnTimeoutMsByHumanCount();
+    if (full <= 0) {
+      this.state.turnTimeoutMs = undefined;
+      this.state.turnStartAt = undefined;
+      return;
+    }
+    if (remain <= 0) {
+      this.state.turnTimeoutMs = undefined;
+      this.state.turnStartAt = undefined;
+      queueMicrotask(() => {
+        if (
+          this.state.phase !== 'playing' ||
+          this.state.turnPhase !== 'action'
+        ) {
+          return;
+        }
+        const cur = this.getCurrentPlayer();
+        if (cur) this.handleTurnTimeout(cur.id);
+      });
+      return;
+    }
+    this.state.turnTimeoutMs = remain;
+    this.state.turnStartAt = Date.now();
+    const playerId = this.getCurrentPlayer().id;
+    const snapshotTurn = this.state.turnNumber;
+    const snapshotIndex = this.state.currentPlayerIndex;
+    this.clearTurnTimer();
+    this.turnTimer = setTimeout(() => {
+      if (
+        this.state.turnNumber !== snapshotTurn ||
+        this.state.currentPlayerIndex !== snapshotIndex ||
+        this.getCurrentPlayer().id !== playerId
+      ) {
+        return;
+      }
+      this.handleTurnTimeout(playerId);
+    }, remain);
+  }
+
+  /**
+   * 在 notifyStateChange 中同步：回合外 pending 时暂停行动计时并启动 5s 真人反馈；
+   * 否则恢复行动计时。
+   */
+  private syncTurnTimerAndOffTurnFeedback(): void {
+    if (this.state.phase !== 'playing' || this.state.turnPhase !== 'action') {
+      this.clearOffTurnFeedbackTimerOnly();
+      this.offTurnFeedbackKey = null;
+      this.state.outOfTurnFeedbackDeadlineAt = undefined;
+      return;
+    }
+    const pc = this.state.pendingChoice;
+    if (this.isOffTurnPending() && pc) {
+      this.pauseActionTurnTimerIfNeeded();
+      const pca = pc as any;
+      let key: string;
+      let isHuman = false;
+      if (pca.type === 'akajitaBatch') {
+        const pendingTargets = (pca.targets || []).filter((t: any) => !pca.responses?.[t.playerId]);
+        key = `akajitaBatch:${pendingTargets.map((t: any) => t.playerId).sort().join(',')}`;
+        isHuman = pendingTargets.some((t: any) => {
+          const r = this.getPlayer(t.playerId);
+          return r && !r.isAI && !this.isAiSeat(r.id) && !r.isOfflineHosted;
+        });
+      } else {
+        key = `${pca.type}:${pca.playerId}`;
+        const responder = this.getPlayer(pc.playerId);
+        isHuman =
+          !!responder &&
+          !responder.isAI &&
+          !this.isAiSeat(responder.id) &&
+          !responder.isOfflineHosted;
+      }
+      if (this.offTurnFeedbackKey !== key) {
+        this.clearOffTurnFeedbackTimerOnly();
+        this.offTurnFeedbackKey = key;
+        if (isHuman) {
+          this.state.outOfTurnFeedbackDeadlineAt = Date.now() + OUT_OF_TURN_FEEDBACK_MS;
+          this.scheduleOffTurnFeedbackTimeout();
+        } else {
+          this.state.outOfTurnFeedbackDeadlineAt = undefined;
+        }
+      }
+    } else {
+      this.offTurnFeedbackKey = null;
+      this.clearOffTurnFeedbackTimerOnly();
+      this.state.outOfTurnFeedbackDeadlineAt = undefined;
+      this.resumeActionTurnTimerIfNeeded();
+    }
+  }
+
+  private scheduleOffTurnFeedbackTimeout(): void {
+    if (!this.isOffTurnPending()) return;
+    const snapshotKey = this.offTurnFeedbackKey;
+    this.feedbackTimer = setTimeout(() => {
+      this.feedbackTimer = undefined;
+      if (this.offTurnFeedbackKey !== snapshotKey) return;
+      if (!this.isOffTurnPending()) return;
+      this.addLog(`⏰ 回合外反馈超时，已按默认策略选择`);
+      let rid = (this.state.pendingChoice as any)?.playerId as string | undefined;
+      const pcb = this.state.pendingChoice as any;
+      if (pcb?.type === 'akajitaBatch') {
+        const pend = (pcb.targets || []).find((t: any) => !pcb.responses?.[t.playerId]);
+        rid = pend?.playerId ?? rid;
+      }
+      if (rid) this.markPlayerAction(rid);
+      this.forceResolveOffTurnPendingDefault();
+    }, OUT_OF_TURN_FEEDBACK_MS);
+  }
+
+  /** 超时兜底：按与 AI 一致的默认项完成回合外 pending */
+  private forceResolveOffTurnPendingDefault(): void {
+    const pc = this.state.pendingChoice as any;
+    if (!pc || !this.isOffTurnPending()) return;
+    if (pc.type === 'harassmentPipelineChoice') {
+      const responder = this.getPlayer(pc.playerId);
+      const ix = defaultHarassmentPipelineChoiceIndex(pc, responder);
+      this.handleHarassmentPipelineChoiceResponse(pc.playerId, ix);
+      return;
+    }
+    if (pc.type === 'zhenMuShouTarget') {
+      const candidates: string[] = pc.candidates || [];
+      if (candidates.length === 0) {
+        this.state.pendingChoice = undefined;
+        this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+        return;
+      }
+      let bestId = candidates[0];
+      let bestHp = Infinity;
+      for (const id of candidates) {
+        const slotY = this.state.field.yokaiSlots.find(y => y?.instanceId === id);
+        if (slotY) {
+          const hp = slotY.hp ?? 99;
+          if (hp < bestHp) {
+            bestHp = hp;
+            bestId = id;
+          }
+          continue;
+        }
+        const boss = this.state.field.currentBoss;
+        if (boss && ((boss as any).instanceId === id || boss.id === id)) {
+          const hp = (this.state.field.bossCurrentHp ?? boss.hp) || 99;
+          if (hp < bestHp) {
+            bestHp = hp;
+            bestId = id;
+          }
+        }
+      }
+      this.handleZhenMuShouTargetResponse(pc.playerId, bestId);
+      return;
+    }
+    if (pc.type === 'akajitaBatch') {
+      this.clearAkajitaTimeout();
+      for (const t of pc.targets) {
+        if (!pc.responses[t.playerId]) {
+          pc.responses[t.playerId] = this.defaultAkajitaPickFromCandidates(t.candidates);
+        }
+      }
+      this.finalizeAkajitaBatch(true);
+      return;
+    }
+    this.addLog(`⚠️ 回合外反馈超时：未单独兜底的 pending 类型 ${pc.type}，已清除`);
+    this.state.pendingChoice = undefined;
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+  }
+
   private startTurnTimer(): void {
     this.clearTurnTimer();
+    this.clearOffTurnFeedbackTimerOnly();
+    this.offTurnFeedbackKey = null;
+    this.state.turnTimerPaused = false;
+    this.state.turnPausedRemainMs = undefined;
+    this.state.outOfTurnFeedbackDeadlineAt = undefined;
     const timeoutMs = this.getTurnTimeoutMsByHumanCount();
     this.state.turnTimeoutMs = timeoutMs;
     this.state.turnStartAt = timeoutMs > 0 ? Date.now() : undefined;
@@ -1055,6 +1282,14 @@ export class MultiplayerGame {
     if (this.state.phase !== 'playing' || this.state.turnPhase !== 'action') return;
     const current = this.getCurrentPlayer();
     if (!current || current.id !== playerId) return;
+
+    if (this.isOffTurnPending()) {
+      console.warn(
+        '[MultiplayerGame] 回合超时触发时仍存在回合外 pending，先强制默认完成',
+      );
+      this.forceResolveOffTurnPendingDefault();
+      return;
+    }
 
     // 超时视为玩家发生一次系统操作，避免被 AFK 检查立即判退
     this.markPlayerAction(playerId);
@@ -1096,6 +1331,10 @@ export class MultiplayerGame {
       } else {
         (this.state as any).pendingChoice = undefined;
       }
+      return;
+    }
+    if (pc.type === 'akajitaBatch') {
+      this.handleAkajitaBatchTimeout();
       return;
     }
     (this.state as any).pendingChoice = undefined;
@@ -1229,6 +1468,16 @@ export class MultiplayerGame {
     };
     if ((this.state as any).pendingChoice?.playerId === oldPlayerId) {
       (this.state as any).pendingChoice.playerId = newPlayerId;
+    }
+    const pcc = (this.state as any).pendingChoice;
+    if (pcc?.type === 'akajitaBatch' && Array.isArray(pcc.targets)) {
+      for (const t of pcc.targets) {
+        if (t.playerId === oldPlayerId) t.playerId = newPlayerId;
+      }
+      if (pcc.responses?.[oldPlayerId] != null) {
+        pcc.responses[newPlayerId] = pcc.responses[oldPlayerId];
+        delete pcc.responses[oldPlayerId];
+      }
     }
     this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
     return true;
@@ -1418,8 +1667,13 @@ export class MultiplayerGame {
     const player = this.getCurrentPlayer();
     this.state.turnPhase = 'cleanup';
     this.clearTurnTimer();
+    this.clearOffTurnFeedbackTimerOnly();
+    this.offTurnFeedbackKey = null;
     this.state.turnStartAt = undefined;
     this.state.turnTimeoutMs = undefined;
+    this.state.turnTimerPaused = undefined;
+    this.state.turnPausedRemainMs = undefined;
+    this.state.outOfTurnFeedbackDeadlineAt = undefined;
     
     // 重置伤害池（镜姬【妖】效果追踪）
     this.state.damagePool = createEmptyDamagePool();
@@ -3206,6 +3460,11 @@ export class MultiplayerGame {
       return { success: false, error: '令牌不能打出' };
     }
 
+    // 恶评（含通称「恶评」的占位实例）禁止当作手牌打出，与客户端一致
+    if (card.cardType === 'penalty' || card.name === '恶评') {
+      return { success: false, error: '恶评不能打出' };
+    }
+
     // 地藏像特殊处理：需要二次确认
     // 如果当前没有等待确认状态，先触发确认对话框
     if (card.name === '地藏像' && !this.state.pendingChoice) {
@@ -3461,6 +3720,102 @@ export class MultiplayerGame {
     };
   }
 
+  /** 为妨害发起者挑选一个用于 SkillContext 的式神槽（无式神时用占位，仅满足管线 emit/onChoice 契约） */
+  private pickHarassmentSkillSlot(player: PlayerState): { shiki: ShikigamiCard; slotIndex: number } {
+    for (let i = 0; i < player.shikigami.length; i++) {
+      const s = player.shikigami[i];
+      if (s) return { shiki: s, slotIndex: i };
+    }
+    return {
+      shiki: { id: 'shikigami_placeholder', name: '—', type: 'shikigami' },
+      slotIndex: 0,
+    };
+  }
+
+  /**
+   * 妨害管线用 SkillContext：发动者为 sourcePlayer；onChoice 经 pending + Socket 续行
+   */
+  private buildSkillContextForHarassment(sourcePlayer: PlayerState): SkillContext {
+    const { shiki, slotIndex } = this.pickHarassmentSkillSlot(sourcePlayer);
+    let state = sourcePlayer.shikigamiState[slotIndex];
+    if (!state) state = sourcePlayer.shikigamiState[0];
+    if (!state) {
+      state = { cardId: shiki.id, isExhausted: false, markers: {} };
+    }
+
+    const ctx: SkillContext = {
+      gameState: this.state as any,
+      player: sourcePlayer as any,
+      shikigami: shiki as any,
+      shikigamiState: state as any,
+      slotIndex,
+      opponents: this.state.players.filter(p => p.id !== sourcePlayer.id) as any[],
+      onSelectCards: async () => [],
+      onSelectTarget: async () => '',
+      onSelectMultiTargets: async () => [],
+      onChoice: async () => 0,
+      onInputNumber: async () => 1,
+      drawCards: (p: any, count: number) => {
+        this.drawCards(p, count);
+        return count;
+      },
+      discardCard: (p: any, instanceId: string, type: 'active' | 'rule') => {
+        const idx = p.hand.findIndex((c: any) => c.instanceId === instanceId);
+        if (idx >= 0) {
+          const [card] = p.hand.splice(idx, 1);
+          this.discard(p, card, type);
+        }
+      },
+      exileCard: (p, instanceId) => {
+        const idx = p.hand.findIndex(c => c.instanceId === instanceId);
+        if (idx >= 0) {
+          const [card] = p.hand.splice(idx, 1);
+          p.exiled.push(card);
+        }
+      },
+      gainPenalty: (p: any) => {
+        const penaltyDeck = (this.state.field as any).penaltyDeck as CardInstance[] | undefined;
+        if (penaltyDeck && penaltyDeck.length > 0) {
+          const penalty = penaltyDeck.shift()!;
+          p.discard.push(penalty);
+          this.addLog(`📛 ${p.name} 获得恶评「${penalty.name}」`);
+        }
+      },
+      addLog: (msg: string) => this.addLog(msg),
+      emitEvent: async (event) => {
+        await this.emitSkillEvent(sourcePlayer, event as any);
+      },
+    };
+    ctx.onChoice = async (options, prompt) => {
+      const subject = ctx.harassmentResistSubject ?? (sourcePlayer as any);
+      return this.waitHarassmentPipelineChoice(subject.id, options, prompt);
+    };
+    return ctx;
+  }
+
+  private waitHarassmentPipelineChoice(
+    playerId: string,
+    options: string[],
+    prompt?: string,
+    meta?: { wangliangTargetId?: string },
+  ): Promise<number> {
+    return new Promise((resolve, reject) => {
+      if (this.harassmentPipelineChoiceResolve) {
+        reject(new Error('妨害选择冲突'));
+        return;
+      }
+      this.harassmentPipelineChoiceResolve = resolve;
+      this.state.pendingChoice = {
+        type: 'harassmentPipelineChoice',
+        playerId,
+        options,
+        prompt: prompt ?? '',
+        meta,
+      } as any;
+      this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    });
+  }
+
   /**
    * 便捷方法：向玩家所有式神广播事件
    * 遍历该玩家的所有式神并构建 ctx，依次 emit
@@ -3676,91 +4031,7 @@ export class MultiplayerGame {
           break;
           
         case '赤舌': {
-          // [妨害] 对手从弃牌堆选择基础术式或招福达摩置于牌库顶
-          // 收集需要处理的对手及其弃牌堆情况
-          console.log('[赤舌调试] 开始处理赤舌效果');
-          const akajitaTargets: { playerId: string; playerName: string; hasSpell: boolean; hasDaruma: boolean; spellCard?: CardInstance; darumaCard?: CardInstance }[] = [];
-          
-          for (const opponent of this.state.players) {
-            if (opponent.id === player.id) continue;
-            
-            // 筛选弃牌堆中的基础术式和招福达摩
-            const spellCard = opponent.discard.find(c => c.name === '基础术式');
-            const darumaCard = opponent.discard.find(c => c.name === '招福达摩');
-            console.log(`[赤舌调试] 对手 ${opponent.name}(${opponent.id}): 基础术式=${!!spellCard}, 招福达摩=${!!darumaCard}`);
-            
-            if (spellCard || darumaCard) {
-              akajitaTargets.push({
-                playerId: opponent.id,
-                playerName: opponent.name,
-                hasSpell: !!spellCard,
-                hasDaruma: !!darumaCard,
-                spellCard,
-                darumaCard
-              });
-            }
-          }
-          
-          if (akajitaTargets.length === 0) {
-            // 场景C：没有符合条件的牌，跳过
-            this.addLog(`   ✨ 御魂：[妨害]对手弃牌堆无符合条件的牌`);
-          } else {
-            // 逐个处理对手（当前简化：同时处理所有对手）
-            for (const target of akajitaTargets) {
-              const opponent = this.getPlayer(target.playerId);
-              if (!opponent) continue;
-              
-              if (target.hasSpell && target.hasDaruma) {
-                // 场景A：两者都有，需要对手选择
-                // 设置pendingChoice给该对手，5秒超时
-                console.log(`[赤舌调试] 场景A: ${target.playerName} 两张都有，设置pendingChoice`);
-                const deadline = Date.now() + 5000;
-                this.state.pendingChoice = {
-                  type: 'akajitaSelect',
-                  playerId: target.playerId,
-                  triggerPlayerId: player.id,  // 触发者
-                  prompt: '赤舌：选择1张牌置于牌库顶',
-                  deadline: deadline,  // 客户端使用deadline计算倒计时
-                  options: [
-                    { name: '基础术式', cardId: target.spellCard!.cardId },
-                    { name: '招福达摩', cardId: target.darumaCard!.cardId }
-                  ],
-                  // 保留原始数据用于执行
-                  candidates: [
-                    { type: 'spell', name: '基础术式', instanceId: target.spellCard!.instanceId },
-                    { type: 'daruma', name: '招福达摩', instanceId: target.darumaCard!.instanceId }
-                  ]
-                } as any;
-                console.log(`[赤舌调试] pendingChoice已设置:`, JSON.stringify(this.state.pendingChoice));
-                this.addLog(`   ⏳ 等待 ${target.playerName} 选择置于牌库顶的牌...`);
-                // 设置5秒超时
-                this.startAkajitaTimeout(target.playerId);
-                // 立即通知状态变更
-                this.notifyStateChange();
-                break; // 一次只处理一个对手的选择
-              } else {
-                // 场景B：只有一种，自动选中
-                const cardToMove = target.spellCard || target.darumaCard;
-                if (cardToMove) {
-                  const idx = opponent.discard.findIndex(c => c.instanceId === cardToMove.instanceId);
-                  if (idx !== -1) {
-                    const card = opponent.discard.splice(idx, 1)[0]!;
-                    opponent.deck.unshift(card); // 置于牌库顶
-                    
-                    // 通知该玩家（通过akajitaNotify）
-                    this.state.akajitaNotify = this.state.akajitaNotify || [];
-                    (this.state as any).akajitaNotify.push({
-                      playerId: target.playerId,
-                      cardName: card.name,
-                      timestamp: Date.now()
-                    });
-                    
-                    this.addLog(`   ✨ ${target.playerName} 的【${card.name}】被置于牌库顶`);
-                  }
-                }
-              }
-            }
-          }
+          this.startAkajitaHarassment(player);
           break;
         }
           
@@ -3947,42 +4218,11 @@ export class MultiplayerGame {
           break;
           
         case '雪幽魂': {
-          // [妨害] 抓牌+1，对手弃置恶评或获得恶评
           this.drawCards(player, 1);
           this.addLog(`   ✨ 御魂：抓牌+1`);
-          
-          // 对每名对手执行妨害
-          for (const opponent of this.state.players) {
-            if (opponent.id === player.id) continue;
-            
-            // 检查对手手牌中的恶评
-            const penaltyCards = opponent.hand.filter(c => c.cardType === 'penalty');
-            
-            if (penaltyCards.length > 0) {
-              // 有恶评，需要弃置1张
-              if (penaltyCards.length === 1) {
-                // 只有1张恶评，自动弃置
-                const cardToDiscard = penaltyCards[0]!;
-                const idx = opponent.hand.findIndex(c => c.instanceId === cardToDiscard.instanceId);
-                if (idx !== -1) {
-                  opponent.discard.push(opponent.hand.splice(idx, 1)[0]!);
-                  this.addLog(`   🗑️ [妨害] ${opponent.name} 弃置恶评「${cardToDiscard.name}」`);
-                }
-              } else {
-                // 多张恶评，AI策略：优先弃置农夫（penalty_001）
-                const farmer = penaltyCards.find(c => c.cardId === 'penalty_001');
-                const cardToDiscard = farmer || penaltyCards[0]!;
-                const idx = opponent.hand.findIndex(c => c.instanceId === cardToDiscard.instanceId);
-                if (idx !== -1) {
-                  opponent.discard.push(opponent.hand.splice(idx, 1)[0]!);
-                  this.addLog(`   🗑️ [妨害] ${opponent.name} 弃置恶评「${cardToDiscard.name}」`);
-                }
-              }
-            } else {
-              // 无恶评，获得1张恶评
-              this.givePenaltyCard(opponent);
-              this.addLog(`   😈 [妨害] ${opponent.name} 无恶评可弃，获得恶评`);
-            }
+          const xyOpponents = this.state.players.filter(p => p.id !== player.id);
+          if (xyOpponents.length > 0) {
+            this.startXueYouHunHarassment(player.id, xyOpponents);
           }
           break;
         }
@@ -4048,65 +4288,18 @@ export class MultiplayerGame {
         }
           
         case '魍魉之匣': {
-          // 抓牌+1，伤害+1，【妨害】每名玩家展示牌库顶，由你决定保留或弃置
           this.drawCards(player, 1);
           player.damage += 1;
           this.addLog(`   ✨ 御魂：抓牌+1，伤害+1`);
-          
-          // 收集所有玩家（含自己）的牌库顶牌
-          const wangliangTargets: { playerId: string; playerName: string; card: CardInstance | null }[] = [];
           for (const p of this.state.players) {
             if (p.deck.length > 0) {
-              const topCard = p.deck[p.deck.length - 1]; // 不pop，先展示
-              wangliangTargets.push({
-                playerId: p.id,
-                playerName: p.name,
-                card: topCard
-              });
-              this.addLog(`   👁️ ${p.name} 牌库顶: ${topCard.name}`);
+              const topCard = p.deck[p.deck.length - 1];
+              this.addLog(`   👁️ ${p.name} 牌库顶: ${topCard!.name}`);
             } else {
-              wangliangTargets.push({
-                playerId: p.id,
-                playerName: p.name,
-                card: null
-              });
               this.addLog(`   👁️ ${p.name} 牌库为空`);
             }
           }
-          
-          // 检查是否有至少一名玩家有牌库
-          const hasAnyCard = wangliangTargets.some(t => t.card !== null);
-          
-          if (!hasAnyCard) {
-            this.addLog(`   ⚠️ 所有玩家牌库为空，跳过妨害效果`);
-          } else {
-            // 将自己排在第一位，其余保持原有顺序
-            const sortedTargets = [
-              ...wangliangTargets.filter(t => t.playerId === player.id),
-              ...wangliangTargets.filter(t => t.playerId !== player.id)
-            ];
-            // 设置 pendingChoice，传递所有玩家（含空牌库）
-            this.state.pendingChoice = {
-              type: 'wangliangChoice',
-              playerId: player.id,
-              prompt: '魍魉之匣：点选要弃置的牌库顶牌（未选中则保留）',
-              allTargets: sortedTargets.map(t => ({
-                playerId: t.playerId,
-                playerName: t.playerName,
-                card: t.card ? {
-                  instanceId: t.card.instanceId,
-                  cardId: t.card.cardId,
-                  name: t.card.name,
-                  hp: t.card.hp,
-                  cardType: t.card.cardType
-                } : null
-              })),
-              currentIndex: 0,
-              decisions: [] as { playerId: string; action: 'keep' | 'discard' }[]
-            };
-            this.notifyStateChange();
-            return; // 等待玩家响应
-          }
+          this.startWangliangHarassment(player);
           break;
         }
           
@@ -4493,55 +4686,29 @@ export class MultiplayerGame {
           const selectableCards = revealedCards.filter(r => r.card.cardType !== 'boss');
           
           if (selectableCards.length === 0) {
-            // 无可选卡牌，将所有展示牌移入弃牌区
-            for (const r of revealedCards) {
-              const owner = this.getPlayer(r.ownerId);
-              if (owner && owner.deck.length > 0) {
-                const card = owner.deck.shift()!;
-                owner.discard.push(card);
-                this.addLog(`   ↩️ ${card.name} 归还 ${r.ownerName} 弃牌区`);
-              }
-            }
             this.addLog(`   ✨ 幽谷响：无可选卡牌执行效果`);
+            void this.runYouguXiangHarassmentAfterSelect(player, revealedCards, []);
           } else if (player.isAI) {
-            // AI自动选择：按评分排序选择最多3张
             const scored = selectableCards.map(r => {
               const c = r.card;
               let score = 0;
-              // 伤害优先
               if (c.damage) score += c.damage * 2;
-              // 关键词评分
               const kw = c.keywords || [];
               if (kw.includes('抓牌')) score += 1.5;
               if (kw.includes('鬼火')) score += 1;
               if (kw.includes('声誉')) score += 0.5;
-              // 令牌/恶评负分
               if (c.cardType === 'token' || c.cardType === 'penalty') score = -10;
               return { ...r, score };
             }).sort((a, b) => b.score - a.score);
-            
+
             const aiSelected = scored.slice(0, Math.min(3, scored.length)).filter(r => r.score > 0);
-            
+            const selectedIds = aiSelected.map(s => s.card.instanceId);
             if (aiSelected.length > 0) {
-              // 执行选中卡牌的效果
-              for (const sel of aiSelected) {
-                this.addLog(`   ⚡ 幽谷响：执行 ${sel.card.name} 的效果`);
-                this.executeSimpleCardEffect(player, sel.card);
-              }
-              this.addLog(`   ✨ 幽谷响：AI执行了 ${aiSelected.map(s => s.card.name).join('、')} 的效果`);
+              this.addLog(`   ✨ 幽谷响：AI 选择执行 ${aiSelected.map(s => s.card.name).join('、')}`);
             } else {
               this.addLog(`   ↩️ 幽谷响：AI选择不执行效果`);
             }
-            
-            // 将所有展示的牌移入对应玩家的弃牌区
-            for (const r of revealedCards) {
-              const owner = this.getPlayer(r.ownerId);
-              if (owner && owner.deck.length > 0) {
-                const card = owner.deck.shift()!;
-                owner.discard.push(card);
-                this.addLog(`   ↩️ ${card.name} 归还 ${r.ownerName} 弃牌区`);
-              }
-            }
+            void this.runYouguXiangHarassmentAfterSelect(player, revealedCards, selectedIds);
           } else {
             // 真人玩家：设置pendingChoice等待选择
             this.state.pendingChoice = {
@@ -4556,21 +4723,13 @@ export class MultiplayerGame {
           }
           break;
         }
-          
-        case '伤魂鸟':
-          // 伤害+4（简化超度）
-          player.damage += 4;
-          this.addLog(`   ✨ 御魂：伤害+4`);
-          break;
-          
+
         case '阴摩罗':
-          // 从弃牌区使用效果（简化：伤害+3）
           player.damage += 3;
           this.addLog(`   ✨ 御魂：伤害+3`);
           break;
-          
+
         case '镰鼬':
-          // 伤害+4
           player.damage += 4;
           this.addLog(`   ✨ 御魂：伤害+4`);
           break;
@@ -4603,23 +4762,14 @@ export class MultiplayerGame {
             }
           }
           
-          // 即时伤害加成
+          // 即时伤害加成（仅打出时结算，无 SPELL_DAMAGE_BONUS）
           const immediateDamage = ghostFireCount * 2;
           player.damage += immediateDamage;
-          
-          // 添加buff用于之后使用阴阳术的伤害加成
-          player.tempBuffs = player.tempBuffs || [];
-          player.tempBuffs.push({
-            type: 'SPELL_DAMAGE_BONUS',
-            value: 2,
-            duration: 1,
-            source: '三味'
-          } as any);
-          
+
           if (ghostFireCount > 0) {
-            this.addLog(`   ✨ 御魂：已用${ghostFireCount}张鬼火牌/阴阳术，伤害+${immediateDamage}，之后每使用阴阳术再+2`);
+            this.addLog(`   ✨ 御魂：已用${ghostFireCount}张御魂(鬼火)/阴阳术，伤害+${immediateDamage}`);
           } else {
-            this.addLog(`   ✨ 御魂：本回合每使用阴阳术伤害+2`);
+            this.addLog(`   ✨ 御魂：尚无符合条件的已打出牌，伤害+0`);
           }
           break;
         }
@@ -4780,65 +4930,425 @@ export class MultiplayerGame {
       this.processNextFanHunXiangOpponent();
       return;
     }
-    
-    // 有手牌，让对手选择
-    this.state.pendingChoice = {
-      type: 'fanHunXiangChoice',
-      playerId: opponentId,
-      prompt: '返魂香：选择一项',
-      options: ['弃置1张手牌', '获得1张恶评']
-    };
-    
-    this.addLog(`   🔥 [妨害] ${opponent.name} 需要选择：弃牌或获得恶评`);
-    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+
+    // 有手牌：走 shared HarassmentPipeline（青女房/铮/萤草/花鸟卷/食梦貘等）+ 返魂香本体二选一
+    void this.runFanHunResolveHarassmentForCurrentOpponent(opponentId).catch((e) => {
+      this.addLog(`   ⚠️ 返魂香妨害异步结算失败: ${e}`);
+      const q = (this.state as any).fanHunXiangQueue as string[] | undefined;
+      if (q?.[0] === opponentId) {
+        q.shift();
+      }
+      if (this.harassmentPipelineChoiceResolve) {
+        this.harassmentPipelineChoiceResolve = null;
+      }
+      this.state.pendingChoice = undefined;
+      this.processNextFanHunXiangOpponent();
+    });
   }
 
   /**
-   * 处理返魂香选择响应
+   * 返魂香：对单名对手执行完整妨害管线 + 弃牌/恶评（未免疫时）
    */
-  public handleFanHunXiangChoiceResponse(playerId: string, choice: number): { success: boolean; error?: string } {
-    if (!this.state.pendingChoice || this.state.pendingChoice.type !== 'fanHunXiangChoice') {
-      return { success: false, error: '当前无返魂香选择' };
+  private async runFanHunResolveHarassmentForCurrentOpponent(opponentId: string): Promise<void> {
+    const queue = (this.state as any).fanHunXiangQueue as string[] | undefined;
+    const sourceId = (this.state as any).fanHunXiangSource as string;
+    const source = this.getPlayer(sourceId);
+    const opponent = this.getPlayer(opponentId);
+    if (!source || !opponent || !queue || queue[0] !== opponentId) {
+      return;
     }
-    
-    if (this.state.pendingChoice.playerId !== playerId) {
+
+    try {
+      const ctx = this.buildSkillContextForHarassment(source);
+      const action = createHarassmentAction(source.id, '返魂香', async (target, _c) => {
+        this.addLog(`   🔥 [妨害] ${target.name} 需要选择：弃牌或获得恶评`);
+        const choice = await _c.onChoice(
+          ['弃置1张手牌', '获得1张恶评'],
+          `${target.name}：返魂香 — 选择一项`,
+        );
+        if (choice === 0) {
+          if (target.hand.length > 0) {
+            const sortedHand = [...target.hand].sort((a, b) => (a.hp || 0) - (b.hp || 0));
+            const cardToDiscard = sortedHand[0]!;
+            const idx = target.hand.findIndex(c => c.instanceId === cardToDiscard.instanceId);
+            if (idx !== -1) {
+              target.discard.push(target.hand.splice(idx, 1)[0]!);
+              this.addLog(`   🗑️ [妨害] ${target.name} 弃置「${cardToDiscard.name}」`);
+            }
+          }
+        } else {
+          this.givePenaltyCard(target);
+          this.addLog(`   😈 [妨害] ${target.name} 选择获得恶评`);
+        }
+      });
+      await resolveHarassment(action, [opponent], ctx);
+    } catch (e) {
+      this.addLog(`   ⚠️ 返魂香妨害结算异常: ${e}`);
+    } finally {
+      if (this.harassmentPipelineChoiceResolve) {
+        this.harassmentPipelineChoiceResolve = null;
+      }
+      this.state.pendingChoice = undefined;
+      const q = (this.state as any).fanHunXiangQueue as string[] | undefined;
+      if (q?.[0] === opponentId) {
+        q.shift();
+      }
+      this.processNextFanHunXiangOpponent();
+    }
+  }
+
+  /**
+   * 妨害管线内嵌的 `onChoice` 续行（青女房/铮/返魂香二选一等共用）
+   */
+  public handleHarassmentPipelineChoiceResponse(
+    playerId: string,
+    choice: number,
+  ): { success: boolean; error?: string } {
+    const pc = this.state.pendingChoice as any;
+    if (!pc || pc.type !== 'harassmentPipelineChoice') {
+      return { success: false, error: '当前无妨害管线选择' };
+    }
+    if (pc.playerId !== playerId) {
       return { success: false, error: '不是你的选择' };
     }
-    
-    const player = this.getPlayer(playerId);
-    if (!player) {
-      return { success: false, error: '玩家不存在' };
-    }
-    
-    // 清除等待状态
+    this.markPlayerAction(playerId);
     this.state.pendingChoice = undefined;
-    
-    if (choice === 0) {
-      // 选择弃置手牌
-      if (player.hand.length > 0) {
-        // AI策略：弃置价值最低的牌（HP最低）
-        const sortedHand = [...player.hand].sort((a, b) => (a.hp || 0) - (b.hp || 0));
-        const cardToDiscard = sortedHand[0]!;
-        const idx = player.hand.findIndex(c => c.instanceId === cardToDiscard.instanceId);
-        if (idx !== -1) {
-          player.discard.push(player.hand.splice(idx, 1)[0]!);
-          this.addLog(`   🗑️ [妨害] ${player.name} 弃置「${cardToDiscard.name}」`);
-        }
-      }
-    } else {
-      // 选择获得恶评
-      this.givePenaltyCard(player);
-      this.addLog(`   😈 [妨害] ${player.name} 选择获得恶评`);
+    const r = this.harassmentPipelineChoiceResolve;
+    this.harassmentPipelineChoiceResolve = null;
+    if (!r) {
+      return { success: false, error: '内部状态错误' };
     }
-    
-    // 从队列中移除当前对手，处理下一个
-    const queue = (this.state as any).fanHunXiangQueue as string[] | undefined;
-    if (queue && queue.length > 0) {
-      queue.shift();
-    }
-    
-    this.processNextFanHunXiangOpponent();
+    r(choice);
     return { success: true };
+  }
+
+  /** @deprecated 已合并至 handleHarassmentPipelineChoiceResponse；保留以防旧客户端误发 */
+  public handleFanHunXiangChoiceResponse(playerId: string, choice: number): { success: boolean; error?: string } {
+    return this.handleHarassmentPipelineChoiceResponse(playerId, choice);
+  }
+
+  // ── 雪幽魂妨害（每名对手依次走 HarassmentPipeline） ──
+
+  private startXueYouHunHarassment(sourcePlayerId: string, opponents: PlayerState[]): void {
+    const q = opponents.map(p => p.id);
+    if (q.length === 0) return;
+    (this.state as any).xueYouHunQueue = q;
+    (this.state as any).xueYouHunSource = sourcePlayerId;
+    this.processNextXueYouHunOpponent();
+  }
+
+  private processNextXueYouHunOpponent(): void {
+    const queue = (this.state as any).xueYouHunQueue as string[] | undefined;
+    if (!queue || queue.length === 0) {
+      delete (this.state as any).xueYouHunQueue;
+      delete (this.state as any).xueYouHunSource;
+      this.checkAndContinueWheelMonkQueue();
+      this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+      return;
+    }
+
+    const opponentId = queue[0];
+    const opponent = this.getPlayer(opponentId);
+    if (!opponent) {
+      queue.shift();
+      this.processNextXueYouHunOpponent();
+      return;
+    }
+
+    void this.runXueYouHunResolveForOpponent(opponentId).catch((e) => {
+      this.addLog(`   ⚠️ 雪幽魂妨害异步结算失败: ${e}`);
+      const q = (this.state as any).xueYouHunQueue as string[] | undefined;
+      if (q?.[0] === opponentId) {
+        q.shift();
+      }
+      if (this.harassmentPipelineChoiceResolve) {
+        this.harassmentPipelineChoiceResolve = null;
+      }
+      this.state.pendingChoice = undefined;
+      this.processNextXueYouHunOpponent();
+    });
+  }
+
+  private async runXueYouHunResolveForOpponent(opponentId: string): Promise<void> {
+    const queue = (this.state as any).xueYouHunQueue as string[] | undefined;
+    const sourceId = (this.state as any).xueYouHunSource as string;
+    const source = this.getPlayer(sourceId);
+    const opponent = this.getPlayer(opponentId);
+    if (!source || !opponent || !queue || queue[0] !== opponentId) {
+      return;
+    }
+
+    try {
+      const ctx = this.buildSkillContextForHarassment(source);
+      const action = createHarassmentAction(source.id, '雪幽魂', async (target, _c) => {
+        const penaltyCards = target.hand.filter(c => c.cardType === 'penalty');
+        if (penaltyCards.length === 0) {
+          this.givePenaltyCard(target);
+          this.addLog(`   😈 [妨害] ${target.name} 无恶评可弃，获得恶评`);
+        } else if (penaltyCards.length === 1) {
+          const cardToDiscard = penaltyCards[0]!;
+          const idx = target.hand.findIndex(c => c.instanceId === cardToDiscard.instanceId);
+          if (idx !== -1) {
+            target.discard.push(target.hand.splice(idx, 1)[0]!);
+            this.addLog(`   🗑️ [妨害] ${target.name} 弃置恶评「${cardToDiscard.name}」`);
+          }
+        } else {
+          const options = penaltyCards.map(p => `弃置「${p.name}」`);
+          const ix = await this.waitHarassmentPipelineChoice(
+            target.id,
+            options,
+            `${target.name}：雪幽魂 — 选择弃置哪张恶评`,
+          );
+          const pick = penaltyCards[ix] ?? penaltyCards[0]!;
+          const idx = target.hand.findIndex(c => c.instanceId === pick.instanceId);
+          if (idx !== -1) {
+            target.discard.push(target.hand.splice(idx, 1)[0]!);
+            this.addLog(`   🗑️ [妨害] ${target.name} 弃置恶评「${pick.name}」`);
+          }
+        }
+      });
+      await resolveHarassment(action, [opponent], ctx);
+    } catch (e) {
+      this.addLog(`   ⚠️ 雪幽魂妨害结算异常: ${e}`);
+    } finally {
+      if (this.harassmentPipelineChoiceResolve) {
+        this.harassmentPipelineChoiceResolve = null;
+      }
+      this.state.pendingChoice = undefined;
+      const q = (this.state as any).xueYouHunQueue as string[] | undefined;
+      if (q?.[0] === opponentId) {
+        q.shift();
+      }
+      this.processNextXueYouHunOpponent();
+    }
+  }
+
+  // ── 魍魉之匣：一次性展示全员牌库顶（与客户端 wangliangChoice 横排 UI 一致） ──
+
+  private startWangliangHarassment(caster: PlayerState): void {
+    const others = this.state.players.filter(p => p.id !== caster.id);
+    const ordered: PlayerState[] = [caster, ...others];
+    const allTargets = ordered.map(p => {
+      if (p.deck.length === 0) {
+        return { playerId: p.id, playerName: p.name, card: null as any };
+      }
+      const top = p.deck[p.deck.length - 1]!;
+      return {
+        playerId: p.id,
+        playerName: p.name,
+        card: {
+          instanceId: top.instanceId,
+          cardId: top.cardId,
+          name: top.name,
+          hp: top.hp ?? top.maxHp ?? 1,
+          cardType: top.cardType,
+        },
+      };
+    });
+    const hasAny = allTargets.some(t => t.card != null);
+    if (!hasAny) {
+      this.addLog(`   ⚠️ 所有玩家牌库为空，跳过魍魉妨害`);
+      this.checkAndContinueWheelMonkQueue();
+      this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+      return;
+    }
+    for (const p of ordered) {
+      if (p.deck.length > 0) {
+        const topCard = p.deck[p.deck.length - 1];
+        this.addLog(`   👁️ ${p.name} 牌库顶: ${topCard!.name}`);
+      } else {
+        this.addLog(`   👁️ ${p.name} 牌库为空`);
+      }
+    }
+    this.state.pendingChoice = {
+      type: 'wangliangChoice',
+      playerId: caster.id,
+      allTargets,
+      decisions: [] as any[],
+      currentIndex: 0,
+    } as any;
+    this.addLog(`   ⏳ 魍魉之匣：等待 ${caster.name} 确认各玩家牌库顶保留/弃置...`);
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+  }
+
+  // ── 赤舌妨害：管线逐目标结算（单候选立即置顶）；多候选统一进入 akajitaBatch 并行选择 ──
+
+  private startAkajitaHarassment(caster: PlayerState): void {
+    void this.runAkajitaHarassmentAsync(caster).catch((e) => {
+      this.addLog(`   ⚠️ 赤舌妨害结算失败: ${e}`);
+      this.state.pendingChoice = undefined;
+      this.clearAkajitaTimeout();
+      this.checkAndContinueWheelMonkQueue();
+      this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    });
+  }
+
+  private async runAkajitaHarassmentAsync(caster: PlayerState): Promise<void> {
+    const opponents = this.state.players.filter(p => p.id !== caster.id);
+    const eligible = opponents.filter((opp) => {
+      const spellCard = opp.discard.find(c => c.name === '基础术式');
+      const darumaCard = opp.discard.find(c => c.name === '招福达摩');
+      return !!(spellCard || darumaCard);
+    });
+    if (eligible.length === 0) {
+      this.addLog(`   ✨ 御魂：[妨害]对手弃牌堆无符合条件的牌`);
+      this.checkAndContinueWheelMonkQueue();
+      this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+      return;
+    }
+
+    const deferred: PlayerState[] = [];
+    const ctx = this.buildSkillContextForHarassment(caster);
+    const action = createHarassmentAction(caster.id, '赤舌', async (target, _c) => {
+      const spellCard = target.discard.find(c => c.name === '基础术式');
+      const darumaCard = target.discard.find(c => c.name === '招福达摩');
+      if (!spellCard && !darumaCard) {
+        return;
+      }
+      if (spellCard && darumaCard) {
+        deferred.push(target);
+        return;
+      }
+      const cardToMove = spellCard || darumaCard!;
+      const idx = target.discard.findIndex(c => c.instanceId === cardToMove.instanceId);
+      if (idx !== -1) {
+        const card = target.discard.splice(idx, 1)[0]!;
+        target.deck.unshift(card);
+        this.pushAkajitaNotify(target.id, card.name);
+        this.addLog(`   ✨ ${target.name} 的【${card.name}】被置于牌库顶`);
+      }
+    });
+    await resolveHarassment(action, eligible, ctx);
+
+    if (deferred.length === 0) {
+      this.checkAndContinueWheelMonkQueue();
+      this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+      return;
+    }
+
+    const deadline = Date.now() + 5000;
+    const targets = deferred.map((target) => {
+      const spellCard = target.discard.find(c => c.name === '基础术式')!;
+      const darumaCard = target.discard.find(c => c.name === '招福达摩')!;
+      return {
+        playerId: target.id,
+        candidates: [
+          {
+            instanceId: spellCard.instanceId,
+            cardId: spellCard.cardId,
+            name: spellCard.name,
+            type: 'spell' as const,
+            cardType: spellCard.cardType,
+          },
+          {
+            instanceId: darumaCard.instanceId,
+            cardId: darumaCard.cardId,
+            name: darumaCard.name,
+            type: 'token' as const,
+            cardType: darumaCard.cardType || 'token',
+          },
+        ],
+      };
+    });
+    this.state.pendingChoice = {
+      type: 'akajitaBatch',
+      sourcePlayerId: caster.id,
+      playerId: caster.id,
+      deadline,
+      targets,
+      responses: {} as Record<string, string>,
+    } as any;
+    this.autoFillAiAkajitaBatchResponses();
+    if ((this.state.pendingChoice as any)?.type === 'akajitaBatch') {
+      this.startAkajitaTimeout();
+      this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    }
+  }
+
+  private pushAkajitaNotify(playerId: string, cardName: string): void {
+    (this.state as any).akajitaNotify = (this.state as any).akajitaNotify || [];
+    (this.state as any).akajitaNotify.push({
+      playerId,
+      cardName,
+      timestamp: Date.now(),
+    });
+  }
+
+  private async runMeiYaoHarassmentAfterSelect(
+    source: PlayerState,
+    selected: { ownerId: string; ownerName: string; instanceId: string },
+  ): Promise<void> {
+    const owner = this.getPlayer(selected.ownerId);
+    if (!owner) {
+      return;
+    }
+    const cardIdx = owner.deck.findIndex(c => c.instanceId === selected.instanceId);
+    if (cardIdx === -1) {
+      return;
+    }
+    const card = owner.deck[cardIdx]!;
+    try {
+      const ctx = this.buildSkillContextForHarassment(source);
+      const action = createHarassmentAction(source.id, '魅妖', async (target, _c) => {
+        this.executeMeiYaoEffect(source, {
+          ownerId: target.id,
+          ownerName: target.name,
+          card,
+        });
+      });
+      await resolveHarassment(action, [owner], ctx);
+    } catch (e) {
+      this.addLog(`   ⚠️ 魅妖妨害结算异常: ${e}`);
+    } finally {
+      if (this.harassmentPipelineChoiceResolve) {
+        this.harassmentPipelineChoiceResolve = null;
+      }
+      this.state.pendingChoice = undefined;
+      this.checkAndContinueWheelMonkQueue();
+      this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    }
+  }
+
+  private async runYouguXiangHarassmentAfterSelect(
+    source: PlayerState,
+    revealedCards: Array<{ card: CardInstance; ownerId: string; ownerName: string }>,
+    selectedIds: string[],
+  ): Promise<void> {
+    const selectedSet = new Set(selectedIds);
+    try {
+      const ctx = this.buildSkillContextForHarassment(source);
+      for (const r of revealedCards) {
+        const owner = this.getPlayer(r.ownerId);
+        if (!owner || owner.deck.length === 0) {
+          continue;
+        }
+        const snapshot = r.card;
+        const shouldExec = selectedSet.has(snapshot.instanceId);
+        const action = createHarassmentAction(source.id, '幽谷响', async (target, _c) => {
+          if (shouldExec) {
+            this.addLog(`   ⚡ 幽谷响：执行 ${snapshot.name} 的效果`);
+            this.executeSimpleCardEffect(source, snapshot);
+          }
+          const idx = target.deck.findIndex(c => c.instanceId === snapshot.instanceId);
+          if (idx !== -1) {
+            const [removed] = target.deck.splice(idx, 1);
+            target.discard.push(removed!);
+            this.addLog(`   ↩️ ${removed.name} 归还 ${target.name} 弃牌区`);
+          }
+        });
+        await resolveHarassment(action, [owner], ctx);
+      }
+      this.addLog(`   ✨ 幽谷响：妨害结算完成`);
+    } catch (e) {
+      this.addLog(`   ⚠️ 幽谷响妨害结算异常: ${e}`);
+    } finally {
+      if (this.harassmentPipelineChoiceResolve) {
+        this.harassmentPipelineChoiceResolve = null;
+      }
+      this.state.pendingChoice = undefined;
+      this.checkAndContinueWheelMonkQueue();
+      this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    }
   }
 
   /**
@@ -5339,45 +5849,14 @@ export class MultiplayerGame {
       }
     }
 
-    // 执行选中卡牌的效果
-    if (ids.length > 0) {
-      const selectedCardNames: string[] = [];
-      
-      for (const cardId of ids) {
-        // 找到对应的卡牌信息
-        const revealInfo = revealedCards.find(r => r.card.instanceId === cardId);
-        if (!revealInfo) continue;
-        
-        const card = revealInfo.card;
-        selectedCardNames.push(card.name);
-        
-        // 执行卡牌效果（使用当前玩家的上下文，但不消耗鬼火、不打出卡牌）
-        this.addLog(`   ⚡ 幽谷响：执行 ${card.name} 的效果`);
-        this.executeSimpleCardEffect(player, card);
-      }
-      
-      this.addLog(`   ✨ 幽谷响：执行了 ${selectedCardNames.join('、')} 的效果`);
-    } else {
+    if (ids.length === 0) {
       this.addLog(`   ↩️ ${player.name} 选择不执行任何效果`);
     }
 
-    // 将所有展示的牌移入对应玩家的弃牌区
-    for (const r of revealedCards) {
-      const owner = this.getPlayer(r.ownerId);
-      if (owner && owner.deck.length > 0) {
-        const card = owner.deck.shift()!;
-        owner.discard.push(card);
-        this.addLog(`   ↩️ ${card.name} 归还 ${r.ownerName} 弃牌区`);
-      }
-    }
-
-    // 清除等待状态
+    const revealedSnapshot = [...revealedCards];
+    const idsSnapshot = [...ids];
     this.state.pendingChoice = undefined;
-    
-    // 检查是否需要继续轮入道队列
-    this.checkAndContinueWheelMonkQueue();
-
-    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    void this.runYouguXiangHarassmentAfterSelect(player, revealedSnapshot, idsSnapshot);
     return { success: true };
   }
 
@@ -5923,81 +6402,7 @@ export class MultiplayerGame {
         
       // ============ 赤舌（妨害，对手选择）============
       case '赤舌': {
-        // [妨害] 对手将弃牌堆的基础术式或招福达摩置于牌库顶
-        // 完整执行：让对手选择，超时时自动AI策略
-        const opponents = this.state.players.filter(p => p.id !== player.id);
-        const akajitaTargets: {
-          playerId: string;
-          playerName: string;
-          hasSpell: boolean;
-          hasDaruma: boolean;
-          spellCard?: CardInstance;
-          darumaCard?: CardInstance;
-        }[] = [];
-        
-        for (const opp of opponents) {
-          const spellCard = opp.discard.find(c => c.name === '基础术式');
-          const darumaCard = opp.discard.find(c => c.name === '招福达摩');
-          
-          if (spellCard || darumaCard) {
-            akajitaTargets.push({
-              playerId: opp.id,
-              playerName: opp.name,
-              hasSpell: !!spellCard,
-              hasDaruma: !!darumaCard,
-              spellCard,
-              darumaCard
-            });
-          }
-        }
-        
-        if (akajitaTargets.length === 0) {
-          this.addLog(`   ✨ 赤舌：[妨害]对手弃牌堆无符合条件的牌`);
-        } else {
-          // 处理第一个对手
-          const target = akajitaTargets[0];
-          const opponent = this.getPlayer(target.playerId);
-          if (opponent) {
-            if (target.hasSpell && target.hasDaruma) {
-              // 两者都有，让对手选择
-              const deadline = Date.now() + 5000;
-              this.state.pendingChoice = {
-                type: 'akajitaSelect',
-                playerId: target.playerId,
-                triggerPlayerId: player.id,
-                prompt: '赤舌：选择1张牌置于牌库顶',
-                deadline: deadline,
-                options: [
-                  { name: '基础术式', cardId: target.spellCard!.cardId },
-                  { name: '招福达摩', cardId: target.darumaCard!.cardId }
-                ],
-                candidates: [
-                  { type: 'spell', name: '基础术式', instanceId: target.spellCard!.instanceId },
-                  { type: 'daruma', name: '招福达摩', instanceId: target.darumaCard!.instanceId }
-                ]
-              } as any;
-              this.addLog(`   ⏳ 等待 ${target.playerName} 选择置于牌库顶的牌...`);
-              this.startAkajitaTimeout(target.playerId);
-            } else {
-              // 只有一种，自动选中
-              const cardToMove = target.spellCard || target.darumaCard;
-              if (cardToMove) {
-                const idx = opponent.discard.findIndex(c => c.instanceId === cardToMove.instanceId);
-                if (idx !== -1) {
-                  const card = opponent.discard.splice(idx, 1)[0]!;
-                  opponent.deck.unshift(card);
-                  (this.state as any).akajitaNotify = (this.state as any).akajitaNotify || [];
-                  (this.state as any).akajitaNotify.push({
-                    playerId: target.playerId,
-                    cardName: card.name,
-                    timestamp: Date.now()
-                  });
-                  this.addLog(`   ✨ ${target.playerName} 的【${card.name}】被置于牌库顶`);
-                }
-              }
-            }
-          }
-        }
+        this.startAkajitaHarassment(player);
         break;
       }
         
@@ -6149,16 +6554,8 @@ export class MultiplayerGame {
         const youguSelectableCards = youguRevealedCards.filter(r => r.card.cardType !== 'boss');
         
         if (youguSelectableCards.length === 0) {
-          // 无可选卡牌，将所有展示牌移入弃牌区
-          for (const r of youguRevealedCards) {
-            const owner = this.getPlayer(r.ownerId);
-            if (owner && owner.deck.length > 0) {
-              const card = owner.deck.shift()!;
-              owner.discard.push(card);
-              this.addLog(`   ↩️ ${card.name} 归还 ${r.ownerName} 弃牌区`);
-            }
-          }
           this.addLog(`   ✨ 幽谷响：无可选卡牌执行效果`);
+          void this.runYouguXiangHarassmentAfterSelect(player, youguRevealedCards, []);
         } else {
           // 设置pendingChoice等待玩家选择
           this.state.pendingChoice = {
@@ -6301,30 +6698,20 @@ export class MultiplayerGame {
       }
         
       case '雪幽魂': {
-        // 抓牌+1
         this.drawCards(player, 1);
         this.addLog(`   ✨ ${effectKey}：抓牌+1`);
-        
-        // [妨害] 对每名对手执行效果
-        for (const opponent of this.state.players) {
-          if (opponent.id === player.id) continue;
-          
-          const penaltyCards = opponent.hand.filter(c => c.cardType === 'penalty');
-          
-          if (penaltyCards.length > 0) {
-            // 有恶评，弃置1张（AI策略：优先弃置农夫）
-            const farmer = penaltyCards.find(c => c.cardId === 'penalty_001');
-            const cardToDiscard = farmer || penaltyCards[0]!;
-            const idx = opponent.hand.findIndex(c => c.instanceId === cardToDiscard.instanceId);
-            if (idx !== -1) {
-              opponent.discard.push(opponent.hand.splice(idx, 1)[0]!);
-              this.addLog(`   🗑️ [妨害] ${opponent.name} 弃置恶评「${cardToDiscard.name}」`);
-            }
-          } else {
-            // 无恶评，获得1张恶评
-            this.givePenaltyCard(opponent);
-          }
+        const xyOpponents = this.state.players.filter(p => p.id !== player.id);
+        if (xyOpponents.length > 0) {
+          this.startXueYouHunHarassment(player.id, xyOpponents);
         }
+        break;
+      }
+
+      case '魍魉之匣': {
+        this.drawCards(player, 1);
+        player.damage += 1;
+        this.addLog(`   ✨ ${effectKey}：抓牌+1，伤害+1`);
+        this.startWangliangHarassment(player);
         break;
       }
         
@@ -6956,6 +7343,12 @@ export class MultiplayerGame {
       case '雪幽魂':
         this.drawCards(player, 1);
         this.addLog(`      → 抓牌+1`);
+        {
+          const xyOpponents = this.state.players.filter(p => p.id !== player.id);
+          if (xyOpponents.length > 0) {
+            this.startXueYouHunHarassment(player.id, xyOpponents);
+          }
+        }
         break;
       case '网切':
         TempBuffHelper.applyNetCutterToField(this.state.field);
@@ -7062,20 +7455,13 @@ export class MultiplayerGame {
     const cardIdx = owner.deck.findIndex(c => c.instanceId === selectedCardId);
     if (cardIdx === -1) return { success: false, error: '牌已不在牌库中' };
 
-    const card = owner.deck[cardIdx];
-    this.executeMeiYaoEffect(player, {
+    const selectedPayload = {
       ownerId: selected.ownerId,
       ownerName: selected.ownerName,
-      card: card
-    });
-
-    // 清除等待状态
+      instanceId: selectedCardId,
+    };
     this.state.pendingChoice = undefined;
-    
-    // 检查是否需要继续轮入道队列
-    this.checkAndContinueWheelMonkQueue();
-
-    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    void this.runMeiYaoHarassmentAfterSelect(player, selectedPayload);
     return { success: true };
   }
 
@@ -7129,6 +7515,7 @@ export class MultiplayerGame {
     const chooserPlayer = this.getPlayer(playerId);
     this.addLog(`   🚫 镇墓兽：${chooserPlayer?.name || '玩家'} 指定 ${targetName} 为禁止退治目标`);
 
+    this.markPlayerAction(playerId);
     // 清除等待状态
     this.state.pendingChoice = undefined;
     
@@ -7255,21 +7642,84 @@ export class MultiplayerGame {
     return { success: true };
   }
 
-  // ============ 赤舌效果相关 ============
+  // ============ 赤舌效果相关（akajitaBatch：多名对手并行选择） ============
 
-  /**
-   * 启动赤舌选择超时计时器（5秒）
-   */
-  private startAkajitaTimeout(playerId: string): void {
+  private defaultAkajitaPickFromCandidates(candidates: any[]): string {
+    const spell = candidates?.find((c: any) => c.type === 'spell');
+    if (spell?.instanceId) return spell.instanceId;
+    return candidates?.[0]?.instanceId ?? '';
+  }
+
+  /** AI / 超时 / 强制关闭：与默认策略一致（优先基础术式） */
+  private applyOneAkajitaPickFromDiscard(
+    playerId: string,
+    selectedId: string,
+    isTimeout: boolean
+  ): void {
+    const player = this.getPlayer(playerId);
+    if (!player || !selectedId) return;
+    const idx = player.discard.findIndex(c => c.instanceId === selectedId);
+    if (idx !== -1) {
+      const card = player.discard.splice(idx, 1)[0]!;
+      player.deck.unshift(card);
+      const timeoutHint = isTimeout ? '（超时默认）' : '';
+      this.addLog(`   ✨ ${player.name} 选择将【${card.name}】置于牌库顶${timeoutHint}`);
+      (this.state as any).akajitaNotify = (this.state as any).akajitaNotify || [];
+      (this.state as any).akajitaNotify.push({
+        playerId,
+        cardName: card.name,
+        timestamp: Date.now(),
+      });
+    } else {
+      this.addLog(`   ⚠️ 赤舌：弃牌堆中未找到选中牌，已跳过置顶`);
+    }
+  }
+
+  private tryFinalizeAkajitaBatchIfComplete(): void {
+    const pc = this.state.pendingChoice as any;
+    if (!pc || pc.type !== 'akajitaBatch') return;
+    for (const t of pc.targets) {
+      if (!pc.responses?.[t.playerId]) return;
+    }
+    this.finalizeAkajitaBatch(false);
+  }
+
+  /** 全员已作答或超时兜底后，一次性置顶并清理 pending */
+  private finalizeAkajitaBatch(anyTimeout: boolean): void {
+    const pc = this.state.pendingChoice as any;
+    if (!pc || pc.type !== 'akajitaBatch') return;
+    this.clearAkajitaTimeout();
+    for (const t of pc.targets) {
+      const sid = pc.responses?.[t.playerId];
+      if (sid) this.applyOneAkajitaPickFromDiscard(t.playerId, sid, anyTimeout);
+    }
+    this.state.pendingChoice = undefined;
+    this.checkAndContinueWheelMonkQueue();
+    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+  }
+
+  /** 匹配房 AI / isAI / 离线托管：立即提交默认项，若无需真人则同步结束批次 */
+  private autoFillAiAkajitaBatchResponses(): void {
+    const pc = this.state.pendingChoice as any;
+    if (!pc || pc.type !== 'akajitaBatch') return;
+    for (const t of pc.targets) {
+      if (pc.responses[t.playerId]) continue;
+      const p = this.getPlayer(t.playerId);
+      if (!p) continue;
+      if (p.isAI || this.isAiSeat(p.id) || p.isOfflineHosted) {
+        pc.responses[t.playerId] = this.defaultAkajitaPickFromCandidates(t.candidates);
+      }
+    }
+    this.tryFinalizeAkajitaBatchIfComplete();
+  }
+
+  private startAkajitaTimeout(): void {
     this.clearAkajitaTimeout();
     this.akajitaTimer = setTimeout(() => {
-      this.handleAkajitaTimeout(playerId);
+      this.handleAkajitaBatchTimeout();
     }, 5000);
   }
 
-  /**
-   * 清除赤舌超时计时器
-   */
   private clearAkajitaTimeout(): void {
     if (this.akajitaTimer) {
       clearTimeout(this.akajitaTimer);
@@ -7277,129 +7727,60 @@ export class MultiplayerGame {
     }
   }
 
-  /**
-   * 赤舌超时处理：默认选择基础术式
-   */
-  private handleAkajitaTimeout(playerId: string): void {
-    const pendingChoice = this.state.pendingChoice as any;
-    if (!pendingChoice || pendingChoice.type !== 'akajitaSelect') return;
-    if (pendingChoice.playerId !== playerId) return;
-
-    // 默认选择基础术式
-    const spellCandidate = pendingChoice.candidates?.find((c: any) => c.type === 'spell');
-    if (spellCandidate) {
-      this.executeAkajitaSelect(playerId, spellCandidate.instanceId, true);
-    } else {
-      // fallback: 选择第一个
-      const firstCandidate = pendingChoice.candidates?.[0];
-      if (firstCandidate) {
-        this.executeAkajitaSelect(playerId, firstCandidate.instanceId, true);
+  private handleAkajitaBatchTimeout(): void {
+    const pc = this.state.pendingChoice as any;
+    if (!pc || pc.type !== 'akajitaBatch') return;
+    this.clearAkajitaTimeout();
+    for (const t of pc.targets) {
+      if (!pc.responses[t.playerId]) {
+        pc.responses[t.playerId] = this.defaultAkajitaPickFromCandidates(t.candidates);
       }
     }
+    this.finalizeAkajitaBatch(true);
   }
 
   /**
-   * 处理赤舌选择响应
-   * @param playerId 选择的玩家ID（被妨害的对手）
-   * @param selectedId 选中的牌instanceId
+   * 处理赤舌选择响应（多人均可并行提交）
    */
   public handleAkajitaSelectResponse(playerId: string, selectedId: string): { success: boolean; error?: string } {
-    const pendingChoice = this.state.pendingChoice as any;
-    if (!pendingChoice || pendingChoice.type !== 'akajitaSelect') {
+    const pc = this.state.pendingChoice as any;
+    if (!pc || pc.type !== 'akajitaBatch') {
       return { success: false, error: '没有待处理的赤舌选择' };
     }
-    if (pendingChoice.playerId !== playerId) {
-      return { success: false, error: '不是你的选择' };
+    const row = pc.targets.find((x: any) => x.playerId === playerId);
+    if (!row) {
+      return { success: false, error: '你不是本次赤舌选择的应答者' };
     }
-
-    // 验证选择是否有效
-    const candidate = pendingChoice.candidates?.find((c: any) => c.instanceId === selectedId);
-    if (!candidate) {
+    if (pc.responses[playerId]) {
+      return { success: false, error: '已提交选择' };
+    }
+    if (!row.candidates?.some((c: any) => c.instanceId === selectedId)) {
       return { success: false, error: '无效的选择' };
     }
-
-    this.clearAkajitaTimeout();
-    this.executeAkajitaSelect(playerId, selectedId, false);
+    pc.responses[playerId] = selectedId;
+    this.tryFinalizeAkajitaBatchIfComplete();
+    if ((this.state.pendingChoice as any)?.type === 'akajitaBatch') {
+      this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+    }
     return { success: true };
   }
 
   /**
-   * 执行赤舌选择：将选中的牌从弃牌堆移到牌库顶
-   */
-  private executeAkajitaSelect(playerId: string, selectedId: string, isTimeout: boolean): void {
-    const player = this.getPlayer(playerId);
-    if (!player) return;
-
-    const pendingChoice = this.state.pendingChoice as any;
-    const candidate = pendingChoice?.candidates?.find((c: any) => c.instanceId === selectedId);
-
-    // 从弃牌堆找到该牌
-    const idx = player.discard.findIndex(c => c.instanceId === selectedId);
-    if (idx !== -1) {
-      const card = player.discard.splice(idx, 1)[0]!;
-      player.deck.unshift(card); // 置于牌库顶
-
-      const timeoutHint = isTimeout ? '（超时默认）' : '';
-      this.addLog(`   ✨ ${player.name} 选择将【${card.name}】置于牌库顶${timeoutHint}`);
-
-      // 设置通知（用于客户端显示提示）
-      (this.state as any).akajitaNotify = (this.state as any).akajitaNotify || [];
-      (this.state as any).akajitaNotify.push({
-        playerId: playerId,
-        cardName: card.name,
-        timestamp: Date.now()
-      });
-    }
-
-    // 清除等待状态
-    this.state.pendingChoice = undefined;
-    
-    // 检查是否需要继续轮入道队列（赤舌是对手选择，但也可能在轮入道场景触发）
-    this.checkAndContinueWheelMonkQueue();
-
-    this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
-  }
-
-  /**
-   * 强制关闭指定玩家的赤舌选择（用于回合开始时、回合结束时）
-   * 如果该玩家有pending的赤舌选择，自动选择基础术式
+   * 回合切换、主回合结束：为指定玩家写入默认项；批次齐则立即 finalize
    */
   private forceCloseAkajitaSelectForPlayer(playerId: string): void {
     const pendingChoice = this.state.pendingChoice as any;
-    if (!pendingChoice || pendingChoice.type !== 'akajitaSelect') return;
-    if (pendingChoice.playerId !== playerId) return;
-
-    // 清除超时计时器
-    this.clearAkajitaTimer();
-
-    // 自动选择基础术式
-    const player = this.getPlayer(playerId);
-    if (!player) {
-      this.state.pendingChoice = undefined;
+    if (!pendingChoice) return;
+    if (pendingChoice.type === 'akajitaBatch') {
+      const row = pendingChoice.targets?.find((x: any) => x.playerId === playerId);
+      if (!row || pendingChoice.responses[playerId]) return;
+      pendingChoice.responses[playerId] = this.defaultAkajitaPickFromCandidates(row.candidates);
+      this.tryFinalizeAkajitaBatchIfComplete();
+      if ((this.state.pendingChoice as any)?.type === 'akajitaBatch') {
+        this.notifyStateChange({ type: 'STATE_UPDATE', state: this.state });
+      }
       return;
     }
-
-    // 找到基础术式
-    const spellCard = player.discard.find(c => c.name === '基础术式');
-    if (spellCard) {
-      const idx = player.discard.findIndex(c => c.instanceId === spellCard.instanceId);
-      if (idx !== -1) {
-        const card = player.discard.splice(idx, 1)[0]!;
-        player.deck.unshift(card); // 置于牌库顶
-        this.addLog(`   ✨ ${player.name} 的【${card.name}】被置于牌库顶（回合切换默认）`);
-
-        // 设置通知
-        (this.state as any).akajitaNotify = (this.state as any).akajitaNotify || [];
-        (this.state as any).akajitaNotify.push({
-          playerId: playerId,
-          cardName: card.name,
-          timestamp: Date.now()
-        });
-      }
-    }
-
-    // 清除等待状态
-    this.state.pendingChoice = undefined;
   }
 
   /**
@@ -7633,6 +8014,7 @@ export class MultiplayerGame {
     this.updateAllPlayersCharm();
     
     this.state.lastUpdate = Date.now();
+    this.syncTurnTimerAndOffTurnFeedback();
     this.stateSeq++;
     
     if (this.onStateChange) {
@@ -7674,9 +8056,23 @@ export class MultiplayerGame {
 
   /**
    * 获取游戏状态
+   * 当存在 `pendingChoice` 时，为客户端只读补充 `timerMode`（不修改 `this.state.pendingChoice`）。
    */
   getState(): GameState {
-    return this.state;
+    const pc = this.state.pendingChoice;
+    if (!pc) {
+      return this.state;
+    }
+    const currentPlayerId = this.state.players[this.state.currentPlayerIndex]?.id;
+    const timerMode: 'turnTotal' | 'offTurnResponse' =
+      pc.playerId === currentPlayerId ? 'turnTotal' : 'offTurnResponse';
+    if (pc.timerMode === timerMode) {
+      return this.state;
+    }
+    return {
+      ...this.state,
+      pendingChoice: { ...pc, timerMode },
+    };
   }
   
   /**
@@ -7723,6 +8119,7 @@ export class MultiplayerGame {
     this.cleaned = true;
     
     this.clearTurnTimer();
+    this.clearOffTurnFeedbackTimerOnly();
     this.clearAfkTimer();
     
     this.onStateChange = undefined;
